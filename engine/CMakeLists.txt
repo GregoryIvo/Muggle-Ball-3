@@ -8,6 +8,8 @@ add_library(mb_engine
   src/Image.cpp
   src/Model.cpp
   src/Physics.cpp
+  src/PhysicsJoints.cpp
+  src/PhysicsShapes.cpp
   src/StbImpl.cpp
   src/CgltfImpl.cpp)
 target_include_directories(mb_engine PUBLIC include PRIVATE shaders/generated)
