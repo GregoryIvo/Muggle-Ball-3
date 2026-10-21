@@ -1,5 +1,7 @@
 #include "mb/game/LevelLoader.h"
 
+#include "mb/engine/Log.h"
+
 #include <nlohmann/json.hpp>
 
 #include <fstream>
@@ -99,6 +101,7 @@ Actor actor(const json& j) {
 Level parseLevelJson(std::string_view text) {
     const json j = json::parse(text);
     Level level;
+    level.version = j.value("version", 1);
     level.gravity = vec3(j.at("gravity"));
     for (const json& a : j.at("actors")) {
         level.actors.push_back(actor(a));
@@ -121,7 +124,13 @@ Level loadLevelJson(const std::filesystem::path& path) {
     }
     std::ostringstream buf;
     buf << in.rdbuf();
-    return parseLevelJson(buf.str());
+    Level level = parseLevelJson(buf.str());
+    if (level.version < kLevelJsonVersion) {
+        logWarn("{}: level JSON is version {}, this build reads version {}; "
+                "run tools/convert_assets.py again to refresh it",
+                path.string(), level.version, kLevelJsonVersion);
+    }
+    return level;
 }
 
 }  // namespace mb

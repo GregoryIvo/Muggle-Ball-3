@@ -115,8 +115,10 @@ ModelMaterial convertMaterial(const std::filesystem::path& glbPath, const cgltf_
                     resolved.string());
         }
     } else if (!out.textureFile.empty()) {
-        logWarn("{}: material '{}': texture '{}' was missing when the mesh was converted", glbPath.string(),
-                out.name, out.textureFile);
+        // Expected for the ground, grass, water and tree meshes: the level's game material names
+        // their textures. A texture that ends up nowhere is reported by the scene instead.
+        logInfo("{}: no texture file for '{}'; the game material provides it", glbPath.string(),
+                out.textureFile);
     }
     return out;
 }

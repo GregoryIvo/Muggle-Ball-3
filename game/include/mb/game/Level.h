@@ -58,7 +58,12 @@ struct Path {
     std::vector<PathPoint> points;
 };
 
+// The level JSON version this build reads, the one tools/mb3level.py writes (LEVEL_JSON_VERSION
+// there; docs/LEVEL_FORMAT.md lists what each version changed).
+inline constexpr int kLevelJsonVersion = 2;
+
 struct Level {
+    int version = kLevelJsonVersion;  // of the JSON it was loaded from; 1 when the file has none
     Vec3 gravity{};
     std::vector<Actor> actors;
     std::vector<Path> paths;
