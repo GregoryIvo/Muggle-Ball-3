@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -196,7 +197,7 @@ void testMusicOnTheDevice(const fs::path& scratch) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    const fs::path scratch = argc > 1 ? fs::path(argv[1]) : fs::temp_directory_path() / "mb3-audio-test";
+    const fs::path scratch = argc > 1 ? fs::path(argv[1]) : fs::temp_directory_path() / ("mb3-audio-test-" + std::to_string(std::random_device{}()));
     testDecode();
     testStream();
     testLoopedMusicThroughTheMixer();

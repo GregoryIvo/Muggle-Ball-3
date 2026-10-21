@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <exception>
 #include <map>
+#include <random>
 #include <set>
 #include <string>
 #include <vector>
@@ -264,7 +265,7 @@ int main(int argc, char** argv) {
         std::printf("SKIP: converted sounds not found under %s (run tools/convert_assets.py)\n", assets.string().c_str());
         return 77;
     }
-    const fs::path scratch = argc > 1 ? fs::path(argv[1]) : fs::temp_directory_path() / "mb3-audio-smoke";
+    const fs::path scratch = argc > 1 ? fs::path(argv[1]) : fs::temp_directory_path() / ("mb3-audio-smoke-" + std::to_string(std::random_device{}()));
     try {
         const SoundCatalog catalog = SoundCatalog::load(assets);
         std::printf("catalog: %zu sounds, %zu musics\n", catalog.sounds().size(), catalog.musicCount());
