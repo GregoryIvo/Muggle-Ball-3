@@ -42,10 +42,6 @@ Window::Window(const std::string& title, int width, int height, bool startFullsc
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         throw std::runtime_error(std::string("SDL_Init failed: ") + SDL_GetError());
     }
-    // A machine without an audio device can still play, just silently.
-    if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
-        logWarn("audio unavailable: {}", SDL_GetError());
-    }
     // A window bigger than the screen is never wanted (a size remembered from another display, say).
     SDL_Rect usable{};
     if (SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable) && usable.w > 0 && usable.h > 0) {

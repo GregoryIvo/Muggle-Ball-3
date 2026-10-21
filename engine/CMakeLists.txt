@@ -12,6 +12,10 @@ add_library(mb_engine
   src/PhysicsJoints.cpp
   src/PhysicsShapes.cpp
   src/StbImpl.cpp
+  src/VorbisImpl.cpp
+  src/Vorbis.cpp
+  src/Mixer.cpp
+  src/Audio.cpp
   src/CgltfImpl.cpp)
 target_include_directories(mb_engine PUBLIC include PRIVATE shaders/generated)
 target_link_libraries(mb_engine
