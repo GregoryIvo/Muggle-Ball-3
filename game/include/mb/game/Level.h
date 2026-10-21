@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mb/engine/Math.h"
 #include "mb/game/ObjectType.h"
 
 #include <array>
@@ -9,7 +10,6 @@
 
 namespace mb {
 
-using Vec3 = std::array<float, 3>;
 using Mat3 = std::array<float, 9>;  // row-major, as stored by PhysX 2.x (NxMat33)
 
 struct Pose {

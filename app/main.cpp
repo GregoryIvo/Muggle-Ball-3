@@ -36,7 +36,9 @@ int runGame() {
     mb::logInfo("Asset root: {}", mb::assetRoot().string());
 
     while (window.pollEvents()) {
-        renderer.frame({0.05f, 0.18f, 0.45f, 1.0f});
+        mb::FrameParams frame;
+        frame.clear = {0.05f, 0.18f, 0.45f, 1.0f};
+        renderer.renderToWindow(frame, {});
     }
     return 0;
 }
