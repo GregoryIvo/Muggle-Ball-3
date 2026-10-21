@@ -20,6 +20,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import materials  # noqa: E402
 import mb3level  # noqa: E402
 import nxconvex  # noqa: E402
+import sounds  # noqa: E402
 import textures  # noqa: E402
 import x2glb  # noqa: E402
 
@@ -52,6 +53,13 @@ def convert_materials(out):
     folder = out / "Data" / "Materials"
     stats = materials.convert(folder / "materials.xml", folder / "materials.json")
     print(f"materials: {stats['materials']} converted, duplicates {stats['duplicates']}")
+
+
+def convert_sounds(out):
+    xml = out / "Data" / "xml"
+    stats = sounds.convert(xml, out / "Sounds", out / "Musics", xml)
+    print(f"sounds: {stats['sounds']} converted, {stats['samples']} samples, {len(stats['silent'])} sounds silent "
+          f"(no file), duplicates {stats['duplicates']}; musics: {stats['musics']}, missing {stats['missingMusics']}")
 
 
 def convert_meshes(out):
@@ -87,6 +95,7 @@ def main():
     copy_data(args.extracted, args.out)
     convert_textures(args.out)
     convert_materials(args.out)
+    convert_sounds(args.out)
     convert_meshes(args.out)
     convert_levels(args.out)
     print(f"done: {args.out.resolve()}")

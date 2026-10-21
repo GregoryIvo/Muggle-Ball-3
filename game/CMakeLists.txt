@@ -4,6 +4,7 @@ add_library(mb_game
   src/LevelLoader.cpp
   src/TextureIndex.cpp
   src/MaterialLibrary.cpp
+  src/SoundLibrary.cpp
   src/SceneBuilder.cpp
   src/PhysicsPlan.cpp
   src/PhysicsScene.cpp
