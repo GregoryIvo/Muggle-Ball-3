@@ -1,9 +1,10 @@
 // Muggle Ball 3: entry point.
 //
 //   MuggleBall3                              open the game window on the first level
-//   MuggleBall3 --level <name|path.json>     ... on this level (file stem, any case, or a path)
+//   MuggleBall3 --level <name|path.json>     ... on this level (file stem or name, any case, or a path)
 //   MuggleBall3 --screenshot out.png [--size WxH] [--level ...] [--shapes] [--camera ex,ey,ez,tx,ty,tz,fov]
 //                                            render one frame without a window, write it as PNG
+//                                            (--size, --shapes and --camera also apply to the window)
 //   MuggleBall3 --check <level.json>         load a converted level JSON, print a summary, exit
 //
 // In the window: Left/Right (or PageUp/PageDown) = previous/next level, F1 = physics wireframes,
@@ -27,6 +28,7 @@
 
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
@@ -165,7 +167,7 @@ std::size_t startLevel(Assets& assets, const Options& options) {
     if (const std::optional<std::size_t> index = assets.catalog.find(options.level)) {
         return *index;
     }
-    throw std::runtime_error("unknown level: " + options.level);
+    throw std::runtime_error("unknown level \"" + options.level + "\"");
 }
 
 int runScreenshot(const Options& options) {
@@ -220,15 +222,18 @@ private:
 };
 
 int runWindow(const Options& options) {
-    mb::Window window("Muggle Ball 3", kDefaultWidth, kDefaultHeight);
+    // Resolve the assets and the level first, so a bad argument fails before a window flashes up.
+    Assets assets;
+    const std::size_t first = startLevel(assets, options);
+
+    mb::Window window("Muggle Ball 3", options.width, options.height);
     mb::Renderer renderer(window);
     mb::logInfo("GPU backend: {}", renderer.backendName());
-    mb::logInfo("Asset root: {}", mb::assetRoot().string());
+    mb::logInfo("Asset root: {}", assets.root.string());
 
-    Assets assets;
     Viewer viewer(renderer, assets, options);
     // A level asked for by name must load; without one, the first level that does will do.
-    if (!viewer.show(startLevel(assets, options)) && (!options.level.empty() || !viewer.showRelative(1))) {
+    if (!viewer.show(first) && (!options.level.empty() || !viewer.showRelative(1))) {
         return 1;
     }
     window.setTitle("Muggle Ball 3 - " + viewer.levelName());
@@ -310,12 +315,14 @@ bool parseCamera(const std::string& text, std::array<float, 7>& out) {
         const std::string field = text.substr(start, comma == std::string::npos ? comma : comma - start);
         char* end = nullptr;
         out[i] = std::strtof(field.c_str(), &end);
-        if (field.empty() || *end) {
+        if (field.empty() || *end || !std::isfinite(out[i])) {
             return false;
         }
         start = comma + 1;
     }
-    return true;
+    // Looking from the target at itself, or through a degenerate lens, draws nothing.
+    const bool eyeAtTarget = out[0] == out[3] && out[1] == out[4] && out[2] == out[5];
+    return !eyeAtTarget && out[6] > 0 && out[6] < 180;
 }
 
 void printUsage() {
@@ -334,7 +341,7 @@ int main(int argc, char** argv) {
         Options options;
         for (int i = 1; i < argc; ++i) {
             const std::string_view arg = argv[i];
-            const bool hasValue = i + 1 < argc;
+            const bool hasValue = i + 1 < argc && argv[i + 1][0] != '\0';
             if (arg == "--check" && hasValue) {
                 return checkLevel(argv[i + 1]);
             } else if (arg == "--level" && hasValue) {

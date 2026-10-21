@@ -148,6 +148,27 @@ void testMeshFileName() {
     check(meshFileName("cannon.x") == "cannon.glb", "mesh name: extension replaced");
     check(meshFileName("bg/BG_Day.X") == "bg/bg_day.glb", "mesh name: lowercased, folder kept");
     check(meshFileName("Prizes\\Cannon.X") == "prizes/cannon.glb", "mesh name: backslash becomes slash");
+    check(meshFileName("../../etc/passwd").empty() && meshFileName("a/../../b.x").empty(),
+          "mesh name: climbing out of the meshes folder is refused");
+    check(meshFileName("/etc/passwd").empty() && meshFileName("\\root.x").empty(), "mesh name: absolute paths are refused");
+    check(meshFileName("a..b/c.x") == "a..b/c.glb", "mesh name: dots inside a name are fine");
+}
+
+void testUnsafeMeshIsNeverLookedUp() {
+    const MaterialLibrary materials = makeMaterials();
+    TextureDir dir;
+    const TextureIndex textures(dir.path);
+    int lookups = 0;
+    const ModelLookup counting = [&lookups](const std::string&) -> const Model* {
+        ++lookups;
+        return nullptr;
+    };
+    Level level;
+    level.actors = {brick("../../secret.x", "", ""), brick("/etc/passwd", "", "")};
+    const SceneDescription scene = describeScene(level, counting, materials, textures);
+    check(lookups == 0 && scene.draws.empty(), "unsafe mesh: the lookup is never asked for it");
+    check(scene.report.missingMeshes == std::set<std::string>{"../../secret.x", "/etc/passwd"},
+          "unsafe mesh: reported as missing, under the level's spelling");
 }
 
 // Model: root "A" (mesh), root "B" (mesh) with child "C" (mesh), root "D" with no mesh.
@@ -235,6 +256,7 @@ void testWorldMatrix() {
 void testTextureRules() {
     TextureDir dir;
     const fs::path wood = dir.add("Wood.jpg");
+    const fs::path ball = dir.add("Ball.png");
     dir.add("Crate-D.jpg");
     dir.add("Crate-C.jpg");
     dir.add("Crate-B.jpg");
@@ -253,7 +275,8 @@ void testTextureRules() {
 
     // One primitive textured by the .x ("Own.jpg"), one frame holding two differently textured primitives.
     Model model;
-    const int ownMat = addMaterial(model, "Own.jpg", own);
+    const Color xDiffuse{0.2f, 0.4f, 0.6f, 1};
+    const int ownMat = addMaterial(model, "Own.jpg", own, xDiffuse);
     const int otherMat = addMaterial(model, "Other.jpg", other);
     const int lostMat = addMaterial(model, "Gone.jpg", {});
     const int waterMat = addMaterial(model, "water.png", water);
@@ -262,6 +285,11 @@ void testTextureRules() {
     addNode(model, "Lost", -1, Mat4::identity(), addMesh(model, {{9, 3, lostMat}}));
     addNode(model, "LostToo", -1, Mat4::identity(), addMesh(model, {{12, 3, ownMat}, {15, 3, lostMat}}));
     addNode(model, "Board", -1, Mat4::identity(), addMesh(model, {{18, 3, waterMat}, {21, 3, ownMat}}));
+    // The same texture spelled in two cases, and a primitive with no texture, are still one texture.
+    const int ownCaseMat = addMaterial(model, "OWN.JPG", own);
+    const int blankMat = addMaterial(model, "", {});
+    addNode(model, "OneTexture", -1, Mat4::identity(),
+            addMesh(model, {{24, 3, ownMat}, {27, 3, ownCaseMat}, {30, 3, blankMat}}));
 
     const auto describe = [&](const Actor& actor) {
         Level level;
@@ -278,8 +306,10 @@ void testTextureRules() {
     // 2. Without a game material the .x texture and colours stay.
     scene = describe(brick("test.x", "One", ""));
     check(scene.draws.at(0).textures == std::vector<fs::path>{own}, "texture: no material keeps the .x texture");
-    check(near(scene.draws.at(0).item.material.emissive.b, 0.3f), "colour: no game material uses the .x colours");
-    check(scene.draws.at(0).item.material.blend == BlendMode::Opaque, "blend: opaque by default");
+    const MaterialParams& plain = scene.draws.at(0).item.material;
+    check(near(plain.emissive.b, 0.3f) && near(plain.diffuse.g, 0.4f) && near(plain.ambient.g, 0.4f),
+          "colour: no game material uses the .x colours (emissive; diffuse also as ambient)");
+    check(plain.blend == BlendMode::Opaque, "blend: opaque by default");
 
     // 3. Two different .x textures in one subtree: the object keeps its own, whatever the material says.
     scene = describe(brick("test.x", "Two", "wood.jpg"));
@@ -321,16 +351,27 @@ void testTextureRules() {
     check(scene.draws.at(0).textures == std::vector<fs::path>{own}, "texture: unresolvable game texture falls back to the .x");
     check(scene.report.missingTextures == std::set<std::string>{"Nowhere"}, "texture: unresolvable game texture is reported");
 
-    // 10. An .x texture that is itself a game material name ("water.png"): that material animates and blends
-    // it, while the object's own material (a board's) keeps supplying the colours.
-    scene = describe(brick("test.x", "Board", "BoardMaterial"));
-    check(scene.draws.size() == 2, "texture: board draws both primitives");
+    // 10. An .x texture that is itself a game material name ("water.png"): that material animates and blends it.
+    // A board's own "BoardMaterial" is a placeholder: textures and colours stay the .x's.
+    scene = describe(brick("test.x", "Board", "BoardMaterial", 1, ObjectType::Board));
+    check(scene.draws.size() == 2, "board: both primitives are drawn");
     check(scene.draws.at(0).textures == std::vector<fs::path>{w1, w2} && scene.draws.at(0).animTimeMs == 150,
           "texture: the .x texture's own game material supplies animation frames");
     check(scene.draws.at(0).item.material.blend == BlendMode::AlphaBlend, "blend: ... and the blend mode");
-    check(near(scene.draws.at(0).item.material.emissive.r, 1.0f), "colour: ... while colours stay the object's");
+    check(near(scene.draws.at(1).item.material.emissive.r, 0.1f) && near(scene.draws.at(1).item.material.diffuse.g, 0.4f),
+          "board: colours come from the .x, not from BoardMaterial's all-ones");
     check(scene.draws.at(1).textures == std::vector<fs::path>{own} && scene.draws.at(1).item.material.blend == BlendMode::Opaque,
           "texture: the other primitive keeps its own texture");
+    scene = describe(brick("test.x", "One", "BoardMaterial", 1, ObjectType::Board));
+    check(scene.draws.at(0).textures == std::vector<fs::path>{own}, "board: BoardMaterial's ball texture is not used, even for one .x texture");
+    scene = describe(brick("test.x", "One", "BoardMaterial", 1, ObjectType::Brick));
+    check(scene.draws.at(0).textures == std::vector<fs::path>{ball} && near(scene.draws.at(0).item.material.emissive.r, 1.0f),
+          "board rule: other object types still use the game material");
+
+    // 11. Texture names compare without case, and primitives without a texture do not count.
+    scene = describe(brick("test.x", "OneTexture", "wood.jpg"));
+    check(scene.draws.size() == 3 && std::ranges::all_of(scene.draws, [&](const SceneDraw& d) { return d.textures == std::vector<fs::path>{wood}; }),
+          "texture: one .x texture under two spellings, plus an untextured primitive, is one texture");
 }
 
 void testBackground() {
@@ -341,9 +382,16 @@ void testBackground() {
     const int mat = addMaterial(model, "", {});
     addNode(model, "Sky", -1, Mat4::identity(), addMesh(model, {{0, 3, mat}}));
 
+    Actor background = brick("test.x", "", "", 1, ObjectType::Background);
+    background.pose.position = {1, 2, 3};
+    Actor wall = brick("test.x", "", "", 2);
+    wall.pose.position = {1, 2, 3};
     Level level;
-    level.actors = {brick("test.x", "", "", 1, ObjectType::Background), brick("test.x", "", "", 2)};
+    level.actors = {background, wall};
     const SceneDescription scene = describeScene(level, lookupOf(model), materials, textures);
+    check(near(transformPoint({0, 0, 0}, scene.draws.at(0).item.world), {1, 2 + kSkyOffsetY, 3}),
+          "background: hung lower by kSkyOffsetY, after the actor pose");
+    check(near(transformPoint({0, 0, 0}, scene.draws.at(1).item.world), {1, 2, 3}), "other objects: not moved");
     const DrawItem& sky = scene.draws.at(0).item;
     check(sky.layer == kBackgroundLayer && !sky.material.lit && !sky.material.depthWrite &&
               sky.material.cull == CullMode::None,
@@ -352,6 +400,14 @@ void testBackground() {
     check(world.layer == kWorldLayer && world.material.lit && world.material.depthWrite &&
               world.material.cull == CullMode::Back,
           "other objects: world layer, lit, depth-written, back faces culled");
+}
+
+void testAnimationFrame() {
+    check(animationFrame(0, 150, 12) == 0 && animationFrame(149, 150, 12) == 0, "animation: first frame for one frame time");
+    check(animationFrame(150, 150, 12) == 1 && animationFrame(1649, 150, 12) == 10, "animation: advances every frame time");
+    check(animationFrame(1800, 150, 12) == 0 && animationFrame(1950, 150, 12) == 1, "animation: wraps around");
+    check(animationFrame(std::int64_t{4'000'000'000'000}, 150, 12) < 12, "animation: no overflow after a long time");
+    check(animationFrame(1000, 0, 12) == 0 && animationFrame(1000, 150, 0) == 0, "animation: degenerate input stays at frame 0");
 }
 
 void testLights() {
@@ -454,7 +510,9 @@ void testCatalog() {
               catalog.levels().at(2).name == "c-level",
           "catalog: sorted by name, ignoring case");
     check(catalog.find("B-LEVEL") == std::optional<std::size_t>(1), "catalog: names match in any case");
-    check(!catalog.find("missing").has_value(), "catalog: unknown name");
+    check(catalog.find("B-Level.JSON") == std::optional<std::size_t>(1), "catalog: a file name with its extension matches too");
+    check(!catalog.find("missing").has_value() && !catalog.find("missing.json").has_value() && !catalog.find("").has_value(),
+          "catalog: unknown name");
     const std::optional<std::size_t> added = catalog.find(outside.string());
     check(added && catalog.levels().at(*added).name == "outside", "catalog: a path joins the list");
     check(LevelCatalog(dir.path / "nope").levels().empty(), "catalog: missing directory is empty");
@@ -487,12 +545,14 @@ void testCamera() {
 
 int main() {
     testMeshFileName();
+    testUnsafeMeshIsNeverLookedUp();
     testFrameSelection();
     testActorsWithoutMeshAreSkipped();
     testClothSegmentsAndPlaceholder();
     testWorldMatrix();
     testTextureRules();
     testBackground();
+    testAnimationFrame();
     testLights();
     testShapeLines();
     testCatalog();

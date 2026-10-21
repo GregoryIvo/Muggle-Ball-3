@@ -22,6 +22,12 @@ namespace mb {
 inline constexpr int kBackgroundLayer = 0;
 inline constexpr int kWorldLayer = 1;
 
+// How far the sky sphere is moved down from where its model and the level's pose put it
+// (centre at y = -5.1). Fitted to the height of the white horizon band behind the far rim in
+// the two reference screenshots, not recovered from the original's code: with it the band
+// lands within about 5 pixels of both at 1024x768; without it, about 70 pixels too high.
+inline constexpr float kSkyOffsetY = -8.5f;
+
 // The light the original uses when a level has no light object. Direction and
 // brightness were tuned against screenshots of the original game, not recovered
 // from its binary; the colours come from the game material "lightMaterial"
@@ -57,7 +63,8 @@ struct SceneDescription {
 // Returns the converted model for a file name from meshFileName(), or nullptr.
 using ModelLookup = std::function<const Model*(const std::string& meshFile)>;
 
-// "bg/Bg_Day.x" -> "bg/bg_day.glb" (docs/ASSET_FORMATS.md).
+// "bg/Bg_Day.x" -> "bg/bg_day.glb" (docs/ASSET_FORMATS.md). Empty for a name that is absolute or
+// climbs out of the meshes folder with "..": such a mesh is reported missing, never opened.
 std::string meshFileName(std::string_view levelMeshName);
 
 // Turns a level into draw descriptions (see docs/ASSET_FORMATS.md for what the
@@ -73,9 +80,16 @@ std::string meshFileName(std::string_view levelMeshName);
 //      name that is itself a texture ("sky.jpg") is used.
 //   2. Otherwise the .x texture, unless its name is a game material too ("water.png"),
 //      which then supplies the textures and the blend mode.
-// Colours come from the object's game material when it has one, else from the .x.
+// Colours come from the object's game material when it has one, else from the .x. A board is the
+// exception: its material "BoardMaterial" is a placeholder (the same in all 83 levels, every
+// colour 1.0, the ball's texture), so a board takes its textures and colours from its .x, where the
+// self-lit white would otherwise hide all shading on the walls and fences. A background object is
+// the sky: drawn first, unlit and from inside, hung kSkyOffsetY lower than its pose.
 SceneDescription describeScene(const Level& level, const ModelLookup& models, const MaterialLibrary& materials,
                                const TextureIndex& textures);
+
+// Which frame of a texture animation is showing `milliseconds` after the scene appeared.
+std::size_t animationFrame(std::int64_t milliseconds, int frameTimeMs, std::size_t frameCount);
 
 // A D3DLIGHT8 as stored in a light object's `extra` (0x68 bytes, little-endian).
 // Only directional lights (type 3) are understood; anything else gives nothing.

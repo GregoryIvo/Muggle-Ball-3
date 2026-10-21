@@ -140,7 +140,7 @@ struct Builder {
 
     void object(const Actor& a, const GameObject& obj) {
         const std::string file = meshFileName(obj.mesh);
-        const Model* model = models(file);
+        const Model* model = file.empty() ? nullptr : models(file);
         if (!model) {
             out.report.missingMeshes.insert(obj.mesh);
             return;
@@ -158,14 +158,17 @@ struct Builder {
             return;
         }
 
-        const GameMaterial* game = obj.material.empty() ? nullptr : materials.find(obj.material);
+        // A board's "BoardMaterial" is a placeholder, see describeScene() in the header.
+        const bool board = obj.type == ObjectType::Board;
+        const GameMaterial* game = obj.material.empty() || board ? nullptr : materials.find(obj.material);
         TexturePlan plan;
         if (distinctModelTextures(*model, nodes) <= 1) {
             plan = planTextures(obj, game, textures, out.report.missingTextures);
         }
 
         const bool background = obj.type == ObjectType::Background;
-        const Mat4 actorWorld = Mat4::fromPhysX(a.pose.rotation, a.pose.position);
+        const Mat4 pose = Mat4::fromPhysX(a.pose.rotation, a.pose.position);
+        const Mat4 actorWorld = background ? pose * Mat4::translation({0, kSkyOffsetY, 0}) : pose;
         for (const int node : nodes) {
             const int mesh = model->nodes[node].mesh;
             if (mesh < 0) {
@@ -314,7 +317,17 @@ void addActorShapes(const Actor& actor, std::vector<DebugLine>& lines) {
 std::string meshFileName(std::string_view levelMeshName) {
     std::string name = lowerAscii(levelMeshName);
     std::ranges::replace(name, '\\', '/');
-    return fs::path(name).replace_extension(".glb").generic_string();
+    const fs::path path = fs::path(name).replace_extension(".glb");
+    const bool escapes =
+        path.has_root_path() || std::ranges::any_of(path, [](const fs::path& part) { return part == ".."; });
+    return escapes ? std::string() : path.generic_string();
+}
+
+std::size_t animationFrame(std::int64_t milliseconds, int frameTimeMs, std::size_t frameCount) {
+    if (frameTimeMs <= 0 || frameCount == 0) {
+        return 0;
+    }
+    return static_cast<std::size_t>(milliseconds / frameTimeMs) % frameCount;
 }
 
 SceneDescription describeScene(const Level& level, const ModelLookup& models, const MaterialLibrary& materials,

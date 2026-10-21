@@ -31,7 +31,9 @@ const ModelCache::Entry* ModelCache::model(const std::string& meshFile) {
 }
 
 TextureHandle ModelCache::texture(const std::filesystem::path& file) {
-    const std::string key = file.string();
+    // Paths from a model are normalised and those from the texture index are not, so the same
+    // file can arrive spelled two ways (for example under a relative asset root).
+    const std::string key = file.lexically_normal().string();
     if (const auto found = textures_.find(key); found != textures_.end()) {
         return found->second;
     }

@@ -33,7 +33,7 @@ private:
     Renderer& renderer_;
     std::filesystem::path meshesDir_;
     std::unordered_map<std::string, std::unique_ptr<Entry>> models_;  // null entries are failures
-    std::unordered_map<std::string, TextureHandle> textures_;         // keyed by path
+    std::unordered_map<std::string, TextureHandle> textures_;         // keyed by normalised path
 };
 
 }  // namespace mb

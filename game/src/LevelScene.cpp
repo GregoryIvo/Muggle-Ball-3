@@ -38,8 +38,8 @@ LevelScene::LevelScene(ModelCache& cache, const MaterialLibrary& materials, cons
 void LevelScene::update(double seconds) {
     const auto milliseconds = static_cast<std::int64_t>(seconds * 1000.0);
     for (const Animation& animation : animations_) {
-        const auto frame = (milliseconds / animation.frameTimeMs) % static_cast<std::int64_t>(animation.frames.size());
-        items_[animation.item].material.texture = animation.frames[static_cast<std::size_t>(frame)];
+        const std::size_t frame = animationFrame(milliseconds, animation.frameTimeMs, animation.frames.size());
+        items_[animation.item].material.texture = animation.frames[frame];
     }
 }
 

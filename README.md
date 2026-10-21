@@ -57,7 +57,10 @@ SDL3 and nlohmann/json are fetched automatically by CMake. Use
    In the window: Left/Right (or PageUp/PageDown) switch level, F1 shows the
    physics shapes, left-drag orbits, right-drag pans, the wheel zooms, R returns
    to the game camera, Esc quits. `--screenshot` renders one frame without a
-   window; `--camera ex,ey,ez,tx,ty,tz,fov` overrides the camera.
+   window; `--camera ex,ey,ez,tx,ty,tz,fov` overrides the camera and `--size`
+   sets the window or image size. Level JSON converted before the capsule fix in
+   `tools/mb3level.py` draws wrong capsules with F1 / `--shapes`: run
+   `convert_assets.py` again to refresh it.
 
 ## Legal
 

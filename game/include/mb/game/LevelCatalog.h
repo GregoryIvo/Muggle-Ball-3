@@ -21,8 +21,8 @@ public:
 
     const std::vector<LevelEntry>& levels() const { return levels_; }
 
-    // `nameOrPath` is a level's file stem (case-insensitive) or the path of a level .json,
-    // which joins the catalog if it was not in the directory. Empty if neither matches.
+    // `nameOrPath` is a level's file stem or file name (case-insensitive) or the path of a
+    // level .json, which joins the catalog if it was not in the directory. Empty if none matches.
     std::optional<std::size_t> find(std::string_view nameOrPath);
 
 private:

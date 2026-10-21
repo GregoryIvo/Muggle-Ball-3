@@ -34,6 +34,11 @@ std::optional<std::size_t> LevelCatalog::find(std::string_view nameOrPath) {
         levels_.push_back({path.stem().string(), path});
         return levels_.size() - 1;
     }
+    for (std::size_t i = 0; i < levels_.size(); ++i) {
+        if (lowerAscii(levels_[i].path.filename().string()) == wanted) {
+            return i;
+        }
+    }
     return std::nullopt;
 }
 
