@@ -5,6 +5,8 @@ add_library(mb_game
   src/TextureIndex.cpp
   src/MaterialLibrary.cpp
   src/SceneBuilder.cpp
+  src/PhysicsPlan.cpp
+  src/PhysicsScene.cpp
   src/ModelCache.cpp
   src/LevelScene.cpp
   src/LevelCatalog.cpp
