@@ -99,6 +99,7 @@ struct BodyRecord {
     std::uint64_t userData = 0;
     std::vector<JointId> joints;
     float sleepThreshold = 0;  // what this body put into Impl::sleepThresholds; 0 = nothing
+    bool locked = false;       // see fullyLocked(): static for good
 };
 
 struct JointRecord {
@@ -113,6 +114,9 @@ struct KinematicTarget {
     JPH::RVec3 position;
     JPH::Quat rotation;
 };
+
+// True when every translation and rotation axis is locked: such a body is created static.
+bool fullyLocked(const BodyDesc& desc);
 
 // Builds the Jolt description of a body (shape, mass, motion). On failure returns false and says why.
 bool makeBodySettings(const BodyDesc& desc, JPH::BodyCreationSettings& out, std::string& error);

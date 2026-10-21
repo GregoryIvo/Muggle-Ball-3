@@ -139,6 +139,12 @@ struct Path {
 // there; docs/LEVEL_FORMAT.md lists what each version changed).
 inline constexpr int kLevelJsonVersion = 3;
 
+// An actor's (or a shape's) pose as a rigid transform. A few saved rotations are slightly scaled
+// (docs/LEVEL_FORMAT.md); drawing and physics both use the nearest rotation, so a body and its model agree.
+inline Mat4 rigidTransform(const Pose& pose) {
+    return orthonormalised(Mat4::fromPhysX(pose.rotation, pose.position));
+}
+
 struct Level {
     int version = kLevelJsonVersion;  // of the JSON it was loaded from; 1 when the file has none
     Vec3 gravity{};
@@ -148,5 +154,21 @@ struct Level {
 
     std::size_t countObjects(ObjectType type) const;
 };
+
+// Every actor of a level has a stable index: the top-level actors in file order, each cloth followed by
+// its segments. Scene drawing and physics share it to find the actor a draw or a body belongs to.
+using ActorIndex = std::uint32_t;
+inline constexpr ActorIndex kNoActor = ~ActorIndex{0};
+
+struct ActorRef {
+    ActorIndex index = 0;
+    const Actor* actor = nullptr;
+    // The object whose material the actor takes: its own, or for a cloth segment the cloth's. Null for an
+    // actor with none.
+    const GameObject* owner = nullptr;
+};
+
+// The actors of the level in index order, pointing into it.
+std::vector<ActorRef> flattenActors(const Level& level);
 
 }  // namespace mb

@@ -30,6 +30,9 @@ float convexRadius(float smallestHalfExtent) {
     return std::min(JPH::cDefaultConvexRadius, 0.25f * smallestHalfExtent);
 }
 
+// A capsule with a shorter cylinder than this (half of it) is made a sphere, see makeConvex().
+constexpr float kMinCapsuleHalfHeight = 0.05f;
+
 JPH::RefConst<JPH::Shape> create(JPH::ShapeSettings& settings, std::string& error) {
     const JPH::ShapeSettings::ShapeResult result = settings.Create();
     if (result.HasError()) {
@@ -68,10 +71,18 @@ JPH::RefConst<JPH::Shape> makeConvex(const PhysicsShape& shape, float density, s
             return create(settings, error);
         }
         case PhysicsShapeType::Capsule: {
-            // A capsule without a cylinder part is a sphere; Jolt makes that substitution itself.
             if (!positive(shape.radius) || !std::isfinite(shape.halfHeight) || shape.halfHeight < 0) {
                 error = "a capsule needs a positive, finite radius and a finite half height of zero or more";
                 return nullptr;
+            }
+            // Jolt's capsule with a cylinder of a few centimetres is unreliable: lying on a 0.84 thick floor it
+            // sinks into it (with a radius of 1.4 and a half height of 0.01, 35 of 40 random drops did; 0.05
+            // never did). The levels have such bags and rocks (half heights 0.005 to 0.037), which are spheres
+            // to within that.
+            if (shape.halfHeight < kMinCapsuleHalfHeight) {
+                JPH::SphereShapeSettings settings(shape.radius, material);
+                settings.mDensity = density;
+                return create(settings, error);
             }
             JPH::CapsuleShapeSettings settings(shape.halfHeight, shape.radius, material);
             settings.mDensity = density;
@@ -142,6 +153,11 @@ JPH::EMotionType toJolt(MotionType motion) {
 
 }  // namespace
 
+bool fullyLocked(const BodyDesc& desc) {
+    return std::all_of(std::begin(desc.lockTranslation), std::end(desc.lockTranslation), [](bool b) { return b; }) &&
+           std::all_of(std::begin(desc.lockRotation), std::end(desc.lockRotation), [](bool b) { return b; });
+}
+
 bool makeBodySettings(const BodyDesc& desc, JPH::BodyCreationSettings& out, std::string& error) {
     if (desc.shapes.empty()) {
         error = "a body needs at least one shape";
@@ -166,7 +182,11 @@ bool makeBodySettings(const BodyDesc& desc, JPH::BodyCreationSettings& out, std:
         error = "mass, density, inertia or the sleep threshold is not usable";
         return false;
     }
-    const bool moves = desc.motion != MotionType::Static;
+    // A body that may not move or turn on any axis is a static one; Jolt cannot make a dynamic or
+    // kinematic body of it (it divides by the zero inverse mass).
+    const bool locked = fullyLocked(desc);
+    const MotionType motion = locked ? MotionType::Static : desc.motion;
+    const bool moves = motion != MotionType::Static;
     if (desc.mass == 0 && !positive(desc.density) && moves) {
         error = "a moving body needs a mass or a positive density";
         return false;
@@ -238,14 +258,17 @@ bool makeBodySettings(const BodyDesc& desc, JPH::BodyCreationSettings& out, std:
         }
     }
 
-    out = JPH::BodyCreationSettings(shape, pose.position, pose.rotation, toJolt(desc.motion),
+    out = JPH::BodyCreationSettings(shape, pose.position, pose.rotation, toJolt(motion),
                                     moves ? layers::moving : layers::nonMoving);
-    out.mAllowDynamicOrKinematic = true;  // setMotionType may turn any body into any other
-    out.mAllowedDOFs = allowedDofs(desc);
+    out.mAllowDynamicOrKinematic = !locked;  // setMotionType may turn any other body into any other kind
+    out.mAllowedDOFs = locked ? JPH::EAllowedDOFs::All : allowedDofs(desc);
     out.mOverrideMassProperties = massMode;
     out.mMassPropertiesOverride = mass;
-    out.mLinearVelocity = toJolt(desc.linearVelocity);
-    out.mAngularVelocity = toJolt(desc.angularVelocity);
+    // Jolt does not allow a body that is asleep to have a velocity (it would be moving).
+    if (!desc.startAsleep) {
+        out.mLinearVelocity = toJolt(desc.linearVelocity);
+        out.mAngularVelocity = toJolt(desc.angularVelocity);
+    }
     out.mLinearDamping = desc.linearDamping;
     out.mAngularDamping = desc.angularDamping;
     out.mMaxAngularVelocity = desc.maxAngularVelocity;

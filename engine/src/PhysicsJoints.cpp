@@ -93,14 +93,17 @@ JPH::Ref<JPH::TwoBodyConstraint> makeHinge(const JointDesc& d, const JointEnd& a
     // zero and everything given as an angle (limits, spring target) moves by the same amount.
     const float shift = (range.low > 0 || range.high < 0) ? 0.5f * (range.low + range.high) : 0.0f;
 
+    // Jolt measures the angle (and drives the motor) of B relative to A about the axis; PhysX does it for A relative
+    // to B (its motors turn A forwards, see JointDesc). Turning both axes round turns the sign of the angle.
+    const JPH::Vec3 axisA = -a.axis, axisB = -b.axis;
     JPH::HingeConstraintSettings settings;
     settings.mSpace = JPH::EConstraintSpace::WorldSpace;
     settings.mPoint1 = a.point;
-    settings.mHingeAxis1 = a.axis;
+    settings.mHingeAxis1 = axisA;
     settings.mNormalAxis1 = a.normal;
     settings.mPoint2 = b.point;
-    settings.mHingeAxis2 = b.axis;
-    settings.mNormalAxis2 = JPH::Quat::sRotation(b.axis, -shift) * b.normal;
+    settings.mHingeAxis2 = axisB;
+    settings.mNormalAxis2 = JPH::Quat::sRotation(axisB, -shift) * b.normal;
     // Jolt has no bounce off a limit, so JointLimit::restitution is not used.
     settings.mLimitsMin = range.low - shift;
     settings.mLimitsMax = range.high - shift;
