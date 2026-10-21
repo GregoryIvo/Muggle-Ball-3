@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -42,8 +43,10 @@ struct TextureDir {
     fs::path path;
 
     TextureDir() {
+        // Unique per run as well as per directory: ctest -j may run this test twice at once.
+        static const unsigned run = std::random_device{}();
         static int counter = 0;
-        path = fs::temp_directory_path() / ("mb3_scene_test_" + std::to_string(counter++));
+        path = fs::temp_directory_path() / ("mb3_scene_test_" + std::to_string(run) + "_" + std::to_string(counter++));
         fs::remove_all(path);
         fs::create_directories(path);
     }
