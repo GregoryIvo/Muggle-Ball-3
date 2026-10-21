@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 
@@ -23,7 +24,7 @@ constexpr const char* kLevel = R"({
     {"pose": {"rotation": [1,0,0,0,1,0,0,0,1], "position": [0,0,0]},
      "shapes": [{"type": "box", "localPose": {"rotation": [1,0,0,0,1,0,0,0,1], "position": [0,1,0]},
                  "halfExtents": [3, 22, 15]}],
-     "object": {"type": "board", "id": 2, "flags": 6, "material": "boardmaterial", "mesh": "boardsea.x"}},
+     "object": {"type": "board", "id": 2, "flags": 518, "material": "boardmaterial", "mesh": "boardsea.x", "extra": "03ff"}},
     {"pose": {"rotation": [1,0,0,0,1,0,0,0,1], "position": [4.7, 0.98, 3.29]},
      "body": "00",
      "shapes": [{"type": "sphere", "localPose": {"rotation": [1,0,0,0,1,0,0,0,1], "position": [0,0,0]},
@@ -45,6 +46,7 @@ int main() {
     check(level.actors.size() == 3, "actor count");
     check(level.actors[0].object && level.actors[0].object->mesh == "boardsea.x", "board mesh");
     check(level.actors[0].shapes.at(0).halfExtents[1] == 22.0f, "box half extents");
+    check(level.actors[0].object->extra == std::vector<std::uint8_t>{0x03, 0xff}, "extra bytes");
     check(!level.actors[0].dynamic && level.actors[1].dynamic, "dynamic flag");
     check(level.actors[1].shapes.at(0).radius == 1.5f, "sphere radius");
     check(!level.actors[2].object, "actor without object");

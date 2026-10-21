@@ -38,6 +38,7 @@ struct GameObject {
     std::string mesh;
     std::string frame;
     std::string prize;              // Prize: which power-up it drops
+    std::vector<std::uint8_t> extra;   // flags & 0x200: 0x68 bytes (a D3DLIGHT8 for lights)
     std::vector<Actor> clothSegments;  // Cloth: the extra segment actors
 };
 

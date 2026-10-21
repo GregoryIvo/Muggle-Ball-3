@@ -17,7 +17,10 @@ import sys
 import zipfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import materials  # noqa: E402
 import mb3level  # noqa: E402
+import textures  # noqa: E402
+import x2glb  # noqa: E402
 
 PLAIN_ARCHIVES = {"Textures.dat": "Textures", "Sounds.dat": "Sounds", "Musics.dat": "Musics"}
 
@@ -37,6 +40,22 @@ def copy_data(extracted, out):
     if not src.is_dir():
         sys.exit(f"missing {src} (run tools/molebox-dump first)")
     shutil.copytree(src, out / "Data", dirs_exist_ok=True)
+
+
+def convert_textures(out):
+    stats = textures.convert_all([out / "Textures", out / "Data" / "Fonts"])
+    print(f"textures: DDS converted to PNG: {stats}")
+
+
+def convert_materials(out):
+    folder = out / "Data" / "Materials"
+    stats = materials.convert(folder / "materials.xml", folder / "materials.json")
+    print(f"materials: {stats}")
+
+
+def convert_meshes(out):
+    stats = x2glb.convert_all(out / "Data" / "SkinMeshes", out / "Textures", out / "Data" / "Meshes")
+    print(f"meshes: {stats}")
 
 
 def convert_levels(out):
@@ -59,6 +78,9 @@ def main():
     args.out.mkdir(parents=True, exist_ok=True)
     unpack_archives(args.game, args.out)
     copy_data(args.extracted, args.out)
+    convert_textures(args.out)
+    convert_materials(args.out)
+    convert_meshes(args.out)
     convert_levels(args.out)
     print(f"done: {args.out.resolve()}")
 
