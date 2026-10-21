@@ -7,7 +7,7 @@ Goal: native on macOS first, then other platforms without rewriting the game.
 | Language and build | C++20, CMake | CMake also generates Xcode projects. |
 | Window, input, audio device | SDL3 | Same API on macOS, Windows, Linux, iOS and consoles. |
 | Rendering | SDL3 GPU API | Metal on macOS, Vulkan elsewhere. Shaders are GLSL, compiled ahead of time to SPIR-V and MSL by `tools/build_shaders.py` (glslang + SPIRV-Cross); the generated headers are committed, so building needs neither tool. |
-| Physics | Jolt Physics (planned) | Replaces PhysX 2.x. Levels store PhysX boxes, spheres, capsules, convexes and joints, all of which map directly. |
+| Physics | Jolt Physics | Replaces PhysX 2.x. Levels store PhysX boxes, spheres, capsules, convexes and joints, all of which map directly. `PhysicsWorld` is the PhysX model over Jolt, `PhysicsScene` runs a level in it; how, and why, is in `PHYSICS.md`. |
 | Audio decode | stb_vorbis (planned) | All sounds and music are Ogg Vorbis. |
 | XML | Converted offline (planned for objects, sounds) | `materials.xml` is converted to JSON by `tools/materials.py`; the menus and the string table by `tools/ui.py`. |
 | Text | The original's pre-rendered font atlases | Five `.crd` + `.dds` atlases of `Bookworm.ttf` and `brushType-SemiBold.TTF` ship with the game and are drawn as sprites (`BitmapFont`). SDL3_ttf stays an option for sizes they lack. |

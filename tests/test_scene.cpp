@@ -3,6 +3,7 @@
 
 #include "mb/game/GameCamera.h"
 #include "mb/game/LevelCatalog.h"
+#include "mb/game/PhysicsScene.h"
 #include "mb/game/SceneBuilder.h"
 
 #include <algorithm>
@@ -122,7 +123,8 @@ MaterialLibrary makeMaterials() {
       {"name": "Lost", "textures": ["Nowhere"]},
       {"name": "BoardMaterial", "textures": ["Ball"], "animated": true,
        "d3d": {"diffuse": [1, 1, 1, 1], "ambient": [1, 1, 1, 1], "emissive": [1, 1, 1, 1]}},
-      {"name": "lightMaterial", "d3d": {"diffuse": [0.75, 0.75, 0.75, 1], "ambient": [0.5, 0.5, 0.5, 1]}}
+      {"name": "lightMaterial", "d3d": {"diffuse": [0.75, 0.75, 0.75, 1], "ambient": [0.5, 0.5, 0.5, 1]}},
+      {"name": "ballMaterial", "physics": {"restitution": 0.999}}
     ]})");
 }
 
@@ -255,6 +257,95 @@ void testWorldMatrix() {
     // (1, 0, 0) -> scale (2, 0, 0) -> translate (3, 0, 0) -> parent (3, 5, 0) -> actor R: (0, 5, -3) + (10, 0, 0).
     const Vec3 p = transformPoint({1, 0, 0}, scene.draws.at(0).item.world);
     check(near(p, {10, 5, -3}), "world matrix: node transforms, then parents, then the actor pose");
+}
+
+void testDrawsFollowActors() {
+    Model model;
+    const int mat = addMaterial(model, "", {});
+    const int mesh = addMesh(model, {{0, 3, mat}});
+    addNode(model, "Leaf", -1, Mat4::translation({0, 0.5f, 0}), mesh);  // the model stands on its actor's origin
+
+    // Index 0 is a board, 1 a brick that will fall, 2 a cloth with one segment, which names a mesh, 3 a brick whose
+    // saved rotation is scaled (0.955 on two axes, as in the data): the draw and the body must agree on the rigid one.
+    Actor board = brick("", "", "", 1, ObjectType::Board);
+    board.body = Body{};
+    board.body->flags = 0xFF;
+    board.body->mass = 1000;
+    Shape floor;
+    floor.type = ShapeType::Box;
+    floor.halfExtents = {20, 0.5f, 20};
+    floor.localPose.position = {0, -0.5f, 0};
+    board.shapes = {floor};
+
+    const auto withBody = [](Actor a, Vec3 at) {
+        a.pose.position = at;
+        a.body = Body{};
+        a.body->mass = 10;
+        a.body->massSpaceInertia = {1, 1, 1};
+        Shape box;
+        box.type = ShapeType::Box;
+        box.halfExtents = {0.5f, 0.5f, 0.5f};
+        a.shapes = {box};
+        return a;
+    };
+    Actor falling = withBody(brick("test.x", "Leaf", "", 2), {0, 5, 0});
+    Actor cloth = withBody(brick("arbuz.x", "", "", 3, ObjectType::Cloth), {5, 5, 0});
+    Actor segment = withBody(brick("test.x", "Leaf", "", 4), {6, 5, 0});
+    cloth.object->clothSegments = {segment};
+    Actor skewed = withBody(brick("test.x", "Leaf", "", 5), {10, 0.5f, 0});
+    const Mat4 turn = Mat4::rotationY(0.5f);
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            const float scale = (i == 1 || j == 1) ? 1.0f : 0.955f;
+            skewed.pose.rotation[static_cast<std::size_t>(i * 3 + j)] = turn.m[j][i] * scale;
+        }
+    }
+    Level level;
+    level.gravity = {0, -9.8f, 0};
+    level.actors = {board, falling, cloth, skewed};
+
+    const MaterialLibrary materials = makeMaterials();
+    TextureDir dir;
+    const TextureIndex textures(dir.path);
+    const SceneDescription scene = describeScene(level, lookupOf(model), materials, textures);
+    check(scene.draws.size() == 3, "follow: the falling brick, the cloth's segment and the skewed brick draw");
+    check(scene.draws[0].actor == 1 && scene.draws[1].actor == 3 && scene.draws[2].actor == 4,
+          "follow: a draw knows its actor by the flattened index (the cloth is 2, its segment 3)");
+    check(near(scene.draws[0].local.translationPart(), {0, 0.5f, 0}), "follow: and its node transform in the actor");
+
+    PhysicsOptions awake;
+    awake.start = StartState::Still;
+    PhysicsSettings onThisThread;
+    onThisThread.threads = 0;
+    PhysicsScene physics(level, materials, awake, onThisThread);
+    // At the start every draw stands where world = local * the body's pose says.
+    bool agree = true;
+    for (const SceneDraw& draw : scene.draws) {
+        const Mat4 expected = placedOnActor(draw.local, physics.actorPose(draw.actor));
+        for (int i = 0; i < 4; ++i) {
+            for (int j = 0; j < 4; ++j) {
+                agree = agree && near(draw.item.world.m[i][j], expected.m[i][j], 1e-5f);
+            }
+        }
+    }
+    check(agree, "follow: item.world is local * the physics pose of the actor, rigid poses included");
+    check(near(physics.actorPose(4).translationPart(), {10, 0.5f, 0}), "follow: the skewed brick starts where it was saved");
+
+    for (int i = 0; i < 60; ++i) {
+        physics.step(1.0f / 60);
+    }
+    const Vec3 fell = physics.actorPose(1).translationPart();
+    check(fell.y < 1.0f, "follow: the brick fell");
+    // Its draw, moved with it, puts the model's point (0, 0, 0) where the node and the body say.
+    const Vec3 drawn = transformPoint({0, 0, 0}, placedOnActor(scene.draws[0].local, physics.actorPose(1)));
+    check(near(drawn, fell + Vec3{0, 0.5f, 0}, 1e-4f), "follow: a moving actor takes its draws with it");
+    check(physics.plan().actors.size() == 5, "follow: the plan has an entry for each flattened actor");
+
+    // A point in the node's frame goes through the node's transform first, and then the actor's pose.
+    const Mat4 node = Mat4::translation({1, 0, 0});
+    const Mat4 pose = Mat4::rotationY(radians(90)) * Mat4::translation({5, 2, 0});
+    check(near(transformPoint({0, 0, 0}, placedOnActor(node, pose)), transformPoint(transformPoint({0, 0, 0}, node), pose)),
+          "follow: placedOnActor applies the node's transform, then the actor's pose");
 }
 
 void testTextureRules() {
@@ -451,6 +542,19 @@ void testLights() {
           "light: the level's light object wins");
 }
 
+// The shape wireframes in world space, at the poses the level saved.
+std::vector<DebugLine> shapeLines(const Level& level) {
+    const std::vector<ActorRef> actors = flattenActors(level);
+    std::vector<DebugLine> lines;
+    for (const ActorShapeLines& entry : actorShapeLines(level)) {
+        const Mat4 world = rigidTransform(actors[entry.actor].actor->pose);
+        for (const DebugLine& line : entry.lines) {
+            lines.push_back({transformPoint(line.a, world), transformPoint(line.b, world), line.color});
+        }
+    }
+    return lines;
+}
+
 void testShapeLines() {
     Actor actor;
     actor.pose.position = {10, 0, 0};
@@ -503,6 +607,54 @@ void testShapeLines() {
     // The capsule spans y in [-h/2 - r, h/2 + r] = [-3, 3] along its local +Y axis; the sphere reaches x = 2.
     check(near(lowest, -3, 1e-3f) && near(highest, 3, 1e-3f) && near(widest, 2, 1e-3f),
           "shape lines: sphere radius and capsule extent");
+}
+
+void testHullLines() {
+    const auto hullLines = [](std::vector<Vec3> points) {
+        Shape hull;
+        hull.type = ShapeType::Convex;
+        hull.hullPoints = std::move(points);
+        Actor actor;
+        actor.shapes = {hull};
+        Level level;
+        level.actors = {actor};
+        return shapeLines(level);
+    };
+    const auto edgeLengths = [](const std::vector<DebugLine>& lines) {
+        std::vector<float> lengths;
+        for (const DebugLine& l : lines) {
+            lengths.push_back(length(l.b - l.a));
+        }
+        return lengths;
+    };
+
+    std::vector<Vec3> cube;
+    for (int i = 0; i < 8; ++i) {
+        cube.push_back({(i & 1) ? 1.0f : -1.0f, (i & 2) ? 1.0f : -1.0f, (i & 4) ? 1.0f : -1.0f});
+    }
+    std::vector<DebugLine> lines = hullLines(cube);
+    check(lines.size() == 12 && std::ranges::all_of(edgeLengths(lines), [](float l) { return near(l, 2); }),
+          "hull lines: a cube has its 12 edges, and no face diagonals");
+
+    // Points inside, or in the middle of a face or an edge, are not corners.
+    std::vector<Vec3> crowded = cube;
+    crowded.push_back({0, 0, 0});
+    crowded.push_back({0, 0, 1});
+    crowded.push_back({1, 0, 1});
+    check(hullLines(crowded).size() == 12, "hull lines: points that are not corners add no edges");
+
+    check(hullLines({{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}}).size() == 6, "hull lines: a tetrahedron has 6 edges");
+    check(hullLines({{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}).size() == 12,
+          "hull lines: an octahedron has 12");
+    // A cone as the mill's roof: a ring of 8 points and an apex, 8 edges round the base and 8 up to the apex.
+    std::vector<Vec3> cone = {{0, 5, 0}};
+    for (int i = 0; i < 8; ++i) {
+        const float a = static_cast<float>(i) * kPi / 4;
+        cone.push_back({std::cos(a), 0, std::sin(a)});
+    }
+    check(hullLines(cone).size() == 16, "hull lines: a cone of 8 points round the base");
+    check(hullLines({{0, 0, 0}, {1, 0, 0}}).empty() && hullLines({}).empty(),
+          "hull lines: too few points give nothing, and nothing goes wrong");
 }
 
 void testCatalog() {
@@ -559,11 +711,13 @@ int main() {
     testActorsWithoutMeshAreSkipped();
     testClothSegmentsAndPlaceholder();
     testWorldMatrix();
+    testDrawsFollowActors();
     testTextureRules();
     testBackground();
     testAnimationFrame();
     testLights();
     testShapeLines();
+    testHullLines();
     testCatalog();
     testCamera();
     if (failures == 0) {
