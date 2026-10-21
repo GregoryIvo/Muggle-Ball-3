@@ -116,6 +116,59 @@ Written by `tools/x2glb.py` (parser: `tools/xfile.py`):
   material has several `<Sounds>` elements, their attributes are merged and
   later ones override.
 
+## Sounds and music
+
+`assets/Sounds/*.ogg` and `assets/Musics/*.ogg` (the contents of `Sounds.dat` and
+`Musics.dat`) are Ogg Vorbis and are used as they are: 165 sound files (127 mono,
+38 stereo, all 44.1 kHz) and 5 music tracks (stereo; `menu`, `village` and
+`pirates` at 44.1 kHz, `cowboy` and `knights` at 32 kHz). Some file names are
+upper case (`BALLhitbat.OGG`) while the XML spells them in other cases.
+
+`Data/xml/sounds.xml` and `musics.xml` are converted by `tools/sounds.py` into
+`Data/xml/sounds.json` and `musics.json`:
+
+```json
+{"version": 1,
+ "sounds": [
+  {"name": "pirat_period", "samples": [{"file": "pirat_period1.ogg", "delayMs": 30000},
+                                       {"file": "pirat_period2.ogg", "delayMs": 35000}]},
+  {"name": "ballHitBoard", "samples": [{"file": "ballhitboard.ogg", "freqStart": 0.7, "freqEnd": 1.1}]},
+  {"name": "pirat_drop", "samples": []}
+ ]}
+```
+
+```json
+{"version": 1, "musics": [{"name": "Cowboys", "file": "cowboy.ogg"}]}
+```
+
+- `sounds` appear in file order; `name` keeps the XML's spelling, and the runtime
+  matches names without regard to case (menus say `menustonedown`, the XML
+  `MenuStoneDown`). A name defined twice (`meteor` and `thunderbolt_dead`, the
+  second time without a delay) keeps its first definition.
+- A sound plays one of its `samples`, picked at random. `file` is the name of
+  the file in `Sounds/` as it is spelled on disk (found ignoring case). `delayMs`
+  (omitted when 0) is how long after that sample starts the sound may play again.
+  `freqStart` and `freqEnd` (both or neither; the XML's single bound is copied
+  to the other) are the playback speed multiplier's range, drawn at random for
+  each play; 1 is normal pitch, 2 an octave up.
+- Samples whose file does not exist are left out and reported. 114 of the 315
+  samples in `sounds.xml` name a file that was never shipped (almost every
+  `*_drop`, many `*_hit`, `bullet_dead`, `rocket_dead`, `thunderbolt`, `money`,
+  ...). A sound left with no sample is still listed, with `"samples": []`: the
+  original knew the name and played nothing, and so does the runtime.
+- `musics` are in file order. A track whose `Stream` file is missing would be
+  left out and reported (all five exist).
+- `sounds.xml` has no XML declaration and its comments are Russian in code page
+  866, which is not UTF-8; the converter reads it that way.
+
+Materials name sounds by plain `sounds.json` names (`shark_hit`, `knight_period`);
+there are no prefixes to extend with a number: the `1` and `2` in
+`knight_period1.ogg` and `knight_period2.ogg` belong to the two samples of
+`knight_period`. 23 of the 600 sound names in `materials.json` (18 different
+ones) are not in `sounds.xml` at all, for example `train_period`, `wood_hit`,
+`cannon_hit` and `jaba_drop`; `village_roof_drop` is spelled `village_roof_frop`
+in the XML. The runtime treats all of them as silent.
+
 ## Textures
 
 JPEG and PNG files are used as they are, from `assets/Textures/` (the
