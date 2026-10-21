@@ -143,7 +143,7 @@ void Menu::prepare() {
 }
 
 void Menu::prepareOptions() {
-    const Settings& s = profile_.settings;
+    const MenuSettings& s = profile_.settings;
     const auto set = [&](std::string_view name, auto apply) {
         if (UiWidget* w = form_.find(name)) {
             apply(*w);
@@ -424,7 +424,7 @@ bool Menu::back() {
 
 void Menu::applyOptions() {
     // Leaving Options untouched must not put the window back to the size the profile remembers.
-    const Settings& s = profile_.settings;
+    const MenuSettings& s = profile_.settings;
     const bool videoChanged = s.windowWidth != videoAtOpen_.windowWidth || s.windowHeight != videoAtOpen_.windowHeight ||
                               s.fullscreen != videoAtOpen_.fullscreen;
     if (videoChanged && hooks_.applyVideo) {
@@ -468,7 +468,7 @@ void Menu::setSlider(UiWidget& slider, float value) {
 
 void Menu::setCheckbox(UiWidget& box, bool checked) {
     box.checked = checked;
-    Settings& s = profile_.settings;
+    MenuSettings& s = profile_.settings;
     if (box.name == "BG") {
         s.freezeSky = checked;
     } else if (box.name == "Camera") {
@@ -618,7 +618,7 @@ void Menu::drawScores(UiAssets& assets, std::vector<Sprite>& out) const {
     float y = area.y + area.h * 0.095f;
     const std::size_t first = static_cast<std::size_t>(scorePage_ * kScoreRows);
     for (std::size_t i = first; i < std::min(first + kScoreRows, profile_.highScores.size()); ++i) {
-        const HighScore& entry = profile_.highScores[i];
+        const MenuHighScore& entry = profile_.highScores[i];
         const bool fresh = static_cast<int>(i) == newScore_;
         params.color = colorOf(fresh ? 0x00ff00 : 0x604020, alpha);
         params.shadowOffset = fresh ? Vec2{s, s} : Vec2{};

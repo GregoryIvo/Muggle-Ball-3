@@ -14,9 +14,9 @@ int Profile::addHighScore(std::string name, int score) {
     if (!qualifies(score)) {
         return -1;
     }
-    const auto place = std::ranges::upper_bound(highScores, score, std::greater<>(), &HighScore::score);
+    const auto place = std::ranges::upper_bound(highScores, score, std::greater<>(), &MenuHighScore::score);
     const auto index = static_cast<int>(std::distance(highScores.begin(), place));
-    highScores.insert(place, HighScore{std::move(name), score});
+    highScores.insert(place, MenuHighScore{std::move(name), score});
     if (highScores.size() > kMaxHighScores) {
         highScores.pop_back();
     }

@@ -30,7 +30,7 @@ std::vector<mb::VideoMode> videoModes(const mb::Window& window) {
     return modes;
 }
 
-void applyVideo(mb::Window& window, const mb::Settings& settings) {
+void applyVideo(mb::Window& window, const mb::MenuSettings& settings) {
     window.setFullscreen(settings.fullscreen);
     if (!settings.fullscreen) {
         window.setSize(settings.windowWidth, settings.windowHeight);
@@ -93,7 +93,7 @@ public:
 private:
     // The menu hooks as set by the caller, plus the window ones.
     static mb::MenuHooks hooksFor(mb::Window& window, mb::MenuHooks hooks) {
-        hooks.applyVideo = [&window, caller = std::move(hooks.applyVideo)](const mb::Settings& settings) {
+        hooks.applyVideo = [&window, caller = std::move(hooks.applyVideo)](const mb::MenuSettings& settings) {
             applyVideo(window, settings);
             if (caller) {
                 caller(settings);

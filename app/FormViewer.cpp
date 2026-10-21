@@ -100,11 +100,11 @@ private:
         mb::MenuHooks hooks;
         hooks.playSound = [](std::string_view sound) { mb::logInfo("sound \"{}\"", sound); };
         hooks.loadProfile = demoProfile;
-        hooks.settingsChanged = [](const mb::Settings& s) {
+        hooks.settingsChanged = [](const mb::MenuSettings& s) {
             mb::logInfo("settings: music {} sound {} smart camera {} freeze sky {} shadows {} mirrors {} fullscreen {} bat {}", s.musicVolume,
                         s.soundVolume, s.smartCamera, s.freezeSky, s.shadows, s.mirrors, s.fullscreen, s.bat);
         };
-        hooks.applyVideo = [](const mb::Settings& s) { mb::logInfo("video: {}x{}, fullscreen {}", s.windowWidth, s.windowHeight, s.fullscreen); };
+        hooks.applyVideo = [](const mb::MenuSettings& s) { mb::logInfo("video: {}x{}, fullscreen {}", s.windowWidth, s.windowHeight, s.fullscreen); };
         hooks.saveProfile = [](const mb::Profile& p) { mb::logInfo("profile saved ({} scores)", p.highScores.size()); };
         return hooks;
     }

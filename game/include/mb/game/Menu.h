@@ -31,9 +31,9 @@ struct MenuHooks {
     std::function<Profile()> loadProfile;
     // Called with every change of a setting as it happens (the volume sliders, the checkboxes, the bat), so that the
     // new volume can be heard before the player leaves Options.
-    std::function<void(const Settings&)> settingsChanged;
+    std::function<void(const MenuSettings&)> settingsChanged;
     // Called when Options is left with its Main Menu button, to make the video settings (window size, fullscreen) take effect.
-    std::function<void(const Settings&)> applyVideo;
+    std::function<void(const MenuSettings&)> applyVideo;
     // Called whenever something worth keeping changed: Options left, a bat picked, a score entered.
     std::function<void(const Profile&)> saveProfile;
 };
@@ -78,7 +78,7 @@ enum class MenuIntent {
 // It owns the current form and fades it in, shows the background form behind it, and turns the pointer and the
 // keyboard into the original's behaviour: hover and press frames and sounds, navigation by "Navigate" buttons,
 // back with Escape, level and bat selection, the Options form (sliders, checkboxes, the video list), the
-// high-score table, name entry and the loading bar. Settings and high scores live in a Profile that the hooks
+// high-score table, name entry and the loading bar. MenuSettings and high scores live in a Profile that the hooks
 // load and save. It knows nothing of the GPU: forms come from a loader and drawing is done with UiAssets.
 //
 //   Menu menu([&](std::string_view name) { return assets.loadForm(name); }, campaign, hooks);
@@ -127,7 +127,7 @@ public:
 
     Profile& profile() { return profile_; }
     const Profile& profile() const { return profile_; }
-    const Settings& settings() const { return profile_.settings; }
+    const MenuSettings& settings() const { return profile_.settings; }
 
     // What clicking a widget of `form` does.
     static MenuIntent intentOf(const UiForm& form, const UiWidget& widget);
@@ -172,7 +172,7 @@ private:
     Profile profile_;
     std::vector<VideoMode> videoModes_;
     int videoMode_ = 0;
-    Settings videoAtOpen_;  // the video settings when Options opened, to tell whether Apply has anything to apply
+    MenuSettings videoAtOpen_;  // the video settings when Options opened, to tell whether Apply has anything to apply
 
     std::string formName_;
     UiForm form_;

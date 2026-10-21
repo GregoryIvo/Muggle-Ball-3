@@ -185,8 +185,8 @@ struct Harness {
         MenuHooks h;
         h.playSound = [this](std::string_view s) { sounds.emplace_back(s); };
         h.loadProfile = [initial = std::move(initial)] { return initial; };
-        h.settingsChanged = [this](const Settings& s) { changes.push_back(s); };
-        h.applyVideo = [this](const Settings& s) { applied.push_back(s); };
+        h.settingsChanged = [this](const MenuSettings& s) { changes.push_back(s); };
+        h.applyVideo = [this](const MenuSettings& s) { applied.push_back(s); };
         h.saveProfile = [this](const Profile& p) { saved.push_back(p); };
         return h;
     }
@@ -235,7 +235,7 @@ struct Harness {
     UiLayout layout = UiLayout::fit(1024, 768);
     ImageSizeFn sizes = [](std::string_view) { return Vec2{}; };
     std::vector<std::string> sounds;
-    std::vector<Settings> changes, applied;
+    std::vector<MenuSettings> changes, applied;
     std::vector<Profile> saved;
     Menu menu;
 };
@@ -441,7 +441,7 @@ void testOptions() {
     h.click("Shadow");
     h.click("Mirror");
     h.click("Fullscreen");
-    const Settings& s = h.menu.settings();
+    const MenuSettings& s = h.menu.settings();
     check(!s.smartCamera && !s.shadows && s.mirrors && s.fullscreen, "checkbox: each box is its own setting (and Fullscreen is a checkbox too)");
     check(h.count("down") == 5 && h.count("in") == 4, "checkbox: each click played the box's down sound, and entering it the in sound");
 

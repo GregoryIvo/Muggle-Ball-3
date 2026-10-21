@@ -1,6 +1,7 @@
 # Build output
 /build*/
 /out/
+/dist/
 .DS_Store
 *.xcodeproj/
 __pycache__/

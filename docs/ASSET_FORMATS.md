@@ -116,6 +116,59 @@ Written by `tools/x2glb.py` (parser: `tools/xfile.py`):
   material has several `<Sounds>` elements, their attributes are merged and
   later ones override.
 
+## Sounds and music
+
+`assets/Sounds/*.ogg` and `assets/Musics/*.ogg` (the contents of `Sounds.dat` and
+`Musics.dat`) are Ogg Vorbis and are used as they are: 165 sound files (127 mono,
+38 stereo, all 44.1 kHz) and 5 music tracks (stereo; `menu`, `village` and
+`pirates` at 44.1 kHz, `cowboy` and `knights` at 32 kHz). Some file names are
+upper case (`BALLhitbat.OGG`) while the XML spells them in other cases.
+
+`Data/xml/sounds.xml` and `musics.xml` are converted by `tools/sounds.py` into
+`Data/xml/sounds.json` and `musics.json`:
+
+```json
+{"version": 1,
+ "sounds": [
+  {"name": "pirat_period", "samples": [{"file": "pirat_period1.ogg", "delayMs": 30000},
+                                       {"file": "pirat_period2.ogg", "delayMs": 35000}]},
+  {"name": "ballHitBoard", "samples": [{"file": "ballhitboard.ogg", "freqStart": 0.7, "freqEnd": 1.1}]},
+  {"name": "pirat_drop", "samples": []}
+ ]}
+```
+
+```json
+{"version": 1, "musics": [{"name": "Cowboys", "file": "cowboy.ogg"}]}
+```
+
+- `sounds` appear in file order; `name` keeps the XML's spelling, and the runtime
+  matches names without regard to case (menus say `menustonedown`, the XML
+  `MenuStoneDown`). A name defined twice (`meteor` and `thunderbolt_dead`, the
+  second time without a delay) keeps its first definition.
+- A sound plays one of its `samples`, picked at random. `file` is the name of
+  the file in `Sounds/` as it is spelled on disk (found ignoring case). `delayMs`
+  (omitted when 0) is how long after that sample starts the sound may play again.
+  `freqStart` and `freqEnd` (both or neither; the XML's single bound is copied
+  to the other) are the playback speed multiplier's range, drawn at random for
+  each play; 1 is normal pitch, 2 an octave up.
+- Samples whose file does not exist are left out and reported. 114 of the 315
+  samples in `sounds.xml` name a file that was never shipped (almost every
+  `*_drop`, many `*_hit`, `bullet_dead`, `rocket_dead`, `thunderbolt`, `money`,
+  ...). A sound left with no sample is still listed, with `"samples": []`: the
+  original knew the name and played nothing, and so does the runtime.
+- `musics` are in file order. A track whose `Stream` file is missing would be
+  left out and reported (all five exist).
+- `sounds.xml` has no XML declaration and its comments are Russian in code page
+  866, which is not UTF-8; the converter reads it that way.
+
+Materials name sounds by plain `sounds.json` names (`shark_hit`, `knight_period`);
+there are no prefixes to extend with a number: the `1` and `2` in
+`knight_period1.ogg` and `knight_period2.ogg` belong to the two samples of
+`knight_period`. 23 of the 600 sound names in `materials.json` (18 different
+ones) are not in `sounds.xml` at all, for example `train_period`, `wood_hit`,
+`cannon_hit` and `jaba_drop`; `village_roof_drop` is spelled `village_roof_frop`
+in the XML. The runtime treats all of them as silent.
+
 ## Textures
 
 JPEG and PNG files are used as they are, from `assets/Textures/` (the
@@ -281,3 +334,22 @@ the file name. The sizes line up with the forms' `font_size` N at 1.25 N (16 and
 out for; so the UI draws N from the atlas nearest 1.25 N at scale N / size (0.8 for an exact match). The cell height
 is about 1.7 times `size` for bookworm and 1.5 times for brushType. `bookworm.ttf_23`'s atlas is a few rows too short
 for its first, unprintable glyphs, which the converter cuts off at the edge.
+
+## App icon: `assets/AppIcon.icns`
+
+macOS only, and not read by the game: `tools/make_icon.py` builds it, `tools/convert_assets.py` runs that
+last (skipped off macOS or if the icon cannot be read), and CMake copies it into the app bundle as
+`Contents/Resources/AppIcon.icns` (with `CFBundleIconFile`) when the file exists. Without it the app has
+the default icon.
+
+The icon is the one in `MagicBall3.exe`: PE resources, `RT_GROUP_ICON` "IDI_APPICON" (the first icon group)
+and the `RT_ICON` images it lists, which are 48, 32, 24 and 16 pixels, 32-bit with alpha. The resource
+directory is intact even though the executable is Alawar's trial wrapper, and the icon data sits in a
+different section than the directory, so every RVA goes through the section table. The `.ico` files in the
+install folder are Alawar's, Gamextazy's and the installer's logos, not the game's; `--ico` reads one if an
+executable's resources ever cannot be parsed.
+
+`make_icon.py` writes an `.iconset` (16 to 512 pixels at 1x and 2x) and runs `iconutil -c icns`. Sizes the
+icon has (16 and 32) are used as they are. The rest (64 to 1024) are resampled from the 48 pixel image with a
+Lanczos filter on alpha-weighted colour, so the 1024 pixel icon is soft: there is nothing sharper in the
+game's files.

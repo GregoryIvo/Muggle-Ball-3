@@ -14,10 +14,17 @@
 //   MuggleBall3 --check <level.json>         load a converted level JSON, print a summary, exit
 //   MuggleBall3 --form <name> [--screenshot out.png] [--size WxH] [--language L] [--hover W | --press W] [--no-background]
 //                                            show a menu form alone (FormViewer.h); Left/Right switch form in the window
+//   MuggleBall3 --play-sound <name> [--seconds N]
+//   MuggleBall3 --play-music <name> [--seconds N]
+//                                            play a named sound (see sounds.xml) or one pass of a music
+//                                            track (Menu, Village, Pirates, Cowboys, Knights), wait, exit
 //
 // In the level viewer: Left/Right (or PageUp/PageDown) = previous/next level, Space = shoot a test ball, P = pause
 // the physics, L = reload the level, F1 = physics wireframes, left-drag = orbit, right-drag = pan, wheel = zoom,
-// R = back to the game camera, Esc = quit.
+// R = back to the game camera, Esc = quit, F11 / Alt+Enter / Ctrl+Cmd+F = fullscreen. The window size and
+// fullscreen are remembered between runs (--size is a one-off and is not).
+
+#include "GameAudio.h"
 
 #include "FormViewer.h"
 #include "FrontEnd.h"
@@ -32,6 +39,7 @@
 #include "mb/game/MaterialLibrary.h"
 #include "mb/game/ModelCache.h"
 #include "mb/game/PhysicsScene.h"
+#include "mb/game/SaveData.h"
 #include "mb/game/TextureIndex.h"
 
 #define SDL_MAIN_HANDLED
@@ -75,8 +83,12 @@ struct BallShot {
 struct Options {
     std::string level;       // --level; empty means the first one
     std::string screenshot;  // --screenshot; empty means open a window
+    std::string playSound;   // --play-sound
+    std::string playMusic;   // --play-music
+    double seconds = 0;      // --seconds: stop a played sound or music after this long; 0 means play it out
     int width = kDefaultWidth;
     int height = kDefaultHeight;
+    bool sizeGiven = false;  // --size was on the command line
     bool shapes = false;
     std::optional<std::array<float, 7>> camera;  // eye, target, vertical fov in degrees
     mb_app::HudOptions hud;                      // --hud
@@ -368,22 +380,36 @@ private:
     int frames_ = 0;
 };
 
+// Remembers how the player left the window. A size from --size was asked for once, so it is not kept.
+void saveWindowState(const mb::Window& window, mb::SaveData& save, bool keepSize) {
+    save.settings.fullscreen = window.fullscreen();
+    if (keepSize) {
+        window.windowedSize(save.settings.windowWidth, save.settings.windowHeight);
+    }
+    save.saveSettings();
+}
+
 int runWindow(const Options& options) {
     // Resolve the assets and the level first, so a bad argument fails before a window flashes up.
     Assets assets;
     const std::size_t first = startLevel(assets, options);
 
-    mb::Window window("Muggle Ball 3", options.width, options.height);
+    mb::SaveData save(mb::userDataDir());
+    mb::logInfo("Save data: {}", save.directory().string());
+    mb::Window window("Muggle Ball 3", options.sizeGiven ? options.width : save.settings.windowWidth,
+                      options.sizeGiven ? options.height : save.settings.windowHeight, save.settings.fullscreen);
     mb::Renderer renderer(window);
     mb::logInfo("GPU backend: {}", renderer.backendName());
     mb::logInfo("Asset root: {}", assets.root.string());
 
+    mb::GameAudio audio(assets.root);  // after the window, so the device closes before SDL quits
     Viewer viewer(renderer, assets, options);
     // A level asked for by name must load; without one, the first level that does will do.
     if (!viewer.show(first) && (!options.level.empty() || !viewer.showRelative(1))) {
         return 1;
     }
     window.setTitle("Muggle Ball 3 - " + viewer.levelName());
+    audio.levelShown(viewer.levelName());
     if (options.ball) {
         viewer.launchBall(*options.ball);
     }
@@ -433,10 +459,12 @@ int runWindow(const Options& options) {
         if (step != 0 && viewer.showRelative(step)) {
             paused = false;
             window.setTitle(titleFor());
+            audio.levelShown(viewer.levelName());
         } else if (reload && viewer.show(viewer.index())) {
             paused = false;
             window.setTitle(titleFor());
         }
+        audio.update();
 
         const Clock::time_point now = Clock::now();
         const float seconds = std::min(std::chrono::duration<float>(now - lastFrame).count(), kMaxFrameSeconds);
@@ -459,6 +487,7 @@ int runWindow(const Options& options) {
         stats.frame();
     }
     stats.report();
+    saveWindowState(window, save, !options.sizeGiven);
     return 0;
 }
 
@@ -530,7 +559,9 @@ void printUsage() {
         "       MuggleBall3 [--level ...] [--hud] [--hud-state lives,score,level[,icon...]]\n"
         "       MuggleBall3 --check <level.json>\n"
         "       MuggleBall3 --form <name> [--screenshot out.png] [--size WxH] [--language L] [--hover W | --press W]"
-        " [--no-background]\n",
+        " [--no-background]\n"
+        "       MuggleBall3 --play-sound <name> [--seconds N]\n"
+        "       MuggleBall3 --play-music <Menu|Village|Pirates|Cowboys|Knights> [--seconds N]\n",
         stderr);
 }
 
@@ -551,6 +582,7 @@ int main(int argc, char** argv) {
             } else if (arg == "--screenshot" && hasValue) {
                 options.screenshot = argv[++i];
             } else if (arg == "--size" && hasValue && parseSize(argv[i + 1], options.width, options.height)) {
+                options.sizeGiven = true;
                 ++i;
             } else if (arg == "--form" && hasValue) {
                 options.form.form = argv[++i];
@@ -574,6 +606,12 @@ int main(int argc, char** argv) {
                 options.hud = {true, state};
                 options.viewer = true;
                 ++i;
+            } else if (arg == "--play-sound" && hasValue) {
+                options.playSound = argv[++i];
+            } else if (arg == "--play-music" && hasValue) {
+                options.playMusic = argv[++i];
+            } else if (arg == "--seconds" && hasValue && std::strtod(argv[i + 1], nullptr) > 0) {
+                options.seconds = std::strtod(argv[++i], nullptr);
             } else if (arg == "--shapes") {
                 options.shapes = true;
                 options.viewer = true;
@@ -617,6 +655,12 @@ int main(int argc, char** argv) {
             options.form.width = options.width;
             options.form.height = options.height;
             return mb_app::runFormViewer(options.form);
+        }
+        if (!options.playSound.empty()) {
+            return mb::playSoundAndWait(mb::assetRoot(), options.playSound, options.seconds);
+        }
+        if (!options.playMusic.empty()) {
+            return mb::playMusicAndWait(mb::assetRoot(), options.playMusic, options.seconds);
         }
         if (options.simulate > 0 && options.screenshot.empty()) {  // the window runs the physics all the time
             printUsage();

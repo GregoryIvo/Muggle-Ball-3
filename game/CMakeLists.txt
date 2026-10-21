@@ -4,6 +4,7 @@ add_library(mb_game
   src/LevelLoader.cpp
   src/TextureIndex.cpp
   src/MaterialLibrary.cpp
+  src/SoundLibrary.cpp
   src/SceneBuilder.cpp
   src/PhysicsPlan.cpp
   src/PhysicsScene.cpp
@@ -21,6 +22,7 @@ add_library(mb_game
   src/Campaign.cpp
   src/Menu.cpp
   src/Hud.cpp
-  src/GameFlow.cpp)
+  src/GameFlow.cpp
+  src/SaveData.cpp)
 target_include_directories(mb_game PUBLIC include)
 target_link_libraries(mb_game PUBLIC mb_engine PRIVATE nlohmann_json::nlohmann_json)

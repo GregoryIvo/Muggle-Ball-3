@@ -15,20 +15,23 @@ level stands as designed until something hits it (the windmills turn), and a tes
 ball can be shot in to knock things over. The front end is in: the game starts at
 the main menu, the original's menu screens work (stage and level selection,
 options, high scores, name entry, info and credits), a level opens with the
-in-game HUD, and Escape pauses it. Not there yet: the real ball and bat, bricks
-that die and score (so a level cannot be played yet), sails (cloth), moving
-sharks and trains, cannons, shadows and reflections, model animation and sound.
+in-game HUD, and Escape pauses it. Sound and music are in: the level viewer plays
+the music of each level's world, and the sound library is ready for gameplay to
+play hits (see [`docs/AUDIO.md`](docs/AUDIO.md)). Not there yet: the real ball and
+bat, bricks that die and score (so a level cannot be played yet), sails (cloth),
+moving sharks and trains, cannons, shadows and reflections, and model animation.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
-| `engine/` | Platform-neutral runtime: window and input, GPU renderer and shaders, model and image loading, logging, paths |
-| `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, level physics (`PhysicsScene`), camera; the 2D UI (bitmap fonts, string table, menu forms, the menu screens and their flow, the HUD) |
-| `app/` | Executable entry point: the game's front end, the level viewer and the menu form viewer |
+| `engine/` | Platform-neutral runtime: window and input, GPU renderer and shaders, model and image loading, physics (`PhysicsWorld` over Jolt), audio (Ogg Vorbis decoding, mixer, device), logging, paths |
+| `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, level physics (`PhysicsScene`), camera, sound library, save data; the 2D UI (bitmap fonts, string table, menu forms, the menu screens and their flow, the HUD) |
+| `app/` | Executable entry point: the game's front end, the level viewer (with physics and music) and the menu form viewer |
 | `platform/macos/` | App bundle metadata (the only per-platform code so far) |
-| `tools/` | Asset pipeline: `convert_assets.py` runs the converters for levels (`mb3level.py`), meshes (`x2glb.py`), materials, textures, the menus, strings and fonts (`ui.py`) and the level list (`campaign.py`); also the MoleBox dumper and the shader compiler |
-| `docs/` | Architecture, level format, converted asset formats (`ASSET_FORMATS.md`), levels in the physics world (`PHYSICS.md`), how the data was recovered |
+| `scripts/` | `package_macos.sh`: universal build, ad-hoc signing, Developer ID signing and notarization |
+| `tools/` | Asset pipeline: `convert_assets.py` runs the converters for levels (`mb3level.py`), meshes (`x2glb.py`), materials, sounds and music (`sounds.py`), textures, the menus, strings and fonts (`ui.py`) and the level list (`campaign.py`), and on macOS the app icon (`make_icon.py`); also the MoleBox dumper and the shader compiler |
+| `docs/` | Architecture, level format, converted asset formats (`ASSET_FORMATS.md`), levels in the physics world (`PHYSICS.md`), sound and music (`AUDIO.md`), macOS packaging (`MACOS.md`), save files (`SAVES.md`), how the data was recovered |
 | `tests/` | C++ and Python tests; the ones that read the game data are skipped unless `MB3_ASSETS` is set |
 
 ## Build (macOS)
@@ -43,7 +46,22 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 
 SDL3 and nlohmann/json come from Homebrew if installed (`brew install sdl3
 nlohmann-json`) and are fetched by CMake otherwise; stb and cgltf are always
-fetched. Use `-G Xcode` instead of Ninja to get an Xcode project.
+fetched. Use `-G Xcode` instead of Ninja to get an Xcode project. This build uses
+Homebrew's SDL3, so it only runs on a Mac that has it, for its architecture only.
+
+### macOS app, universal binary, packaging
+
+```sh
+scripts/package_macos.sh --universal                  # arm64 + x86_64, SDL3 built from source, ad-hoc signed, in dist/
+scripts/package_macos.sh --bundle-assets              # your own copy: the game's files inside the app, so it runs from the Finder
+DEVELOPER_ID="Developer ID Application: ..." NOTARY_PROFILE=mb3-notary scripts/package_macos.sh --universal
+```
+
+The CMake options behind it are `MB3_UNIVERSAL`, `MB3_FETCH_SDL3`, `MB3_BUNDLE_ASSETS` and
+`MB3_ASSETS_DIR`. [`docs/MACOS.md`](docs/MACOS.md) has the details and the steps for
+signing and notarizing, which need your Apple Developer credentials. An app with the
+game's files inside is for your own use only: they belong to Alawar and Dream Dale and must not be
+redistributed. Packaged builds need macOS 13.3 or later.
 
 The compiled shaders are committed (`engine/shaders/generated/`), so building
 needs no shader tools. After editing a shader, run `python3 tools/build_shaders.py`
@@ -62,6 +80,9 @@ to regenerate them; that is the only thing that needs `glslangValidator` and
        --extracted /path/to/MB3OUT --out assets
    ```
 
+   On macOS this also builds `assets/AppIcon.icns` from the icon in `MagicBall3.exe`; CMake
+   puts it in the app bundle (run `cmake` again if you made it after configuring).
+
 3. Run from the repo root, or point `MB3_ASSETS` at the folder:
 
    ```sh
@@ -72,6 +93,8 @@ to regenerate them; that is the only thing that needs `glslangValidator` and
    $MuggleBall3 --level piratos-ostrovok --hud [--hud-state 3,1529,1,Cannon,Magnit]   # with the in-game HUD (also in screenshots)
    $MuggleBall3 --screenshot out.png --level piratos-ostrovok --simulate 3 --ball -5,0   # a test ball, 3 s of physics
    $MuggleBall3 --check assets/Data/Levels/piratos-po-krugy.json
+   $MuggleBall3 --play-sound pirat_hit           # play a named sound (sounds.xml), wait, exit
+   $MuggleBall3 --play-music Pirates --seconds 20  # one pass of Menu, Village, Pirates, Cowboys or Knights
    $MuggleBall3 --form MainMenu                  # a menu form on its own (any file in assets/Data/Menu, any case)
    $MuggleBall3 --form Options --screenshot out.png [--size 1024x768] [--language Russian]
    ```
@@ -82,7 +105,11 @@ to regenerate them; that is the only thing that needs `glslangValidator` and
    `--shapes`, `--camera`, `--hud`, `--ball`): Left/Right (or PageUp/PageDown) switch
    level, Space shoots a test ball, P pauses the physics, L reloads the level (with
    fresh physics), F1 shows the physics shapes (where the bodies are now), left-drag
-   orbits, right-drag pans, the wheel zooms, R returns to the game camera, Esc quits.
+   orbits, right-drag pans, the wheel zooms, R returns to the game camera, Esc quits;
+   the viewer plays the music of the level's world (a machine without an audio
+   device plays silently), and F11 or Alt+Enter (and Ctrl+Cmd+F on macOS) toggle
+   fullscreen; its window size and fullscreen are remembered between runs (`--size`
+   is not).
    `--screenshot` renders one frame without a window; `--simulate <seconds>` (only
    with `--screenshot`) runs the physics that long first, and `--ball [x,degrees]`
    shoots a test ball at t = 0: from `(x, 1.2, -15)`, that many degrees off straight
@@ -97,6 +124,11 @@ to regenerate them; that is the only thing that needs `glslangValidator` and
    older `tools/mb3level.py` still loads but logs a warning (old files drew wrong
    capsules with F1 / `--shapes`, and have no physics fields):
    run `convert_assets.py` again to refresh it.
+
+   Settings, progress and high scores are saved as JSON in
+   `~/Library/Application Support/MuggleBall3/` (see [`docs/SAVES.md`](docs/SAVES.md)); set
+   `MB3_USER_DATA` to use another folder. An app without bundled assets, started from the
+   Finder, also looks for the converted assets in `assets/` inside that folder.
 
 ## Legal
 

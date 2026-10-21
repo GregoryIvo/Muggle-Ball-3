@@ -1,3 +1,5 @@
+find_package(Threads REQUIRED)
+
 add_executable(mb_tests test_main.cpp)
 target_link_libraries(mb_tests PRIVATE mb_game nlohmann_json::nlohmann_json)
 add_test(NAME mb_tests COMMAND mb_tests)
@@ -60,6 +62,40 @@ target_include_directories(mb_frontend_smoke PRIVATE ${PROJECT_SOURCE_DIR}/app)
 target_link_libraries(mb_frontend_smoke PRIVATE mb_game)
 add_test(NAME mb_frontend_smoke COMMAND mb_frontend_smoke)
 set_tests_properties(mb_frontend_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# File helpers and save data, in a temporary folder.
+add_executable(mb_save_tests test_save.cpp)
+target_link_libraries(mb_save_tests PRIVATE mb_game)
+add_test(NAME mb_save_tests COMMAND mb_save_tests)
+
+# Fullscreen shortcuts and the remembered window size, on SDL's dummy video driver; 77 (skipped) if that cannot make a window.
+add_executable(mb_window_tests test_window.cpp)
+target_link_libraries(mb_window_tests PRIVATE mb_engine)
+add_test(NAME mb_window_tests COMMAND mb_window_tests)
+set_tests_properties(mb_window_tests PROPERTIES SKIP_RETURN_CODE 77)
+
+# Mixer maths on synthetic PCM, rendered offline: no audio device, no game data.
+add_executable(mb_mixer_tests test_mixer.cpp)
+target_link_libraries(mb_mixer_tests PRIVATE mb_engine Threads::Threads)
+add_test(NAME mb_mixer_tests COMMAND mb_mixer_tests)
+
+# SoundLibrary against a recording stand-in for the audio engine.
+add_executable(mb_sound_tests test_sound.cpp)
+target_link_libraries(mb_sound_tests PRIVATE mb_game)
+add_test(NAME mb_sound_tests COMMAND mb_sound_tests)
+
+# Ogg Vorbis decoding and the audio device (SDL's disk driver) against a synthetic sine wave.
+add_executable(mb_audio_tests test_audio.cpp)
+target_link_libraries(mb_audio_tests PRIVATE mb_engine)
+target_compile_definitions(mb_audio_tests PRIVATE "MB3_TEST_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\"")
+add_test(NAME mb_audio_tests COMMAND mb_audio_tests ${CMAKE_BINARY_DIR}/test-output/audio)
+
+# The converted sounds and music from $MB3_ASSETS decode, loop and come out of the audio device
+# undistorted; exits 77 (skipped) otherwise.
+add_executable(mb_audio_smoke audio_smoke.cpp)
+target_link_libraries(mb_audio_smoke PRIVATE mb_game)
+add_test(NAME mb_audio_smoke COMMAND mb_audio_smoke ${CMAKE_BINARY_DIR}/test-output/audio-smoke)
+set_tests_properties(mb_audio_smoke PROPERTIES SKIP_RETURN_CODE 77)
 
 # Rigid bodies over Jolt: conventions, materials, mass, joints, contacts. CPU only.
 add_executable(mb_physics_test physics_test.cpp)
