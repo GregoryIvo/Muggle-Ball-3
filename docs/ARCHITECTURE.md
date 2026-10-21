@@ -9,7 +9,7 @@ Goal: native on macOS first, then other platforms without rewriting the game.
 | Rendering | SDL3 GPU API | Metal on macOS, Vulkan elsewhere. Shaders are GLSL, compiled ahead of time to SPIR-V and MSL by `tools/build_shaders.py` (glslang + SPIRV-Cross); the generated headers are committed, so building needs neither tool. |
 | Physics | Jolt Physics | Replaces PhysX 2.x. Levels store PhysX boxes, spheres, capsules, convexes and joints, all of which map directly. `PhysicsWorld` is the PhysX model over Jolt, `PhysicsScene` runs a level in it; how, and why, is in `PHYSICS.md`. |
 | Audio | stb_vorbis, a software mixer, SDL3 audio | All sounds and music are Ogg Vorbis. See [`AUDIO.md`](AUDIO.md). |
-| XML | Converted offline (planned for objects) | `materials.xml`, the sound and music lists, the menus and the string table are converted to JSON by `tools/materials.py`, `tools/sounds.py` and `tools/ui.py`. |
+| XML | Converted offline | `materials.xml`, the sound and music lists, the menus and the string table, and the object and particle definitions are converted to JSON by `tools/materials.py`, `tools/sounds.py`, `tools/ui.py` and `tools/objects.py` (see `OBJECTS.md`). |
 | Text | The original's pre-rendered font atlases | Five `.crd` + `.dds` atlases of `Bookworm.ttf` and `brushType-SemiBold.TTF` ship with the game and are drawn as sprites (`BitmapFont`). SDL3_ttf stays an option for sizes they lack. |
 | 2D UI | Sprites on the renderer, forms in `game/` | See below. |
 | Meshes | Offline `.x` → binary glTF, loaded with cgltf | 272 meshes, all `xof 0303bin 0032`. See `ASSET_FORMATS.md`. |

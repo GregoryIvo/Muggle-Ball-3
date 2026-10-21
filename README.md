@@ -30,8 +30,8 @@ moving sharks and trains, cannons, shadows and reflections, and model animation.
 | `app/` | Executable entry point: the game's front end, the level viewer (with physics and music) and the menu form viewer |
 | `platform/macos/` | App bundle metadata (the only per-platform code so far) |
 | `scripts/` | `package_macos.sh`: universal build, ad-hoc signing, Developer ID signing and notarization |
-| `tools/` | Asset pipeline: `convert_assets.py` runs the converters for levels (`mb3level.py`), meshes (`x2glb.py`), materials, sounds and music (`sounds.py`), textures, the menus, strings and fonts (`ui.py`) and the level list (`campaign.py`), and on macOS the app icon (`make_icon.py`); also the MoleBox dumper and the shader compiler |
-| `docs/` | Architecture, level format, converted asset formats (`ASSET_FORMATS.md`), levels in the physics world (`PHYSICS.md`), sound and music (`AUDIO.md`), macOS packaging (`MACOS.md`), save files (`SAVES.md`), how the data was recovered |
+| `tools/` | Asset pipeline: `convert_assets.py` runs the converters for levels (`mb3level.py`), meshes (`x2glb.py`), materials, sounds and music (`sounds.py`), textures, the menus, strings and fonts (`ui.py`) and the level list (`campaign.py`), object and particle definitions (`objects.py`), and on macOS the app icon (`make_icon.py`); also the MoleBox dumper and the shader compiler |
+| `docs/` | Architecture, level format, converted asset formats (`ASSET_FORMATS.md`), levels in the physics world (`PHYSICS.md`), sound and music (`AUDIO.md`), macOS packaging (`MACOS.md`), save files (`SAVES.md`), what the object definitions say about gameplay (`OBJECTS.md`), how the data was recovered |
 | `tests/` | C++ and Python tests; the ones that read the game data are skipped unless `MB3_ASSETS` is set |
 
 ## Build (macOS)
