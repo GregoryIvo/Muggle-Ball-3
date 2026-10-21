@@ -199,7 +199,7 @@ void testPhysicsFields() {
 
     check(level.joints.size() == 4, "joint count");
     const mb::Joint& fixed = level.joints[0];
-    check(fixed.type == mb::JointType::Fixed && fixed.actorA == 0 && fixed.actorB == 10, "fixed joint actors");
+    check(fixed.type == mb::NxJointType::Fixed && fixed.actorA == 0 && fixed.actorB == 10, "fixed joint actors");
     check(fixed.localNormal[1].y == 1.0f && fixed.localAxis[1].z == -1.0f && fixed.localAnchor[0].x == 1.5f &&
               fixed.localAnchor[1].z == 6.5f,
           "joint frames");
@@ -207,7 +207,7 @@ void testPhysicsFields() {
     check(fixed.raw == std::vector<std::uint8_t>{0x08, 0x00}, "joint raw bytes");
 
     const mb::Joint& hinge = level.joints[1];
-    check(hinge.type == mb::JointType::Revolute && hinge.maxForce == std::numeric_limits<float>::max(), "unbreakable revolute joint");
+    check(hinge.type == mb::NxJointType::Revolute && hinge.maxForce == std::numeric_limits<float>::max(), "unbreakable revolute joint");
     check(hinge.limitLow.value == -0.5f && hinge.limitLow.restitution == 0.25f && hinge.limitLow.hardness == 0.75f &&
               hinge.limitHigh.value == 1.5f && hinge.limitHigh.restitution == 0.125f && hinge.limitHigh.hardness == 0.5f,
           "revolute limits");
@@ -218,7 +218,7 @@ void testPhysicsFields() {
           "revolute projection and flags");
 
     const mb::Joint& ball = level.joints[2];
-    check(ball.type == mb::JointType::Spherical && ball.swingAxis.y == 1.0f, "spherical joint swing axis");
+    check(ball.type == mb::NxJointType::Spherical && ball.swingAxis.y == 1.0f, "spherical joint swing axis");
     check(ball.limitLow.value == -1.0f && near(ball.limitLow.hardness, 0.9f) && ball.limitHigh.value == 1.0f &&
               near(ball.limitHigh.restitution, 0.2f),
           "spherical twist limit");

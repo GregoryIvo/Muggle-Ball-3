@@ -113,7 +113,7 @@ SpringDesc springDesc(const json& j) {
 // fill the same Joint fields (Level.h says which).
 Joint joint(const json& j) {
     Joint out;
-    out.type = static_cast<JointType>(j.at("type").get<std::uint32_t>());
+    out.type = static_cast<NxJointType>(j.at("type").get<std::uint32_t>());
     out.actorA = j.at("actorA").get<std::uint32_t>();
     out.actorB = j.at("actorB").get<std::uint32_t>();
     const auto perActor = [&j](const char* key, Vec3 (&dst)[2]) {

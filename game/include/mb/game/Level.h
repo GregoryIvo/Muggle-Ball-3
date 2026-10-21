@@ -84,7 +84,7 @@ struct Actor {
 };
 
 // PhysX 2.x NxJointType numbering. The shipped levels use Revolute, Spherical and Fixed.
-enum class JointType : std::uint32_t {
+enum class NxJointType : std::uint32_t {
     Prismatic = 0, Revolute = 1, Cylindrical = 2, Spherical = 3, PointOnLine = 4,
     PointInPlane = 5, Distance = 6, Pulley = 7, Fixed = 8, D6 = 9,
 };
@@ -101,7 +101,7 @@ struct SpringDesc {
 
 // One serialized NxJointDesc (plus its NxRevoluteJointDesc / NxSphericalJointDesc part).
 struct Joint {
-    JointType type = JointType::Fixed;
+    NxJointType type = NxJointType::Fixed;
     // Which actors it connects, as the file stores them; docs/LEVEL_FORMAT.md says how
     // they map to actors (and which value means the world).
     std::uint32_t actorA = 0, actorB = 0;
