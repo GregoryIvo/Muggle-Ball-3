@@ -7,6 +7,8 @@
 #include "line_vert.h"
 #include "mesh_frag.h"
 #include "mesh_vert.h"
+#include "sprite_frag.h"
+#include "sprite_vert.h"
 
 #include <cstddef>
 #include <format>
@@ -125,6 +127,19 @@ PipelineKey PipelineKey::forMaterial(SDL_GPUTextureFormat colorFormat, const Mat
     return key;
 }
 
+PipelineKey PipelineKey::forSprites(SDL_GPUTextureFormat colorFormat) {
+    PipelineKey key;
+    key.colorFormat = colorFormat;
+    key.blend = true;
+    key.srcBlend = BlendFactor::SrcAlpha;
+    key.dstBlend = BlendFactor::InvSrcAlpha;
+    key.cull = CullMode::None;
+    key.depthWrite = false;
+    key.depthTest = false;
+    key.sprites = true;
+    return key;
+}
+
 PipelineKey PipelineKey::forLines(SDL_GPUTextureFormat colorFormat) {
     PipelineKey key;
     key.colorFormat = colorFormat;
@@ -138,7 +153,8 @@ std::uint64_t PipelineKey::pack() const {
     // The blend factors are D3DBLEND numbers, 1 to 10, which fit four bits.
     const std::uint64_t factors =
         blend ? (static_cast<std::uint64_t>(srcBlend) << 4) | static_cast<std::uint64_t>(dstBlend) : 0;
-    return (static_cast<std::uint64_t>(colorFormat) << 16) | (static_cast<std::uint64_t>(lines) << 13) |
+    return (static_cast<std::uint64_t>(colorFormat) << 16) | (static_cast<std::uint64_t>(sprites) << 14) |
+           (static_cast<std::uint64_t>(lines) << 13) |
            (static_cast<std::uint64_t>(depthTest) << 12) | (static_cast<std::uint64_t>(depthWrite) << 11) |
            (static_cast<std::uint64_t>(cull) << 9) | (static_cast<std::uint64_t>(blend) << 8) | factors;
 }
@@ -158,6 +174,14 @@ PipelineCache::PipelineCache(SDL_GPUDevice* device, SDL_GPUTextureFormat depthFo
         lineFragment_ = createShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT,
                                      {shaders::line_frag_spirv, shaders::line_frag_msl, shaders::line_frag_msl_entry},
                                      0, 0, "line.frag");
+        spriteVertex_ = createShader(device, SDL_GPU_SHADERSTAGE_VERTEX,
+                                     {shaders::sprite_vert_spirv, shaders::sprite_vert_msl,
+                                      shaders::sprite_vert_msl_entry},
+                                     0, 1, "sprite.vert");
+        spriteFragment_ = createShader(device, SDL_GPU_SHADERSTAGE_FRAGMENT,
+                                       {shaders::sprite_frag_spirv, shaders::sprite_frag_msl,
+                                        shaders::sprite_frag_msl_entry},
+                                       1, 0, "sprite.frag");
     } catch (...) {
         releaseShaders();
         throw;
@@ -174,12 +198,13 @@ PipelineCache::~PipelineCache() {
 }
 
 void PipelineCache::releaseShaders() {
-    for (SDL_GPUShader* shader : {meshVertex_, meshFragment_, lineVertex_, lineFragment_}) {
+    for (SDL_GPUShader* shader :
+         {meshVertex_, meshFragment_, lineVertex_, lineFragment_, spriteVertex_, spriteFragment_}) {
         if (shader) {
             SDL_ReleaseGPUShader(device_, shader);
         }
     }
-    meshVertex_ = meshFragment_ = lineVertex_ = lineFragment_ = nullptr;
+    meshVertex_ = meshFragment_ = lineVertex_ = lineFragment_ = spriteVertex_ = spriteFragment_ = nullptr;
 }
 
 SDL_GPUGraphicsPipeline* PipelineCache::get(const PipelineKey& key) {
@@ -193,15 +218,29 @@ SDL_GPUGraphicsPipeline* PipelineCache::get(const PipelineKey& key) {
 SDL_GPUGraphicsPipeline* PipelineCache::create(const PipelineKey& key) {
     SDL_GPUVertexBufferDescription buffer{};
     buffer.slot = 0;
-    buffer.pitch = key.lines ? sizeof(LineVertex) : sizeof(Vertex);
     buffer.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
 
     // Locations match the shaders' `layout(location = n) in` declarations.
     SDL_GPUVertexAttribute attributes[3]{};
+    SDL_GPUShader* vertexShader = meshVertex_;
+    SDL_GPUShader* fragmentShader = meshFragment_;
+    Uint32 attributeCount = 3;
     if (key.lines) {
+        buffer.pitch = sizeof(LineVertex);
         attributes[0] = {0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(LineVertex, position)};
         attributes[1] = {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(LineVertex, color)};
+        vertexShader = lineVertex_;
+        fragmentShader = lineFragment_;
+        attributeCount = 2;
+    } else if (key.sprites) {
+        buffer.pitch = sizeof(SpriteVertex);
+        attributes[0] = {0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(SpriteVertex, position)};
+        attributes[1] = {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(SpriteVertex, uv)};
+        attributes[2] = {2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(SpriteVertex, color)};
+        vertexShader = spriteVertex_;
+        fragmentShader = spriteFragment_;
     } else {
+        buffer.pitch = sizeof(Vertex);
         attributes[0] = {0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, position)};
         attributes[1] = {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, normal)};
         attributes[2] = {2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, uv)};
@@ -212,12 +251,12 @@ SDL_GPUGraphicsPipeline* PipelineCache::create(const PipelineKey& key) {
     colorTarget.blend_state = blendState(key);
 
     SDL_GPUGraphicsPipelineCreateInfo info{};
-    info.vertex_shader = key.lines ? lineVertex_ : meshVertex_;
-    info.fragment_shader = key.lines ? lineFragment_ : meshFragment_;
+    info.vertex_shader = vertexShader;
+    info.fragment_shader = fragmentShader;
     info.vertex_input_state.vertex_buffer_descriptions = &buffer;
     info.vertex_input_state.num_vertex_buffers = 1;
     info.vertex_input_state.vertex_attributes = attributes;
-    info.vertex_input_state.num_vertex_attributes = key.lines ? 2 : 3;
+    info.vertex_input_state.num_vertex_attributes = attributeCount;
     info.primitive_type = key.lines ? SDL_GPU_PRIMITIVETYPE_LINELIST : SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
     info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     info.rasterizer_state.cull_mode = toSdl(key.cull);

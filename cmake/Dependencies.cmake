@@ -5,11 +5,18 @@ include(FetchContent)
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_STATIC ON CACHE BOOL "" FORCE)
 set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+# An installed SDL3 is used unless MB3_FETCH_SDL3 asks for the pinned tag, built from source and linked
+# statically (scripts/package_macos.sh does, so the app needs nothing from /opt/homebrew).
+set(mb3_sdl3_find FIND_PACKAGE_ARGS 3.2 CONFIG)
+if(MB3_FETCH_SDL3)
+  set(mb3_sdl3_find "")
+  message(STATUS "SDL3: building release-3.2.10 from source, linked statically")
+endif()
 FetchContent_Declare(SDL3
   GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
   GIT_TAG release-3.2.10
   GIT_SHALLOW TRUE
-  FIND_PACKAGE_ARGS 3.2 CONFIG)
+  ${mb3_sdl3_find})
 
 # JSON for the converted level, material and mesh files.
 set(JSON_BuildTests OFF CACHE INTERNAL "")
@@ -30,7 +37,29 @@ FetchContent_Declare(cgltf
   GIT_TAG v1.15
   GIT_SHALLOW TRUE)
 
-FetchContent_MakeAvailable(SDL3 nlohmann_json stb cgltf)
+# Jolt Physics: rigid bodies, standing in for the original's PhysX 2.x.
+# OVERRIDE_CXX_FLAGS would rewrite the global compiler flags (no RTTI, no exceptions).
+set(OVERRIDE_CXX_FLAGS OFF CACHE BOOL "" FORCE)
+set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
+set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
+set(CPP_RTTI_ENABLED ON CACHE BOOL "" FORCE)
+set(CPP_EXCEPTIONS_ENABLED ON CACHE BOOL "" FORCE)
+set(ENABLE_OBJECT_STREAM OFF CACHE BOOL "" FORCE)
+set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(DEBUG_RENDERER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
+set(PROFILER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
+# The GPU compute back ends (hair, cloth) are of no use to a rigid body game.
+set(JPH_USE_DX12 OFF CACHE BOOL "" FORCE)
+set(JPH_USE_VK OFF CACHE BOOL "" FORCE)
+set(JPH_USE_MTL OFF CACHE BOOL "" FORCE)
+set(JPH_USE_CPU_COMPUTE OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(JoltPhysics
+  GIT_REPOSITORY https://github.com/jrouwe/JoltPhysics.git
+  GIT_TAG v5.6.0
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR Build)
+
+FetchContent_MakeAvailable(SDL3 nlohmann_json stb cgltf JoltPhysics)
 
 # stb and cgltf are header-only and ship no CMake project of their own.
 add_library(stb INTERFACE)

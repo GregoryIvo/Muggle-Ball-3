@@ -45,11 +45,19 @@ struct OffscreenTarget {
     Uint32 height = 0;
 };
 
-// Growable GPU vertex buffer plus transfer buffer that debug lines are streamed through each frame.
-struct LineBuffer {
+// Growable GPU vertex buffer plus transfer buffer that per-frame vertices (debug lines, sprites) are streamed
+// through.
+struct StreamBuffer {
     SDL_GPUBuffer* vertices = nullptr;
     SDL_GPUTransferBuffer* transfer = nullptr;
-    Uint32 capacity = 0;  // in vertices
+    Uint32 capacity = 0;  // in bytes
+};
+
+// Consecutive sprites that share a texture, drawn with one call.
+struct SpriteRun {
+    SDL_GPUTexture* texture = nullptr;
+    Uint32 firstVertex = 0;
+    Uint32 vertexCount = 0;
 };
 
 // A draw item after its handles are resolved, ready to sort.
@@ -83,10 +91,12 @@ struct Renderer::Impl {
 
     SizedTexture windowDepth;
     OffscreenTarget offscreen;
-    LineBuffer lineBuffer;
+    StreamBuffer lineBuffer;
+    StreamBuffer spriteBuffer;
 
     std::vector<PendingDraw> opaqueDraws;   // kept between frames to reuse their storage
     std::vector<PendingDraw> blendedDraws;
+    std::vector<SpriteRun> spriteRuns;
     bool warnedMissingResource = false;
     bool swapchainFailed = false;
 
@@ -106,17 +116,25 @@ struct Renderer::Impl {
     bool ensureOffscreen(Uint32 width, Uint32 height);
     void releaseOffscreen();
 
-    void renderWindow(const FrameParams& frame, std::span<const DrawItem> items, std::span<const DebugLine> lines);
+    void renderWindow(const FrameParams& frame, std::span<const DrawItem> items, std::span<const DebugLine> lines,
+                      std::span<const Sprite> sprites);
     Image renderOffscreen(int width, int height, const FrameParams& frame, std::span<const DrawItem> items,
-                          std::span<const DebugLine> lines);
+                          std::span<const DebugLine> lines, std::span<const Sprite> sprites);
 
     void collectDraws(SDL_GPUTextureFormat colorFormat, const FrameParams& frame, std::span<const DrawItem> items);
+    void releaseStream(StreamBuffer& buffer);
+    void* mapStream(StreamBuffer& buffer, std::size_t bytes, const char* what);
+    void uploadStream(SDL_GPUCommandBuffer* cmd, StreamBuffer& buffer, Uint32 bytes);
     Uint32 uploadLines(SDL_GPUCommandBuffer* cmd, std::span<const DebugLine> lines);
+    Uint32 uploadSprites(SDL_GPUCommandBuffer* cmd, std::span<const Sprite> sprites);
     void drawFrame(SDL_GPUCommandBuffer* cmd, SDL_GPUTexture* color, SDL_GPUTextureFormat colorFormat,
                    SDL_GPUTexture* depth, Uint32 width, Uint32 height, const FrameParams& frame,
-                   std::span<const DrawItem> items, std::span<const DebugLine> lines);
+                   std::span<const DrawItem> items, std::span<const DebugLine> lines,
+                   std::span<const Sprite> sprites);
     void drawMeshes(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, const Mat4& viewProj,
                     const FrameParams& frame);
+    void drawSprites(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, SDL_GPUTextureFormat colorFormat,
+                     Uint32 width, Uint32 height);
     void warnMissing(const char* what, std::uint32_t handle);
 };
 

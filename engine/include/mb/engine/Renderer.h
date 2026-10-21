@@ -97,6 +97,28 @@ struct DebugLine {
     Color color{0, 1, 0, 1};
 };
 
+// A screen-space textured quad for 2D overlays (menus, text, the HUD).
+//
+// Coordinates are pixels of the target the frame is drawn into: the window's drawable area
+// (Renderer::drawableSize) or the image of renderToImage. The origin is the top-left corner,
+// +x runs right and +y runs down. Sprites are drawn after the 3D scene and the debug lines, in
+// the order they are submitted (later ones on top), alpha-blended (straight alpha, as the
+// meshes) and without any depth test, so they work with or without a scene.
+struct Sprite {
+    float x = 0;       // top-left corner of the unrotated quad
+    float y = 0;
+    float width = 0;
+    float height = 0;
+    TextureHandle texture = 0;  // 0 draws the tint as a solid colour
+    // Texture coordinates of the quad's top-left and bottom-right corners; (0, 0) is the texture's
+    // top-left pixel, as in Direct3D. Swapping two values mirrors the image; values outside
+    // 0..1 repeat it (the sampler wraps), which is how tiled and scrolling images are drawn.
+    Vec2 uv0{0, 0};
+    Vec2 uv1{1, 1};
+    Color tint{1, 1, 1, 1};  // multiplied into every texel, alpha included
+    float rotation = 0;      // radians, clockwise on screen, about the quad's centre
+};
+
 // The SDL3 GPU API underneath picks Metal on macOS and Vulkan or Direct3D 12
 // elsewhere, so nothing above this layer is platform-specific. Shaders are
 // GLSL compiled ahead of time (tools/build_shaders.py) to SPIR-V and MSL.
@@ -122,13 +144,15 @@ public:
     void drawableSize(int& width, int& height) const;
 
     // Draws one frame into the window's swapchain and presents it. Opaque items
-    // draw first (by layer), then blended items back to front, then debug lines.
+    // draw first (by layer), then blended items back to front, then debug lines,
+    // then the sprites in submission order. With no items the frame is just the
+    // clear colour and the sprites, which is how the menus draw.
     void renderToWindow(const FrameParams& frame, std::span<const DrawItem> items,
-                        std::span<const DebugLine> lines = {});
+                        std::span<const DebugLine> lines = {}, std::span<const Sprite> sprites = {});
 
     // Draws one frame into an offscreen target of the given size and reads it back.
     Image renderToImage(int width, int height, const FrameParams& frame, std::span<const DrawItem> items,
-                        std::span<const DebugLine> lines = {});
+                        std::span<const DebugLine> lines = {}, std::span<const Sprite> sprites = {});
 
     struct Impl;
 

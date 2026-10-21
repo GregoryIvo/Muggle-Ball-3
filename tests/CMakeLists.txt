@@ -1,3 +1,5 @@
+find_package(Threads REQUIRED)
+
 add_executable(mb_tests test_main.cpp)
 target_link_libraries(mb_tests PRIVATE mb_game nlohmann_json::nlohmann_json)
 add_test(NAME mb_tests COMMAND mb_tests)
@@ -28,3 +30,85 @@ add_executable(mb_scene_smoke scene_smoke.cpp)
 target_link_libraries(mb_scene_smoke PRIVATE mb_game)
 add_test(NAME mb_scene_smoke COMMAND mb_scene_smoke)
 set_tests_properties(mb_scene_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# The 2D UI foundation: layout, sprite sheets, string table, bitmap fonts and the form model. Needs no GPU or data.
+add_executable(mb_ui_tests test_ui.cpp)
+target_link_libraries(mb_ui_tests PRIVATE mb_game nlohmann_json::nlohmann_json)
+add_test(NAME mb_ui_tests COMMAND mb_ui_tests)
+
+# Loads every converted form, font and string against the real game data when MB3_ASSETS points at it (and draws
+# them when there is a GPU); exits 77 (skipped) otherwise.
+add_executable(mb_ui_smoke ui_smoke.cpp)
+target_link_libraries(mb_ui_smoke PRIVATE mb_game)
+add_test(NAME mb_ui_smoke COMMAND mb_ui_smoke)
+set_tests_properties(mb_ui_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# The menu runtime and the game flow, driven by synthetic pointer events and keys. Needs no GPU or data.
+add_executable(mb_menu_tests test_menu.cpp)
+target_link_libraries(mb_menu_tests PRIVATE mb_game nlohmann_json::nlohmann_json)
+add_test(NAME mb_menu_tests COMMAND mb_menu_tests)
+
+# The menus and the HUD against the real game data when MB3_ASSETS points at it (and with a GPU, their sprites); exits 77 (skipped)
+# otherwise.
+add_executable(mb_menu_smoke menu_smoke.cpp)
+target_link_libraries(mb_menu_smoke PRIVATE mb_game)
+add_test(NAME mb_menu_smoke COMMAND mb_menu_smoke)
+set_tests_properties(mb_menu_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# The whole front end in a real window, driven by events pushed from a second thread, with the real game data. Exits 77
+# (skipped) without MB3_ASSETS, a window system or a GPU.
+add_executable(mb_frontend_smoke frontend_smoke.cpp ${PROJECT_SOURCE_DIR}/app/FrontEnd.cpp)
+target_include_directories(mb_frontend_smoke PRIVATE ${PROJECT_SOURCE_DIR}/app)
+target_link_libraries(mb_frontend_smoke PRIVATE mb_game)
+add_test(NAME mb_frontend_smoke COMMAND mb_frontend_smoke)
+set_tests_properties(mb_frontend_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# File helpers and save data, in a temporary folder.
+add_executable(mb_save_tests test_save.cpp)
+target_link_libraries(mb_save_tests PRIVATE mb_game)
+add_test(NAME mb_save_tests COMMAND mb_save_tests)
+
+# Fullscreen shortcuts and the remembered window size, on SDL's dummy video driver; 77 (skipped) if that cannot make a window.
+add_executable(mb_window_tests test_window.cpp)
+target_link_libraries(mb_window_tests PRIVATE mb_engine)
+add_test(NAME mb_window_tests COMMAND mb_window_tests)
+set_tests_properties(mb_window_tests PROPERTIES SKIP_RETURN_CODE 77)
+
+# Mixer maths on synthetic PCM, rendered offline: no audio device, no game data.
+add_executable(mb_mixer_tests test_mixer.cpp)
+target_link_libraries(mb_mixer_tests PRIVATE mb_engine Threads::Threads)
+add_test(NAME mb_mixer_tests COMMAND mb_mixer_tests)
+
+# SoundLibrary against a recording stand-in for the audio engine.
+add_executable(mb_sound_tests test_sound.cpp)
+target_link_libraries(mb_sound_tests PRIVATE mb_game)
+add_test(NAME mb_sound_tests COMMAND mb_sound_tests)
+
+# Ogg Vorbis decoding and the audio device (SDL's disk driver) against a synthetic sine wave.
+add_executable(mb_audio_tests test_audio.cpp)
+target_link_libraries(mb_audio_tests PRIVATE mb_engine)
+target_compile_definitions(mb_audio_tests PRIVATE "MB3_TEST_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\"")
+add_test(NAME mb_audio_tests COMMAND mb_audio_tests ${CMAKE_BINARY_DIR}/test-output/audio)
+
+# The converted sounds and music from $MB3_ASSETS decode, loop and come out of the audio device
+# undistorted; exits 77 (skipped) otherwise.
+add_executable(mb_audio_smoke audio_smoke.cpp)
+target_link_libraries(mb_audio_smoke PRIVATE mb_game)
+add_test(NAME mb_audio_smoke COMMAND mb_audio_smoke ${CMAKE_BINARY_DIR}/test-output/audio-smoke)
+set_tests_properties(mb_audio_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# Rigid bodies over Jolt: conventions, materials, mass, joints, contacts. CPU only.
+add_executable(mb_physics_test physics_test.cpp)
+target_link_libraries(mb_physics_test PRIVATE mb_engine)
+add_test(NAME mb_physics_test COMMAND mb_physics_test)
+
+# Level -> physics mapping and levels running in a PhysicsScene, with made-up levels. CPU only.
+add_executable(mb_physics_scene_tests test_physics_scene.cpp)
+target_link_libraries(mb_physics_scene_tests PRIVATE mb_game)
+add_test(NAME mb_physics_scene_tests COMMAND mb_physics_scene_tests)
+
+# Runs all converted levels in the physics world when MB3_ASSETS points at the data; exits 77 (skipped) otherwise.
+add_executable(mb_physics_smoke physics_smoke.cpp)
+target_link_libraries(mb_physics_smoke PRIVATE mb_game)
+add_test(NAME mb_physics_smoke COMMAND mb_physics_smoke)
+set_tests_properties(mb_physics_smoke PROPERTIES SKIP_RETURN_CODE 77)
