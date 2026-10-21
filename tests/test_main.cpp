@@ -28,7 +28,9 @@ constexpr const char* kLevel = R"({
     {"pose": {"rotation": [1,0,0,0,1,0,0,0,1], "position": [4.7, 0.98, 3.29]},
      "body": "00",
      "shapes": [{"type": "sphere", "localPose": {"rotation": [1,0,0,0,1,0,0,0,1], "position": [0,0,0]},
-                 "radius": 1.5}],
+                 "radius": 1.5},
+                {"type": "capsule", "localPose": {"rotation": [1,0,0,0,1,0,0,0,1], "position": [0,0,0]},
+                 "radiusHeight": [0.9, 9.8]}],
      "object": {"type": "cloth", "id": 7, "flags": 0,
                 "cloth": {"width": 2, "height": 1, "params": [0,0,0], "segments": [
                   {"pose": {"rotation": [1,0,0,0,1,0,0,0,1], "position": [1,0,0]}, "shapes": [],
@@ -49,6 +51,9 @@ int main() {
     check(level.actors[0].object->extra == std::vector<std::uint8_t>{0x03, 0xff}, "extra bytes");
     check(!level.actors[0].dynamic && level.actors[1].dynamic, "dynamic flag");
     check(level.actors[1].shapes.at(0).radius == 1.5f, "sphere radius");
+    check(level.actors[1].shapes.at(1).type == mb::ShapeType::Capsule && std::fabs(level.actors[1].shapes.at(1).radius - 0.9f) < 1e-5f &&
+              std::fabs(level.actors[1].shapes.at(1).height - 9.8f) < 1e-5f,
+          "capsule radius and height");
     check(!level.actors[2].object, "actor without object");
     check(level.countObjects(mb::ObjectType::Brick) == 1, "brick nested in cloth is counted");
     check(level.countObjects(mb::ObjectType::Cloth) == 1, "cloth counted");

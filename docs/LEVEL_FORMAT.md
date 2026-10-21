@@ -34,8 +34,11 @@ object       only if userData != 0, see Game object
 Shape type, then descriptor size (sub_46cd10): 0 plane 0x68, 1 sphere 0x5C,
 2 box 0x64, 3 capsule 0x64, 4 convex 0x60 + string, 5 mesh 0x60 + string.
 Each descriptor starts with its type again, then the local pose (NxMat34).
-Box half-extents are the last 12 bytes, sphere radius the last 4, capsule
-radius and height the last 8.
+Box half-extents are the last 12 bytes, sphere radius the last 4. A capsule
+ends with radius, height and a u32 that is 0 in every shipped level (flags),
+so its radius and height are the 8 bytes before the last 4. The capsule runs
+along the shape's local +Y; `height` is the distance between the centres of
+its two caps, so it spans y in [-height/2 - radius, height/2 + radius].
 
 `string` = u32 length + bytes (no terminator).
 
