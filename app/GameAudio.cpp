@@ -45,6 +45,27 @@ void GameAudio::levelShown(std::string_view levelName) {
     }
 }
 
+void GameAudio::menuShown() {
+    if (sounds_) {
+        sounds_->playMusic("Menu");
+    }
+}
+
+void GameAudio::playSound(std::string_view name) {
+    if (sounds_) {
+        sounds_->play(name);
+    }
+}
+
+void GameAudio::setVolumes(float music, float sound) {
+    audio_.mixer().setMusicVolume(music);
+    audio_.mixer().setSfxVolume(sound);
+}
+
+void GameAudio::setPaused(bool paused) {
+    audio_.mixer().setPaused(paused);
+}
+
 void GameAudio::update() {
     const Clock::time_point now = Clock::now();
     const double elapsed = std::chrono::duration<double>(now - last_).count();

@@ -30,7 +30,7 @@ std::vector<mb::VideoMode> videoModes(const mb::Window& window) {
     return modes;
 }
 
-void applyVideo(mb::Window& window, const mb::MenuSettings& settings) {
+void applyVideo(mb::Window& window, const mb::Settings& settings) {
     window.setFullscreen(settings.fullscreen);
     if (!settings.fullscreen) {
         window.setSize(settings.windowWidth, settings.windowHeight);
@@ -39,17 +39,23 @@ void applyVideo(mb::Window& window, const mb::MenuSettings& settings) {
 
 class FrontEnd {
 public:
-    FrontEnd(mb::Window& window, mb::Renderer& renderer, LevelSession& session, const FrontEndOptions& options)
+    FrontEnd(mb::Window& window, mb::Renderer& renderer, LevelSession& session, mb::SaveData& save,
+             const FrontEndOptions& options)
         : window_(window),
           renderer_(renderer),
           session_(session),
+          save_(save),
+          events_(options.events),
           assets_(renderer, mb::assetRoot(), options.language),
           campaign_(mb::Campaign::load(assets_.root() / "Data" / "xml" / "levels.json")),
-          menu_([this](std::string_view name) { return assets_.loadForm(name); }, campaign_, hooksFor(window, options.hooks)),
+          menu_([this](std::string_view name) { return assets_.loadForm(name); }, campaign_, save, hooksFor(window, options.hooks)),
           flow_(menu_, campaign_) {
         menu_.setVideoModes(videoModes(window));
-        if (options.hooks.loadProfile) {
-            applyVideo(window, menu_.settings());  // the window the player chose last time
+        menu_.setLevelsLocked(options.lockLevels);
+        window.windowedSize(seenWidth_, seenHeight_);
+        seenFullscreen_ = window.fullscreen();
+        if (options.hooks.settingsChanged) {
+            options.hooks.settingsChanged(save.settings);  // whoever listens (the volume) starts from the saved settings
         }
         menu_.open("MainMenu");
     }
@@ -60,12 +66,16 @@ public:
         Clock::time_point last = Clock::now();
         mb::InputEvents input;
         bool textInput = false;
+        if (events_.menuShown) {
+            events_.menuShown();
+        }
         while (window_.pollEvents(input)) {
             const Clock::time_point now = Clock::now();
             // A long frame (a level loading) must not make the next one jump through a fade.
             const double seconds = std::min(std::chrono::duration<double>(now - last).count(), 0.1);
             last = now;
 
+            followWindow();
             int width = 0, height = 0;
             renderer_.drawableSize(width, height);
             const mb::GameFlow::Step step =
@@ -76,6 +86,7 @@ public:
             if (step.loadLevel) {
                 loadLevel(*step.loadLevel);
             }
+            announceMode();
 
             const bool wantsText = flow_.mode() == mb::GameFlow::Mode::Menu && menu_.wantsText();
             if (wantsText != textInput) {
@@ -86,6 +97,9 @@ public:
                 session_.update(input, seconds, flow_.hud());
             }
             draw(width, height);
+            if (events_.frame) {
+                events_.frame();
+            }
         }
         return 0;
     }
@@ -93,13 +107,60 @@ public:
 private:
     // The menu hooks as set by the caller, plus the window ones.
     static mb::MenuHooks hooksFor(mb::Window& window, mb::MenuHooks hooks) {
-        hooks.applyVideo = [&window, caller = std::move(hooks.applyVideo)](const mb::MenuSettings& settings) {
+        hooks.applyVideo = [&window, caller = std::move(hooks.applyVideo)](const mb::Settings& settings) {
             applyVideo(window, settings);
             if (caller) {
                 caller(settings);
             }
         };
         return hooks;
+    }
+
+    // The player may have resized the window or gone fullscreen (the window's edge, F11) since the last frame: the
+    // settings follow, so that Options shows the window as it is and the save at exit keeps it. Only what changed is
+    // taken over (a size given with --size is not the player's choice), and not while Options is up, which holds
+    // choices not yet applied.
+    void followWindow() {
+        if (menu_.formName() == "options") {
+            return;
+        }
+        const bool fullscreen = window_.fullscreen();
+        int width = 0, height = 0;
+        window_.windowedSize(width, height);
+        if (fullscreen != seenFullscreen_) {
+            save_.settings.fullscreen = fullscreen;
+        }
+        if (width != seenWidth_ || height != seenHeight_) {
+            save_.settings.windowWidth = width;
+            save_.settings.windowHeight = height;
+        }
+        seenFullscreen_ = fullscreen;
+        seenWidth_ = width;
+        seenHeight_ = height;
+    }
+
+    // Tells the events where the flow has gone since the last frame.
+    void announceMode() {
+        using Mode = mb::GameFlow::Mode;
+        const Mode before = mode_, now = flow_.mode();
+        mode_ = now;
+        if (now == before) {
+            return;
+        }
+        if (before == Mode::Paused && events_.paused) {
+            events_.paused(false);  // first, so that the sounds of what comes next are not held back
+        }
+        if (now == Mode::Paused && events_.paused) {
+            events_.paused(true);
+        }
+        if (before == Mode::Loading && now == Mode::Playing && events_.levelStarted) {
+            if (const std::string* name = campaign_.levelName(flow_.level())) {
+                events_.levelStarted(*name);
+            }
+        }
+        if (now == Mode::Menu && events_.menuShown) {
+            events_.menuShown();
+        }
     }
 
     void loadLevel(int index) {
@@ -142,16 +203,22 @@ private:
     mb::Window& window_;
     mb::Renderer& renderer_;
     LevelSession& session_;
+    mb::SaveData& save_;
+    FrontEndEvents events_;
     mb::UiAssets assets_;
     mb::Campaign campaign_;
     mb::Menu menu_;
     mb::GameFlow flow_;
+    mb::GameFlow::Mode mode_ = mb::GameFlow::Mode::Menu;  // as of the last announceMode()
+    bool seenFullscreen_ = false;                         // the window as of the last followWindow()
+    int seenWidth_ = 0, seenHeight_ = 0;
 };
 
 }  // namespace
 
-int runFrontEnd(mb::Window& window, mb::Renderer& renderer, LevelSession& session, const FrontEndOptions& options) {
-    return FrontEnd(window, renderer, session, options).run();
+int runFrontEnd(mb::Window& window, mb::Renderer& renderer, LevelSession& session, mb::SaveData& save,
+                const FrontEndOptions& options) {
+    return FrontEnd(window, renderer, session, save, options).run();
 }
 
 mb::UiInput toUiInput(const mb::InputEvents& input) {

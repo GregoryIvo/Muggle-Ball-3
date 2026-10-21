@@ -14,7 +14,7 @@ Goal: native on macOS first, then other platforms without rewriting the game.
 | 2D UI | Sprites on the renderer, forms in `game/` | See below. |
 | Meshes | Offline `.x` → binary glTF, loaded with cgltf | 272 meshes, all `xof 0303bin 0032`. See `ASSET_FORMATS.md`. |
 | Images | stb_image | JPEG and PNG; the 25 DDS files are converted to PNG offline. |
-| Saves | JSON in the per-user folder | Settings, progress and high scores in three small versioned files, written atomically (`SAVES.md`). |
+| Saves | JSON in the per-user folder | Settings, progress and high scores in three small versioned files, written atomically (`SAVES.md`). `SaveData` is the only model of them: the menus work on it directly. |
 | macOS app | CMake bundle, `scripts/package_macos.sh` | Universal binary, icon, optional bundled assets, signing and notarization (`MACOS.md`). |
 
 ## 2D UI
@@ -29,10 +29,10 @@ Menus, text and (later) the HUD are drawn as screen-space quads after the 3D sce
 | `game/` `UiForm` | A menu form (`Data/Menu/*.json`): a tree of widgets with their data, state and pixel rectangles; maps the original's 4:3 layout onto any target (`UiLayout`, pillarboxed or letterboxed); hit testing and pointer events (hover, press, click). |
 | `game/` `UiAssets` | Finds and uploads the images, fonts and strings below the assets folder; loads forms by name. |
 | `game/` `UiDraw` | `drawForm`: a form to sprites, with each widget's state frame, shadows, hover growth, press offset, text and fade; the scrolling sky and a text field's caret. |
-| `game/` `Menu` | The screens: owns the current form and the background behind it, turns pointer samples and keys into the original's behaviour (below), keeps the `Profile` (settings, high scores, unlocked levels). No GPU. |
+| `game/` `Menu` | The screens: owns the current form and the background behind it, turns pointer samples and keys into the original's behaviour (below), shows and changes the `SaveData` it is given (settings, progress, high scores) and writes it. No GPU. |
 | `game/` `GameFlow` | Where the player is: menu, loading, playing, paused. No GPU or window, so the whole flow is tested. |
 | `game/` `Hud`, `Campaign` | The in-game overlay and the pause screen; the level list in stages (`Data/xml/levels.json`). |
-| `app/` `FrontEnd` | The game as the player meets it: the window loop that drives `GameFlow`, `LevelSession` (what the scene code provides), and `HudOverlay` for `--hud`. |
+| `app/` `FrontEnd` | The game as the player meets it: the window loop that drives `GameFlow`, `LevelSession` (what the scene code provides), `FrontEndEvents` (menus, level start, pause: the music and the pause of the sound follow them, `FrontEndAudio`), and `HudOverlay` for `--hud`. |
 
 Below the foundation, one form on its own (this is the model `Menu` is built on):
 
@@ -63,7 +63,7 @@ Window::pollEvents ──InputEvents──► toUiInput ──UiInput──► G
 - `Window` reports every mouse move and left-button change with its position (`InputEvents::pointer`), so a click made
   inside one frame is still a press and a release; keys (Escape is one, once `setEscapeQuits(false)`), typed text
   (`setTextInput`), and the window's size, fullscreen state and display size.
-- `Menu` does the work of the screens. It is given a form loader, the `Campaign` and `MenuHooks`, and each frame
+- `Menu` does the work of the screens. It is given a form loader, the `Campaign`, the `SaveData` and `MenuHooks`, and each frame
   `update(input, dt, layout, imageSizes)` returns `StartLevel(index)`, `Quit` or nothing.
 - `GameFlow` adds the level: choosing one shows the Loading form for a frame, then asks the app to build the scene
   (`Step::loadLevel`; `loaded(ok)` answers), then plays with the HUD. Escape pauses; Escape again goes to the main menu,
@@ -77,11 +77,11 @@ checks that):
 | Form | Behaviour |
 |---|---|
 | `MainMenu` | Start Game, Info, Options, High Scores open their forms (the buttons' `Navigate` data; the button's name is the form's). Exit quits. |
-| `selectstage` | The four stage buttons open `stagepiratos`, `stagefarm`, `stagecowboys`, `stageknights`; Quick Start starts level 0; a stage with no unlocked level is disabled. The three bats are the player's choice: the one in use shows its "chosen" frame (the data's `disabled="yes"` on the red one is that), a click on another picks it. |
-| `stage*` | One button per level, named by campaign index; a click starts it. Levels past `Profile::unlockedLevels` show the locked frame and do nothing. Quick Start starts the stage's first level. The bats are repeated. Select Stage goes back. |
-| `Options` | Music and sound volume sliders (0 to 100 in steps of 5: press or drag the knob, or the - and + buttons), Smart Camera, Freeze Sky, Shadows, Mirrors and Fullscreen check boxes, and a list of window sizes (- and +). Every change goes to `MenuHooks::settingsChanged`; the Main Menu button (or Escape) saves the profile and, if the window size or fullscreen changed, calls `applyVideo`. |
-| `highscores` | The local table on the map, eight lines a page with the arrows to turn it. The online buttons and the "downloading" text are hidden: that server is gone. |
-| `EnterName`, `GameOver` | `Menu::openGameOver(score)` shows the first if the score makes the table, else the second. The name is typed into the field (twelve characters; Backspace; Enter or Apply enters it; an empty name is "Player"), then the table opens with the new line in green. |
+| `selectstage` | The four stage buttons open `stagepiratos`, `stagefarm`, `stagecowboys`, `stageknights` (the first level of every stage is always open, so every stage can be entered); Quick Start starts level 0. The three bats are the player's choice: the one in use shows its "chosen" frame (the data's `disabled="yes"` on the red one is that), a click on another picks it. |
+| `stage*` | One button per level, named by campaign index; a click starts it. Levels the saved `Progress` has not opened (`SAVES.md`) show the locked frame and do nothing, unless `Menu::setLevelsLocked(false)`, which the game uses while nothing can finish a level. Quick Start starts the stage's first level. The bats are repeated. Select Stage goes back. |
+| `Options` | Music and sound volume sliders (0 to 100 in steps of 5, stored as volumes from 0 to 1: press or drag the knob, or the - and + buttons), Smart Camera, Freeze Sky, Shadows, Mirrors and Fullscreen check boxes, and a list of window sizes (- and +). Every change goes to `MenuHooks::settingsChanged`; the Main Menu button (or Escape) saves the settings and, if the window size or fullscreen changed, calls `applyVideo`. The sizes are the original's 4:3 shapes that fit the display; the form opens showing the window as it is (resized by dragging, or fullscreen with F11): the Fullscreen box as the window has it, the size as the nearest one of the list. |
+| `highscores` | The local table on the map, eight lines a page with the arrows to turn it (the save data keeps five pages, 40 entries). The online buttons and the "downloading" text are hidden: that server is gone. |
+| `EnterName`, `GameOver` | `Menu::openGameOver(score, level)` shows the first if the score makes the table, else the second. The name is typed into the field (twelve characters; Backspace; Enter or Apply enters it, with the level it was made on; an empty name is "Player"), then the table opens with the new line in green. |
 | `endgame`, `endgame2`, `endgame3` | The story; the arrows move between them; The End goes to the score (`Menu::openEnding(score)`). Escape does not skip them. |
 | `info`, `info2`, `info3`, `credits` | The arrows move between them; Main Menu goes back. |
 | `Loading` | A progress bar from `Menu::setProgress`, no background form; stays up for at least its `show_time_msec`. |
@@ -100,14 +100,21 @@ Everything outside the screens plugs in through `MenuHooks` (set in `FrontEndOpt
 
 | Hook | When |
 |---|---|
-| `playSound(name)` | Once as the pointer enters a widget that has `sound_mouse_in`, once as the button goes down on one with `sound_mouse_down`. The names are `Data/xml/sounds.xml` entries. Not set by the app: the sound system is another part. |
-| `loadProfile()` | Once, when the menus are made: the saved `Profile` (settings, `unlockedLevels`, high scores). |
-| `saveProfile(profile)` | Options left, a bat picked, a score entered. |
-| `settingsChanged(settings)` | Every change of a setting as it happens, to set a volume live. |
+| `playSound(name)` | Once as the pointer enters a widget that has `sound_mouse_in`, once as the button goes down on one with `sound_mouse_down`. The names are `Data/xml/sounds.xml` entries. The game plays them through `GameAudio` (`AUDIO.md`). |
+| `settingsChanged(settings)` | Every change of a setting as it happens, to set a volume live; `FrontEnd` also calls it once at the start with the saved settings. |
 | `applyVideo(settings)` | Options left with a changed window size or fullscreen. The app adds its own (it resizes the window) in front of the caller's. |
 | `LevelSession::start(name, progress)` | The campaign name of a level (`piratos-ostrovok`, any case) is to be built; blocks, may report progress. |
 | `LevelSession::update(input, dt, hud)` | Each frame of play, not while paused. The game changes `GameHud` here (lives, points, bonuses). |
 | `LevelSession::render(renderer, overlay)` | Draw the scene, then the overlay sprites (HUD, pause screen) over it. |
+
+What the player keeps needs no hook: the `Menu` changes the `SaveData` it was made with and writes it (Options left, a bat picked, a score entered). `FrontEndEvents` (in `FrontEndOptions::events`) tell the program where the game is, for the sound:
+
+| Event | When |
+|---|---|
+| `menuShown()` | At the start, and again whenever the menus come back (from a level, or after a level that could not be built). |
+| `levelStarted(name)` | The Loading form has gone and the level plays; `name` is the campaign's. |
+| `paused(bool)` | The pause screen came up, or went away: before the menus or the level go on. |
+| `frame()` | Once per frame. |
 
 ## HUD
 

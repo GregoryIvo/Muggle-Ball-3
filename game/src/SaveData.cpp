@@ -129,6 +129,7 @@ Settings readSettings(const json& doc) {
     readBool(doc, "fullscreen", s.fullscreen, kSettingsFile);
     readInt(doc, "windowWidth", s.windowWidth, kMinWindowWidth, kMaxWindowSize, kSettingsFile);
     readInt(doc, "windowHeight", s.windowHeight, kMinWindowHeight, kMaxWindowSize, kSettingsFile);
+    readInt(doc, "bat", s.bat, 0, kBatCount - 1, kSettingsFile);
     return s;
 }
 
@@ -183,6 +184,17 @@ Progress readProgress(const json& doc) {
     return p;
 }
 
+// The bytes of the first `chars` UTF-8 characters of `text` (a byte that continues a character is not a new one).
+std::size_t bytesOfChars(std::string_view text, std::size_t chars) {
+    std::size_t bytes = 0, seen = 0;
+    for (; bytes < text.size(); ++bytes) {
+        if ((static_cast<unsigned char>(text[bytes]) & 0xC0) != 0x80 && seen++ == chars) {
+            break;
+        }
+    }
+    return bytes;
+}
+
 std::string cleanName(std::string_view name) {
     std::string out;
     for (const char c : name) {
@@ -196,14 +208,8 @@ std::string cleanName(std::string_view name) {
         out.erase(out.find_last_not_of(' ') + 1);
     };
     trim();
-    if (out.size() > kMaxNameBytes) {
-        std::size_t cut = kMaxNameBytes;
-        while (cut > 0 && (static_cast<unsigned char>(out[cut]) & 0xC0) == 0x80) {
-            --cut;  // the first dropped byte continues a character: drop the whole character
-        }
-        out.resize(cut);
-        trim();
-    }
+    out.resize(bytesOfChars(out, kMaxNameChars));
+    trim();
     return out.empty() ? kDefaultName : out;
 }
 
@@ -340,6 +346,7 @@ bool SaveData::saveSettings() const {
     doc["fullscreen"] = settings.fullscreen;
     doc["windowWidth"] = settings.windowWidth;
     doc["windowHeight"] = settings.windowHeight;
+    doc["bat"] = settings.bat;
     return writeDocument(directory_, kSettingsFile, doc);
 }
 

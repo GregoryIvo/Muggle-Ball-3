@@ -15,9 +15,12 @@ level stands as designed until something hits it (the windmills turn), and a tes
 ball can be shot in to knock things over. The front end is in: the game starts at
 the main menu, the original's menu screens work (stage and level selection,
 options, high scores, name entry, info and credits), a level opens with the
-in-game HUD, and Escape pauses it. Sound and music are in: the level viewer plays
-the music of each level's world, and the sound library is ready for gameplay to
-play hits (see [`docs/AUDIO.md`](docs/AUDIO.md)). Not there yet: the real ball and
+in-game HUD, and Escape pauses it. Sound and music are in: the menus click and play
+their music, each level plays the music of its world (the pause freezes it), and
+the sound library is ready for gameplay to play hits (see
+[`docs/AUDIO.md`](docs/AUDIO.md)). What the player sets is kept between runs: the
+Options (volumes, check boxes, window size), the bat and the window itself (see
+[`docs/SAVES.md`](docs/SAVES.md)). Not there yet: the real ball and
 bat, bricks that die and score (so a level cannot be played yet), sails (cloth),
 moving sharks and trains, cannons, shadows and reflections, and model animation.
 
@@ -101,8 +104,11 @@ to regenerate them; that is the only thing that needs `glslangValidator` and
 
    In the game: the main menu leads to Start Game, then a stage, then a level (or
    Quick Start); Escape in a menu goes one step back, Escape in a level pauses it
-   (Escape again: main menu, any other key: resume). In the level viewer (`--level`,
-   `--shapes`, `--camera`, `--hud`, `--ball`): Left/Right (or PageUp/PageDown) switch
+   (Escape again: main menu, any other key: resume). The menus have their sounds and
+   music, the Options sliders set the volumes as you move them, and the game opens
+   with the window size, fullscreen state, volumes and bat you left it with. Every
+   level can be started from the stage screens for now, since nothing finishes a level.
+   In the level viewer (`--level`, `--shapes`, `--camera`, `--hud`, `--ball`): Left/Right (or PageUp/PageDown) switch
    level, Space shoots a test ball, P pauses the physics, L reloads the level (with
    fresh physics), F1 shows the physics shapes (where the bodies are now), left-drag
    orbits, right-drag pans, the wheel zooms, R returns to the game camera, Esc quits;
@@ -127,8 +133,9 @@ to regenerate them; that is the only thing that needs `glslangValidator` and
 
    Settings, progress and high scores are saved as JSON in
    `~/Library/Application Support/MuggleBall3/` (see [`docs/SAVES.md`](docs/SAVES.md)); set
-   `MB3_USER_DATA` to use another folder. An app without bundled assets, started from the
-   Finder, also looks for the converted assets in `assets/` inside that folder.
+   `MB3_USER_DATA` to use another folder (the tests do, so that they never touch your saves).
+   An app without bundled assets, started from the Finder, also looks for the converted
+   assets in `assets/` inside that folder.
 
 ## Legal
 
