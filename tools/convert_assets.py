@@ -8,6 +8,9 @@ Usage:
 --game       the installed game folder (holds Textures.dat, Sounds.dat, Musics.dat)
 --extracted  the folder produced by tools/molebox-dump (holds Data/ from MagicBall3.dat)
 --out        destination; created if missing, never committed (see .gitignore)
+
+Converts textures, materials, meshes, levels, and the object and particle XML
+(tools/objects.py writes a .json beside each .xml under Data/Objects and Data/Particles).
 """
 import argparse
 import json
@@ -23,6 +26,7 @@ import make_icon  # noqa: E402
 import materials  # noqa: E402
 import mb3level  # noqa: E402
 import nxconvex  # noqa: E402
+import objects  # noqa: E402
 import sounds  # noqa: E402
 import textures  # noqa: E402
 import ui  # noqa: E402
@@ -100,6 +104,13 @@ def convert_levels(out):
     print(f"levels: {len(levels)} converted to JSON")
 
 
+def convert_objects(out):
+    stats = objects.convert_all(out / "Data")
+    objects.report(stats)
+    if stats["failed"]:
+        sys.exit(f"objects: {len(stats['failed'])} files could not be converted")
+
+
 def convert_icon(game, out):
     """The app icon, assets/AppIcon.icns, from the executable's icon resource. macOS only (iconutil);
     elsewhere, or if the icon cannot be read, the app simply has no custom icon, so nothing here is fatal."""
@@ -131,6 +142,7 @@ def main():
     convert_meshes(args.out)
     convert_levels(args.out)
     convert_campaign(args.out)
+    convert_objects(args.out)
     convert_icon(args.game, args.out)
     print(f"done: {args.out.resolve()}")
 
