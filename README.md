@@ -9,21 +9,25 @@ Status: early. Step 2, drawing a level standing still, is done: the window opens
 through the SDL3 GPU API (Metal on macOS) and shows any of the 83 converted
 levels from the original's fixed camera, with models, textures (animated ones
 included), sky and the level's own light, and wireframes of the physics shapes on
-request. Sound and music are in: the game plays the music of each level's world, and the
-sound library is ready for physics to play hits (see [`docs/AUDIO.md`](docs/AUDIO.md)).
-Not there yet: sails (cloth), shadows and reflections, model animation, physics,
-gameplay and menus.
+request. Step 3 puts the levels in a physics world (Jolt, standing in for PhysX):
+every actor is a rigid body with its real shapes, mass, material and joints, the
+level stands as designed until something hits it (the windmills turn), and a test
+ball can be shot in to knock things over. Sound and music are in: the game plays
+the music of each level's world, and the sound library is ready for gameplay to
+play hits (see [`docs/AUDIO.md`](docs/AUDIO.md)). Not there yet: the real ball and
+bat, bricks that die and score, sails (cloth), moving sharks and trains, cannons,
+shadows and reflections, model animation and menus.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
-| `engine/` | Platform-neutral runtime: window and input, GPU renderer and shaders, model and image loading, audio (Ogg Vorbis decoding, mixer, device), logging, paths |
-| `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, camera, sound library |
-| `app/` | Executable entry point: the level viewer, with music |
+| `engine/` | Platform-neutral runtime: window and input, GPU renderer and shaders, model and image loading, physics (`PhysicsWorld` over Jolt), audio (Ogg Vorbis decoding, mixer, device), logging, paths |
+| `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, level physics (`PhysicsScene`), camera, sound library |
+| `app/` | Executable entry point: the level viewer, with physics and music |
 | `platform/macos/` | App bundle metadata (the only per-platform code so far) |
 | `tools/` | Asset pipeline: `convert_assets.py` runs the converters for levels (`mb3level.py`), meshes (`x2glb.py`), materials, sounds and music (`sounds.py`) and textures; also the MoleBox dumper and the shader compiler |
-| `docs/` | Architecture, level format, converted asset formats (`ASSET_FORMATS.md`), sound and music (`AUDIO.md`), how the data was recovered |
+| `docs/` | Architecture, level format, converted asset formats (`ASSET_FORMATS.md`), levels in the physics world (`PHYSICS.md`), sound and music (`AUDIO.md`), how the data was recovered |
 | `tests/` | C++ and Python tests; the ones that read the game data are skipped unless `MB3_ASSETS` is set |
 
 ## Build (macOS)
@@ -64,19 +68,25 @@ to regenerate them; that is the only thing that needs `glslangValidator` and
    $MuggleBall3                                  # first level
    $MuggleBall3 --level piratos-ostrovok         # a level by name (any case) or by .json path
    $MuggleBall3 --screenshot out.png --level cowboys-napadenie [--size 1024x768] [--shapes]
+   $MuggleBall3 --screenshot out.png --level piratos-ostrovok --simulate 3 --ball -5,0   # a test ball, 3 s of physics
    $MuggleBall3 --check assets/Data/Levels/piratos-po-krugy.json
    $MuggleBall3 --play-sound pirat_hit           # play a named sound (sounds.xml), wait, exit
    $MuggleBall3 --play-music Pirates --seconds 20  # one pass of Menu, Village, Pirates, Cowboys or Knights
    ```
 
-   In the window: Left/Right (or PageUp/PageDown) switch level, F1 shows the
-   physics shapes, left-drag orbits, right-drag pans, the wheel zooms, R returns
-   to the game camera, Esc quits; the music follows the level's world (a machine
-   without an audio device plays silently). `--screenshot` renders one frame without a
-   window; `--camera ex,ey,ez,tx,ty,tz,fov` overrides the camera and `--size`
-   sets the window or image size. `MB3_GPU_DEBUG=1` turns on the GPU back end's
-   validation layer. A level JSON written by an older `tools/mb3level.py` still
-   loads but logs a warning (old files drew wrong capsules with F1 / `--shapes`):
+   In the window: Left/Right (or PageUp/PageDown) switch level, Space shoots a test
+   ball, P pauses the physics, L reloads the level (with fresh physics), F1 shows
+   the physics shapes (where the bodies are now), left-drag orbits, right-drag
+   pans, the wheel zooms, R returns to the game camera, Esc quits; the music
+   follows the level's world (a machine without an audio device plays silently).
+   `--screenshot` renders one frame without a window; `--simulate <seconds>` (only with
+   `--screenshot`) runs the physics that long first, and `--ball [x,degrees]` shoots a
+   test ball at t = 0 (also in the window): from `(x, 1.2, -15)`, that many degrees off straight ahead, or without
+   the argument at the middle of the movable bodies. `--camera ex,ey,ez,tx,ty,tz,fov`
+   overrides the camera and `--size` sets the window or image size.
+   `MB3_GPU_DEBUG=1` turns on the GPU back end's validation layer. A level JSON
+   written by an older `tools/mb3level.py` still loads but logs a warning (old
+   files drew wrong capsules with F1 / `--shapes`, and have no physics fields):
    run `convert_assets.py` again to refresh it.
 
 ## Legal

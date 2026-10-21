@@ -19,6 +19,7 @@ import zipfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import materials  # noqa: E402
 import mb3level  # noqa: E402
+import nxconvex  # noqa: E402
 import sounds  # noqa: E402
 import textures  # noqa: E402
 import x2glb  # noqa: E402
@@ -69,8 +70,13 @@ def convert_meshes(out):
 
 def convert_levels(out):
     levels = sorted((out / "Data" / "Levels").glob("*.mb3"), key=lambda p: p.name.lower())
+    # Convex shapes embed the hull points of the meshes in Data/NxMeshes, so the runtime needs no cooked format.
+    hulls = nxconvex.HullFolder(out / "Data" / "NxMeshes")
     for path in levels:
-        level = mb3level.parse(path.read_bytes())
+        try:
+            level = mb3level.parse(path.read_bytes(), hulls)
+        except (FileNotFoundError, ValueError) as e:
+            sys.exit(f"{path.name}: {e}")
         if level["trailingBytes"]:
             sys.exit(f"{path.name}: {level['trailingBytes']} unparsed bytes")
         path.with_suffix(".json").write_text(json.dumps(level))

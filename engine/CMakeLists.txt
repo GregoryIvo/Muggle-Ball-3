@@ -7,6 +7,9 @@ add_library(mb_engine
   src/RenderFrame.cpp
   src/Image.cpp
   src/Model.cpp
+  src/Physics.cpp
+  src/PhysicsJoints.cpp
+  src/PhysicsShapes.cpp
   src/StbImpl.cpp
   src/VorbisImpl.cpp
   src/Vorbis.cpp
@@ -16,4 +19,4 @@ add_library(mb_engine
 target_include_directories(mb_engine PUBLIC include PRIVATE shaders/generated)
 target_link_libraries(mb_engine
   PUBLIC SDL3::SDL3
-  PRIVATE stb cgltf nlohmann_json::nlohmann_json)
+  PRIVATE stb cgltf nlohmann_json::nlohmann_json Jolt)
