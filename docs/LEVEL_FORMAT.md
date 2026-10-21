@@ -2,7 +2,8 @@
 
 Little-endian. Recovered from the level loader in `game32.img` (addresses
 refer to the unpacked image at base 0x400000). `tools/mb3level.py` implements
-it; all 83 shipped levels parse to the last byte.
+it; all 83 shipped levels parse to the last byte. The runtime reads the JSON
+that tool writes, described under "Converted JSON" at the end.
 
 ```
 magic        char[37]   "Magic Ball 3 serialize level ver 3.0\0"
@@ -86,3 +87,46 @@ count u32
   track[...] = keyCount u32, index u32, param u32, mask bitset,
                key[keyCount] = f32[3] × 3, u32 object
 ```
+
+## Converted JSON
+
+`tools/convert_assets.py` writes `assets/Data/Levels/<name>.json` next to each
+`.mb3`; `mb3level.parse()` builds it and `game/src/LevelLoader.cpp` reads it.
+It mirrors the structures above field by field. Floats are rounded to 5
+decimals; bytes the runtime does not interpret yet are kept as hex strings.
+
+```
+version       int       see Versions
+gravity       [x, y, z]
+actors        [actor]   only the top-level actors; cloth segments are nested
+globalParam   u32
+joints        [{actorA, actorB, type, raw}]
+paths         [{name, param, mask: {count, hex}, points: [{pos, tng, dir, up}]}]
+pathBindings  [{name, tracks: [{index, param, mask, keys: [{a, b, c, object}]}]}]
+trailingBytes int       bytes left unparsed; 0 in every shipped level
+```
+
+An actor is `{offset, pose: {rotation[9], position[3]}, body?, shapes, object?}`
+(`offset` is where its descriptor starts in the `.mb3`; `body` is the body
+descriptor as hex and present for dynamic actors). A shape is `{type,
+localPose, raw}` plus `radius` (sphere), `halfExtents` (box), `radiusHeight`
+`[radius, height]` (capsule) or `meshName` (convex, mesh). An object is `{type,
+id, flags}` plus whichever of `material`, `mesh`, `frame`, `extra` (hex),
+`prize`, `target`, `param`, `names` and `cloth` its type carries.
+
+### Versions
+
+The top-level `version` says which revision of the converter wrote the file. A
+file without it is version 1. `LEVEL_JSON_VERSION` in `tools/mb3level.py` and
+`kLevelJsonVersion` in `game/include/mb/game/Level.h` must be raised together
+whenever the output changes in a way that files from before the change would be
+misread; `tests/test_mb3level.py` checks that the two agree.
+
+| Version | Change |
+|---|---|
+| 1 | No `version` key. The earliest files read a capsule's `radiusHeight` one float too late, so it held `[height, 0]`. |
+| 2 | Capsule `radiusHeight` is `[radius, height]`. Adds `version`. |
+
+The runtime loads an older file but logs one warning per load asking for
+`tools/convert_assets.py` to be run again. A file converted after the capsule
+fix but before `version` existed has no `version` either, so it warns too.

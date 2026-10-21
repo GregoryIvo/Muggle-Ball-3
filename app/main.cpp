@@ -267,11 +267,8 @@ int runWindow(const Options& options) {
             window.setTitle("Muggle Ball 3 - " + viewer.levelName());
         }
 
-        if (input.leftButton) {
-            viewer.camera.orbit(input.mouseDX, input.mouseDY);
-        } else if (input.rightButton) {
-            viewer.camera.pan(input.mouseDX, input.mouseDY);
-        }
+        viewer.camera.orbit(input.leftDragDX, input.leftDragDY);
+        viewer.camera.pan(input.rightDragDX, input.rightDragDY);
         viewer.camera.zoom(input.wheel);
 
         int width = 0, height = 0;

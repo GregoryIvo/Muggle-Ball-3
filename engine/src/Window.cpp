@@ -51,10 +51,35 @@ bool Window::pollEvents(InputEvents& input) {
                     input.keysPressed.push_back(event.key.key);
                 }
                 break;
-            case SDL_EVENT_MOUSE_MOTION:
-                input.mouseDX += event.motion.xrel;
-                input.mouseDY += event.motion.yrel;
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            case SDL_EVENT_MOUSE_BUTTON_UP: {
+                const bool down = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+                switch (event.button.button) {
+                    case SDL_BUTTON_LEFT: leftHeld_ = down; break;
+                    case SDL_BUTTON_RIGHT: rightHeld_ = down; break;
+                    case SDL_BUTTON_MIDDLE: middleHeld_ = down; break;
+                    default: break;
+                }
                 break;
+            }
+            case SDL_EVENT_MOUSE_MOTION: {
+                const float dx = event.motion.xrel, dy = event.motion.yrel;
+                input.mouseDX += dx;
+                input.mouseDY += dy;
+                if (leftHeld_) {
+                    input.leftDragDX += dx;
+                    input.leftDragDY += dy;
+                }
+                if (rightHeld_) {
+                    input.rightDragDX += dx;
+                    input.rightDragDY += dy;
+                }
+                if (middleHeld_) {
+                    input.middleDragDX += dx;
+                    input.middleDragDY += dy;
+                }
+                break;
+            }
             case SDL_EVENT_MOUSE_WHEEL:
                 input.wheel += event.wheel.y;
                 break;
@@ -62,10 +87,9 @@ bool Window::pollEvents(InputEvents& input) {
                 break;
         }
     }
-    const SDL_MouseButtonFlags buttons = SDL_GetMouseState(nullptr, nullptr);
-    input.leftButton = (buttons & SDL_BUTTON_LMASK) != 0;
-    input.rightButton = (buttons & SDL_BUTTON_RMASK) != 0;
-    input.middleButton = (buttons & SDL_BUTTON_MMASK) != 0;
+    input.leftButton = leftHeld_;
+    input.rightButton = rightHeld_;
+    input.middleButton = middleHeld_;
     return running;
 }
 

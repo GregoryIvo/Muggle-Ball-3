@@ -11,6 +11,13 @@ import sys
 
 MAGIC = b"Magic Ball 3 serialize level ver 3.0\0"
 
+# Version of the JSON this tool writes, stored as the top-level "version". Raise it together with
+# kLevelJsonVersion in game/include/mb/game/Level.h whenever files written before a change would
+# be misread. A file without "version" is version 1.
+#   1  no "version" key; the earliest files read capsule radius and height from the wrong bytes
+#   2  capsule radius and height fixed; adds "version"
+LEVEL_JSON_VERSION = 2
+
 OBJECT_TYPES = {
     1: "board", 2: "bat", 3: "ball", 4: "brick", 5: "prize", 6: "shadowcaster",
     7: "background", 8: "light", 9: "bullet", 10: "wall", 11: "cannon",
@@ -167,7 +174,7 @@ def parse(data):
         raise ValueError("not a Magic Ball 3 level")
     rd = Reader(data)
     rd.take(len(MAGIC))
-    level = {"gravity": r(rd.f32s(3))}
+    level = {"version": LEVEL_JSON_VERSION, "gravity": r(rd.f32s(3))}
     # The stored actor count includes the segments of cloth objects, which are
     # read nested inside their cloth's record.
     remaining = rd.u32()
