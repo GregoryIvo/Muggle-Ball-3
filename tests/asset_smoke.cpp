@@ -73,14 +73,15 @@ int main() {
     try {
         const mb::MaterialLibrary library = mb::MaterialLibrary::load(materialsJson);
         std::set<std::string> names;
-        std::size_t blended = 0, additive = 0;
+        std::size_t blended = 0, additive = 0, custom = 0;
         for (const mb::GameMaterial& m : library.all()) {
             names.insert(m.name);
             blended += m.blendMode() == mb::BlendMode::AlphaBlend;
             additive += m.blendMode() == mb::BlendMode::Additive;
+            custom += m.blendMode() == mb::BlendMode::Custom;
         }
-        std::printf("materials.json: %zu materials (%zu distinct names), %zu alpha-blended, %zu additive\n",
-                    library.size(), names.size(), blended, additive);
+        std::printf("materials.json: %zu materials (%zu distinct names), %zu alpha-blended, %zu additive, %zu other blend\n",
+                    library.size(), names.size(), blended, additive, custom);
 
         const fs::path textures = assets / "Textures";
         if (fs::is_directory(textures)) {

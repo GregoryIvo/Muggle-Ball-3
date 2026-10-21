@@ -117,7 +117,8 @@ struct Builder {
     }
 
     // A primitive keeps the texture its .x names, unless that name is also a game material:
-    // "water.png" is the sea board's animated, blended water, and the material then decides.
+    // "water.png" is the sea board's animated, blended water, and the material then decides
+    // its textures, colours and blending.
     void ownTexture(const ModelMaterial& own, SceneDraw& draw) {
         if (own.textureFile.empty()) {
             return;
@@ -127,7 +128,11 @@ struct Builder {
             if (!plan.files.empty()) {
                 draw.textures = std::move(plan.files);
                 draw.animTimeMs = plan.animTimeMs;
-                draw.item.material.blend = named->blendMode();
+                MaterialParams& m = draw.item.material;
+                m.diffuse = named->diffuse;
+                m.ambient = named->ambient;
+                m.emissive = named->emissive;
+                named->applyBlend(m);
                 return;
             }
         }
@@ -189,7 +194,7 @@ struct Builder {
                     m.diffuse = game->diffuse;
                     m.ambient = game->ambient;
                     m.emissive = game->emissive;
-                    m.blend = game->blendMode();
+                    game->applyBlend(m);
                 } else if (own) {
                     m.diffuse = own->diffuse;
                     m.ambient = own->diffuse;

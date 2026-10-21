@@ -362,6 +362,9 @@ constexpr const char* kMaterials = R"({
     {"name": "Off", "renderStates": [[27, 0], [20, 2]]},
     {"name": "NoEnable", "renderStates": [[20, 2], [19, 5]]},
     {"name": "BlendOnly", "renderStates": [[27, 1]]},
+    {"name": "Water.png", "renderStates": [[19, 5], [20, 3], [27, 1]]},
+    {"name": "Multiply", "renderStates": [[19, 9], [20, 1], [27, 1]]},
+    {"name": "Unsupported", "renderStates": [[19, 13], [20, 0], [27, 1]]},
     {"name": "Looped", "sounds": {"period": "p", "loop": "l"}},
     {"name": "SHARK.JPG", "density": 9, "group": "Other"}
   ]
@@ -369,8 +372,8 @@ constexpr const char* kMaterials = R"({
 
 void testMaterialLibrary(const fs::path& tmp) {
     const mb::MaterialLibrary lib = mb::MaterialLibrary::parse(kMaterials);
-    check(lib.size() == 8 && lib.all().size() == 8, "materials: every definition is kept in file order");
-    check(lib.all()[0].name == "shark.jpg" && lib.all()[7].name == "SHARK.JPG", "materials: file order");
+    check(lib.size() == 11 && lib.all().size() == 11, "materials: every definition is kept in file order");
+    check(lib.all()[0].name == "shark.jpg" && lib.all()[10].name == "SHARK.JPG", "materials: file order");
 
     const mb::GameMaterial* shark = lib.find("Shark.JPG");
     check(shark == &lib.all()[0] && near(shark->density, 0.01f) && shark->group == "Levels/Sea",
@@ -415,6 +418,32 @@ void testMaterialLibrary(const fs::path& tmp) {
     check(lib.find("noenable")->blendMode() == mb::BlendMode::Opaque, "materials: no state 27 is Opaque");
     check(lib.find("blendonly")->blendMode() == mb::BlendMode::AlphaBlend, "materials: blending without dest is AlphaBlend");
     check(lib.find("boardmaterial")->blendMode() == mb::BlendMode::Opaque, "materials: no render states is Opaque");
+    check(lib.find("water.png")->blendMode() == mb::BlendMode::Custom, "materials: source alpha, source colour is Custom");
+    check(lib.find("multiply")->blendMode() == mb::BlendMode::Custom, "materials: destination colour, zero is Custom");
+    check(lib.find("unsupported")->blendMode() == mb::BlendMode::AlphaBlend,
+          "materials: factors outside D3DBLEND 1 to 10 are the alpha blend's");
+
+    using Factors = std::pair<mb::BlendFactor, mb::BlendFactor>;
+    check(lib.find("shark.jpg")->blendFactors() == Factors{mb::BlendFactor::SrcAlpha, mb::BlendFactor::InvSrcAlpha},
+          "materials: factors 5, 6 are source alpha, inverse source alpha");
+    check(lib.find("glow")->blendFactors() == Factors{mb::BlendFactor::SrcAlpha, mb::BlendFactor::One},
+          "materials: a missing source factor is source alpha");
+    check(lib.find("blendonly")->blendFactors() == Factors{mb::BlendFactor::SrcAlpha, mb::BlendFactor::InvSrcAlpha},
+          "materials: missing factors are the alpha blend's");
+    check(lib.find("water.png")->blendFactors() == Factors{mb::BlendFactor::SrcAlpha, mb::BlendFactor::SrcColor},
+          "materials: factors 5, 3 are source alpha, source colour");
+    check(lib.find("multiply")->blendFactors() == Factors{mb::BlendFactor::DestColor, mb::BlendFactor::Zero},
+          "materials: factors 9, 1 are destination colour, zero");
+    check(lib.find("unsupported")->blendFactors() == Factors{mb::BlendFactor::SrcAlpha, mb::BlendFactor::InvSrcAlpha},
+          "materials: unsupported factors fall back");
+
+    mb::MaterialParams params;
+    lib.find("water.png")->applyBlend(params);
+    check(params.blend == mb::BlendMode::Custom && params.srcBlend == mb::BlendFactor::SrcAlpha &&
+              params.dstBlend == mb::BlendFactor::SrcColor,
+          "materials: applyBlend sets the mode and both factors");
+    lib.find("boardmaterial")->applyBlend(params);
+    check(params.blend == mb::BlendMode::Opaque, "materials: applyBlend resets an opaque material");
 
     check(throwsWith([] { mb::MaterialLibrary::parse("not json"); }, "invalid materials JSON"), "materials: bad JSON throws");
     check(throwsWith([] { mb::MaterialLibrary::parse("{}"); }, "materials"), "materials: missing array throws");
@@ -429,7 +458,7 @@ void testMaterialLibrary(const fs::path& tmp) {
 
     const fs::path file = tmp / "materials.json";
     writeFile(file, kMaterials);
-    check(mb::MaterialLibrary::load(file).size() == 8, "materials: load from file");
+    check(mb::MaterialLibrary::load(file).size() == 11, "materials: load from file");
     check(throwsWith([&] { mb::MaterialLibrary::load(tmp / "absent.json"); }, "absent.json"),
           "materials: missing file throws with path");
 }

@@ -22,10 +22,27 @@ struct Color {
 using MeshHandle = std::uint32_t;
 using TextureHandle = std::uint32_t;
 
+// A blend factor, numbered like Direct3D's D3DBLEND (1 = ZERO ... 10 = INVDESTCOLOR) so game data converts 1:1.
+// The destination alpha is the frame's clear alpha: the alpha channel is never written.
+enum class BlendFactor {
+    Zero = 1,
+    One,
+    SrcColor,
+    InvSrcColor,
+    SrcAlpha,
+    InvSrcAlpha,
+    DestAlpha,
+    InvDestAlpha,
+    DestColor,
+    InvDestColor,
+};
+
+// Everything but Opaque draws after the opaque geometry, sorted back to front.
 enum class BlendMode {
     Opaque,      // no blending; fragments with alpha < 0.5 are discarded (Direct3D alpha test)
-    AlphaBlend,  // src * a + dst * (1 - a), drawn after opaque geometry, sorted back to front
-    Additive,    // src * a + dst, drawn after opaque geometry
+    AlphaBlend,  // src * a + dst * (1 - a)
+    Additive,    // src * a + dst
+    Custom,      // src * srcBlend + dst * dstBlend, with MaterialParams::srcBlend and dstBlend
 };
 
 // Front faces are clockwise, as in Direct3D (its default cull mode culls counter-clockwise).
@@ -42,6 +59,8 @@ struct MaterialParams {
     Color emissive{0, 0, 0, 0};
     TextureHandle texture = 0;  // 0 binds a 1x1 white texture
     BlendMode blend = BlendMode::Opaque;
+    BlendFactor srcBlend = BlendFactor::SrcAlpha;  // used by BlendMode::Custom only
+    BlendFactor dstBlend = BlendFactor::InvSrcAlpha;
     CullMode cull = CullMode::Back;
     bool lit = true;
     bool depthWrite = true;

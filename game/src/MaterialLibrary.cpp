@@ -8,6 +8,7 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <tuple>
 
 namespace mb {
 
@@ -15,9 +16,11 @@ namespace {
 
 using nlohmann::json;
 
-constexpr int kRenderStateAlphaBlendEnable = 27;  // D3DRS_ALPHABLENDENABLE
+constexpr int kRenderStateSrcBlend = 19;          // D3DRS_SRCBLEND
 constexpr int kRenderStateDestBlend = 20;         // D3DRS_DESTBLEND
-constexpr int kBlendOne = 2;                      // D3DBLEND_ONE
+constexpr int kRenderStateAlphaBlendEnable = 27;  // D3DRS_ALPHABLENDENABLE
+constexpr int kFirstBlendFactor = static_cast<int>(BlendFactor::Zero);  // BlendFactor uses D3DBLEND's numbers
+constexpr int kLastBlendFactor = static_cast<int>(BlendFactor::InvDestColor);
 
 // Reads obj[key] into out when present; a missing or null key leaves the default.
 template <class T>
@@ -95,20 +98,44 @@ GameMaterial parseMaterial(const json& j) {
 
 }  // namespace
 
+std::pair<BlendFactor, BlendFactor> GameMaterial::blendFactors() const {
+    BlendFactor src = BlendFactor::SrcAlpha;
+    BlendFactor dst = BlendFactor::InvSrcAlpha;
+    for (const auto& [state, value] : renderStates) {
+        if (value >= kFirstBlendFactor && value <= kLastBlendFactor) {
+            if (state == kRenderStateSrcBlend) {
+                src = static_cast<BlendFactor>(value);
+            } else if (state == kRenderStateDestBlend) {
+                dst = static_cast<BlendFactor>(value);
+            }
+        }
+    }
+    return {src, dst};
+}
+
 BlendMode GameMaterial::blendMode() const {
     bool blending = false;
-    int destBlend = 0;
     for (const auto& [state, value] : renderStates) {
         if (state == kRenderStateAlphaBlendEnable) {
             blending = value == 1;
-        } else if (state == kRenderStateDestBlend) {
-            destBlend = value;
         }
     }
     if (!blending) {
         return BlendMode::Opaque;
     }
-    return destBlend == kBlendOne ? BlendMode::Additive : BlendMode::AlphaBlend;
+    const auto [src, dst] = blendFactors();
+    if (src == BlendFactor::SrcAlpha && dst == BlendFactor::InvSrcAlpha) {
+        return BlendMode::AlphaBlend;
+    }
+    if (src == BlendFactor::SrcAlpha && dst == BlendFactor::One) {
+        return BlendMode::Additive;
+    }
+    return BlendMode::Custom;
+}
+
+void GameMaterial::applyBlend(MaterialParams& material) const {
+    material.blend = blendMode();
+    std::tie(material.srcBlend, material.dstBlend) = blendFactors();
 }
 
 MaterialLibrary MaterialLibrary::load(const std::filesystem::path& materialsJson) {
