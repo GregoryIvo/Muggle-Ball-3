@@ -83,6 +83,10 @@ bool Window::pollEvents(InputEvents& input) {
             case SDL_EVENT_MOUSE_WHEEL:
                 input.wheel += event.wheel.y;
                 break;
+            case SDL_EVENT_WINDOW_FOCUS_LOST:
+                // A release outside the window may never arrive; don't leave a drag stuck on.
+                leftHeld_ = rightHeld_ = middleHeld_ = false;
+                break;
             default:
                 break;
         }
