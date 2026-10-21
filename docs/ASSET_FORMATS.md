@@ -31,8 +31,10 @@ Written by `tools/x2glb.py` (parser: `tools/xfile.py`):
   `FrameTransformMatrix` copied in file order (omitted when identity). That
   order is glTF's column-major layout of the same transform, so the only
   difference from standard glTF is handedness. A `Mesh` outside any frame gets
-  a synthetic unnamed root node. The scene's root nodes are the top-level
-  frames in file order.
+  a synthetic unnamed root node (only `melon.X` does this). The scene's root
+  nodes are the top-level frames in file order. Frame names are not unique:
+  eight files repeat a `ph_*` name (`house3.X` has seven `ph_Box02`), so a
+  lookup by name finds the first.
 - **Meshes**: a frame's mesh is one glTF mesh. It has one primitive per
   material used, and every `Mesh` object directly inside the frame is merged
   into it.
@@ -52,18 +54,27 @@ Written by `tools/x2glb.py` (parser: `tools/xfile.py`):
   file's path relative to the `.glb`, URI-encoded, e.g.
   `../../Textures/Pushka.jpg`. The file is found case-insensitively in
   `assets/Textures/`, root first, then subfolders, falling back to the same
-  stem with another extension. `extras`:
+  stem with another extension (`.png` preferred; `.dds` is never chosen, the
+  runtime decodes JPEG and PNG only). `extras`:
   `{"power": f, "specular": [r,g,b], "emissive": [r,g,b], "textureFile": "Pushka.jpg"}`,
   plus `"textureMissing": true` if the file wasn't found (and then no
-  `baseColorTexture`).
+  `baseColorTexture`). Three names in the shipped meshes match no file:
+  `Ground-2.jpg` (ten ground meshes; `materials.json` has a material of that
+  name whose textures are `Ground-2-0` to `Ground-2-2`), `derewo fon2.jpg`
+  (`c-trees.X`; the file is `derewo_fon2.jpg`) and `w.jpg` (`water.X`).
+  `house2.X` has two different materials called `Material__1`; its meshes
+  refer to the first.
 - **Animations** are not glTF animations. They are kept losslessly in the
   root `extras.animations` for later use:
   `[{"name": set name, "ticksPerSecond": n, "tracks": [{"node": frame name,
   "rotation": [[tick, w, x, y, z], ...], "scale": [[tick, x, y, z], ...],
   "position": [[tick, x, y, z], ...], "matrix": [[tick, m0..m15], ...]}]}]`.
   Only the key types present are written. `ticksPerSecond` comes from
-  `AnimTicksPerSecond`, or 4800 (the D3DX default) if the file has none.
-- Root `extras`: `{"source": "SkinMeshes/cannon.X", "coordinateSystem": "d3d-left-handed"}`.
+  `AnimTicksPerSecond`, or 4800 (the D3DX default) if the file has none. In
+  the shipped files no mesh has `AnimTicksPerSecond`, every track holds
+  `matrix` keys only, and 184 of the 264 sets have no tracks at all.
+- Root `extras`: `{"source": "SkinMeshes/cannon.X", "coordinateSystem": "d3d-left-handed", "animations": [...]}`.
+  `animations` is always present, `[]` when the file has no animation sets.
 
 ## Materials: `assets/Data/Materials/materials.json`
 
