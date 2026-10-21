@@ -2,7 +2,7 @@
 
 Research notes for step 4 (bat, ball, bricks, score, lives, level end) and step 5 (prizes).
 Tags on claims: **[M]** measured from video, **[D]** read from the game's data files, **[I]** inferred, **[?]** not verified.
-Times are video seconds (`currentTime`), frame step 1/30 s. Saved frames and numbers are in `reference/gameplay/` (index at the end).
+Times are video seconds (`currentTime`), frame step 1/30 s. Saved frames and numbers are in `reference/gameplay/` next to the repository, not in it (they are screenshots of other people's videos; index at the end).
 
 ## 0. Sources and method
 
