@@ -5,6 +5,7 @@ cmake_minimum_required(VERSION 3.24)
 option(MB3_UNIVERSAL "macOS: build arm64 and x86_64 in one binary (needs MB3_FETCH_SDL3, which it turns on)" OFF)
 option(MB3_FETCH_SDL3 "Compile SDL3 from source and link it statically instead of using an installed one" OFF)
 option(MB3_BUNDLE_ASSETS "macOS: copy the converted game assets into the .app. For your own copy only: never distribute it" OFF)
+option(MB3_GAME_ICON "macOS: use the icon converted from your copy of the game (it is the game's artwork: off for apps you hand out)" ON)
 set(MB3_ASSETS_DIR "" CACHE PATH "Converted game assets: icon and bundled assets (default: $MB3_ASSETS, else <source>/assets)")
 
 if(CMAKE_HOST_APPLE)

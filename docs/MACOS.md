@@ -35,9 +35,9 @@ otool -L build-universal/app/MuggleBall3.app/Contents/MacOS/MuggleBall3     # sy
 `tools/make_icon.py` reads the icon from the original's `MagicBall3.exe` and builds `assets/AppIcon.icns`
 (details in `ASSET_FORMATS.md`); `tools/convert_assets.py` runs it. CMake puts the file in the bundle and sets
 `CFBundleIconFile` **when it finds it at configure time**, so run `cmake` again after creating it. The icon is
-the original game's artwork. It stays in the gitignored `assets/` folder, and a build made with it carries it:
-if you hand an app to other people, decide whether that is what you want (build without it by pointing
-`MB3_ASSETS_DIR` at a folder that has none).
+the original game's artwork. It stays in the gitignored `assets/` folder, and only your own builds carry it:
+`scripts/package_macos.sh` leaves it out of Developer ID builds (`-DMB3_GAME_ICON=OFF`) and checks that it did,
+and any other build can do the same with that option.
 
 ## Window
 

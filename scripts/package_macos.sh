@@ -57,7 +57,9 @@ fi
 if [[ $universal -eq 1 ]]; then variant=universal; else variant=native; fi
 build="build/package-$variant"
 
-configure=(-S . -B "$build" -DCMAKE_BUILD_TYPE=Release -DMB3_BUILD_TESTS=OFF
+# A Developer ID build is for handing out, so it carries none of the game's artwork, not even its icon.
+if [[ -n "${DEVELOPER_ID:-}" ]]; then game_icon=OFF; else game_icon=ON; fi
+configure=(-S . -B "$build" -DCMAKE_BUILD_TYPE=Release -DMB3_BUILD_TESTS=OFF -DMB3_GAME_ICON=$game_icon
            -DMB3_FETCH_SDL3=ON -DMB3_UNIVERSAL=$([[ $universal -eq 1 ]] && echo ON || echo OFF)
            -DMB3_BUNDLE_ASSETS=$([[ $bundle_assets -eq 1 ]] && echo ON || echo OFF))
 if [[ $bundle_assets -eq 1 ]]; then
@@ -89,6 +91,9 @@ fi
 foreign="$(otool -L "$exe" | awk '/^\t/ {print $1}' | grep -Ev '^(/usr/lib/|/System/Library/)' || true)"
 [[ -z "$foreign" ]] || die "the binary links libraries from outside the system: $foreign"
 echo "links only system libraries"
+if [[ $game_icon == OFF && -e "$app/Contents/Resources/AppIcon.icns" ]]; then
+    die "a Developer ID build must not contain the game's icon"
+fi
 
 echo "==> sign"
 if [[ -n "${DEVELOPER_ID:-}" ]]; then
