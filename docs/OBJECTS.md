@@ -20,10 +20,11 @@ version 3, the one in `assets/`, documented on the physics branches
 
 1. **The definitions are the level editor's object library, not a runtime
    rulebook.** A level stores a complete baked copy of every object (shapes,
-   material name, mesh, frame, a few extras). Only objects that never appear in
-   a level are built from the XML while playing: the **bat, ball, wall, bullets,
+   material name, mesh, frame, a few extras). Objects that never appear in a
+   level are built from the XML while playing: the **bat, ball, wall, bullets,
    prizes, explosions** (and the rocket / meteor / thunderbolt / cannonball
-   projectiles). Section 2.
+   projectiles). One exception reads the XML for an object that *is* in every
+   level: the sky dome's rotation `speed` (section 2). Section 2.
 2. **The XML carries no tuning numbers for the player's side.** The bat and ball
    have no `<Extra>`; prizes have a name and a halo colour but no duration, speed
    or size factor; generators have no rate. Those values are hard-coded in the
@@ -125,14 +126,20 @@ the pair **(mesh, frame)**, matching an XML `<mesh name=... frameNode=...>`
   its 26 values. `train` (level type 26) has no definition and no instance.
 
 **What the level bakes from `<extra>`:** dynamite `explose` and `radius`
-(`target` string and a float in `param`: 101 `explosebig` 5.0, 15 `explosesmall`
-3.0); flicker `particles1` / `particles2` (`names`); `light` and its colours
+(`target` string and the radius in `param`, which the level JSON stores as the
+u32 bit pattern of a float: 1084227584 = 0x40A00000 = 5.0 on 101 `explosebig`,
+1077936128 = 0x40400000 = 3.0 on 15 `explosesmall`; reinterpret it as a float); flicker `particles1` / `particles2` (`names`); `light` and its colours
 (a `D3DLIGHT9` in the 0x68-byte extra, flags `0x200`: point light, range 20 or
 50, attenuation 0.3 / 0.03 / 0.01, the XML's `A R G B` reordered); the shadow
 type as `param` 16, 32 or 64 (**inferred** mapping: 16 `mirrors`, 20 levels, the
 marker on the water plane; 32 `dxdirectional`, 41 levels, high above a corner; 64
 `dxpoint`, 1 level, centred above the board; `cowboys-v-tualet` has 120);
-`standUp` as object flag `0x40`; `rotfrozen` as `0x80`. Flag `0x01` is set on the
+`standUp` as object flag `0x40`. Object flag `0x80` goes with `rotfrozen` (an
+attribute of `<shapes>`, not `<extra>`) only loosely: 37 level objects whose XML
+has `rotfrozen="1"` lack it, and 116 flagged objects (all 63 fireworks among
+them) have no `rotfrozen` in any matching XML. Use the level's own object flags
+and body flags (`0x70`, frozen rotation), never values derived from the XML. Flag
+`0x01` is set on the
 35 sharks and birds that follow a path (they are kinematic and listed in the
 level's `pathBindings`). The 2 light objects (evening and night materials) carry
 directional-light extras (`D3DLIGHT9` type 3). Level `globalParam` is the
@@ -140,8 +147,12 @@ editor's next object id (61 of 83 levels equal the largest id or one more), not
 a rule.
 
 **Everything else in `<extra>` is absent from levels** (velocity, bulletType,
-disableGravity, lifeTime, disablePrize, shootSound, description, oreol, speed)
-because the objects that use it never appear in a level.
+disableGravity, lifeTime, disablePrize, shootSound, description, oreol), because
+the objects that use it never appear in a level. The exceptions are the sky
+dome's `speed` and `translation`: backgrounds are in all 83 levels (mesh
+`bg/bg_day.x`, `bg_night.x` or `bg_red.x`) with no rotation speed baked in, so
+the speed (0.0003 or 0.0002) must be read from `BackGrounds/*.xml` at run time,
+found through the skinmesh name.
 
 **Runtime-only objects.** Of the 26 types, 7 never appear in any level:
 `bat`, `ball`, `prize`, `bullet`, `wall`, `firerocket` (and `train`); and the XML
@@ -153,7 +164,9 @@ stems).
 
 **Dead references.** XML materials absent from `materials.json`: `Sky.jpg`,
 `Night.jpg`, `red.jpg` (the three sky domes), `Bonus-Stena.jpg` (the wall),
-`Basket.jpg`, `Brevno.jpg` (the cauldron and torch flickers). Meshes: every mesh
+`Basket.jpg` (the basket brick, `Hlam/basket.XML`, one level object) and
+`Brevno.jpg` (the cauldron `kotel`, the only object with `Flicker=1`; the torch
+`fakel` uses `Lopata.jpg`, which exists, and has no `Flicker` attribute). Meshes: every mesh
 a definition, a level or a material names exists; 7 of the 272 `.glb` files are
 named by nothing in the data: `ball-explosive.x` and `ball-powerfull.x` (the
 executable swaps them in for the ball), `c-holm1.x`, and four splinter meshes
@@ -367,12 +380,15 @@ holds each object as type `cannon`, `firework` and so on, with these shapes.
 Other typed objects with no `<extra>`: `vibro` (`Sea/Other/barrel-func.XML`: a
 capsule barrel; `krug-func.xml`: a ring of 2 boxes; all 23 level instances are
 kinematic. No level's `pathBindings` lists one (they bind only the sharks and
-birds), though every level carries paths named `track/krug1` and `track/krug2`:
+birds), though nearly every level carries paths named `track/krug1` (82 of 83) and
+`track/krug2` (80; `piratos-bad-night` has only `track/track`):
 how they move is **unknown**), `cloth` (19 sails and
 flags in `Sea/Ships`: one sphere 1.1, plus a `<cloth>` element, below), `tree`
 (6 in `Trees`; every level trunk is `tree.x`, material `Tree`, brick type 5,
 energy 5, score 130; the fruit are separate `brick` objects, apples, melons,
-pumpkins and cabbages, held to the trunk by breakable `NX_JOINT_FIXED` joints (`breakForce` 10 to 20),
+pumpkins and cabbages, held to the trunk by breakable `NX_JOINT_FIXED` joints (`breakForce` 10 to 20 on
+the apple tree, 180 on `arbuz-tree`, 100 on `kapusta-tree`, `melon-tree` and
+`tikva-tree`),
 and the `LeafFall` particle is their hit effect, **inferred**), `flicker`
 (`Village/Hlam/kotel.XML` cauldron, `Village/fakel.XML` torch: a point light with
 a `Flicker` flag, sparks and smoke), `light` and `shadowcaster` (marker spheres of
@@ -421,9 +437,9 @@ case-insensitively, first definition wins (`meteor` is the only repeat).
 |---|---|---|
 | `brickType` | **0** 213, **4** 17, **2** 6, **5** 1 (no 1 or 3) | 2: not a brick. The six are `BallMaterial`, `ball.jpg`, `bulletMaterial`, `BoardMaterial`, `Big-Water.jpg` and `Default`: ball, bullets, board, the fallback. 5: `Tree`, the trunk (energy 5, leaf particle). 4: ground tiles (`trava`, `trava-ground`, `Ground-2*`, `plitka`), rocks (`Skala`), crates (`Box.jpg`) and the 10 animals. 0: everything else, including characters, buildings, lava and water tiles. Level usage: 0 on 10,356 objects, 4 on 2,771, 5 on 128, 2 on 83 (the boards) |
 | `brickEnergy` | 1: 130, 2: 25, 3: 77, 4: 4, 5: 1 | hit points, **inferred**. Level bricks: 1 for 9,329, 3 for 2,173 (characters, animals, 3 ground types), 2 for 483, 4 for 342. How much damage a hit does is **unknown** |
-| `brickScore` | 4 to 777, median 42 | points when destroyed. Level totals run from 1,422 to 18,733 (median 7,191); `piratos-ostrovok` 4,231 over 65 objects, `cowboys-saloon` 3,986 over 88 |
+| `brickScore` | 4 to 777, median 60 over the 237 materials (42 over the scored level objects) | points when destroyed. Level totals (including `vibro` objects) run from 1,422 to 18,733 (median 7,191); `piratos-ostrovok` 4,231 over 65 objects, `cowboys-saloon` 3,986 over 88 |
 | `exploseType` | 5: 93, 6: 67, 3: 59, 0: 10, 2: 4, 9: 3, 8: 1 | the way the object breaks, an enumeration in code. **6**: shatters into splinters (66 of 67 have a `splinter` mesh): buildings, ground, crates, metal. **5**: no splinter (5 of 93 have one): characters, animals, trees, interactive objects (cannon, portals, generators, spring, volcano, fireworks). **3**: prizes, `bat_*` materials, ship hull and sails (11), plus a few. **8**: dynamite. **9**: fire rocket, meteor, thunderbolt. **0 / 2**: nothing (system, board, light, Default) |
-| `exploseDelay` | 0 to 500 ms; 500 for the prizes and `bat_*` materials, 0 to 250 for bricks | section 6 |
+| `exploseDelay` | 0 to 500 ms; 500 for the prizes and `bat_*` materials, 0 to 250 for most bricks (500 on `Oblaka.jpg`, `MillKrisha` and `MillWindow`) | section 6 |
 | `explosePower` | 6.789 (72) or 1.0 (165) | section 6: unused |
 | `splinter` | 15 distinct meshes on 77 materials; `splinter-brown.x` 25, `splinter.x` 15 | the debris mesh that flies out; 160 materials have none. 4 more splinter meshes exist that no material names |
 | `sounds` | `dead` 214, `hit` 182, `drop` 157, `period` 46, `loop` 1 | `drop`: lands after a fall; `hit`: struck; `dead`: destroyed or (prizes) collected; `period`: periodic or fired (generators, volcano, bullets, animals); `loop`: the spring |
@@ -454,7 +470,7 @@ the default; `Default` is `brickType` 2, energy 1, score 10.
   the *floor* (`Ground-2-ground` 686, `plitka` 521, `Lava.jpg` 415, `Ground-2.jpg`
   380, `Water-brick` 185, `Fence` 155), plus path-following sharks and birds
   (flag `0x01`), and buildings or apples in a level or two. Kinematic is **not**
-  "scenery": the sharks have score 91 and the tiles scores 36 to 44.
+  "scenery": the sharks have score 91 and the tiles scores 10 (`Lava.jpg`) to 44.
 - **Brick type 4 that is dynamic**: 1,174 objects: ground tiles that are loose
   (`Ground-2.jpg` 231), crates (175), sheep (121), rocks (98), and the animals.
 
