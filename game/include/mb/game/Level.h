@@ -31,7 +31,7 @@ struct Shape {
     std::uint32_t shapeFlags = 0;   // NxShapeFlag
     std::uint16_t group = 0;        // collision group
     std::uint16_t materialIndex = 0;
-    float mass = 0, density = 0;    // 0 = derive from the actor
+    float mass = 0, density = 0;    // the level files do not store them: always 0, the actor's body gives the mass
     float skinWidth = -1;           // -1 = the scene default
 };
 
@@ -109,7 +109,7 @@ struct Joint {
     Vec3 localAxis[2]{};
     Vec3 localAnchor[2]{};
     float maxForce = 0, maxTorque = 0;  // break thresholds; FLT_MAX = unbreakable
-    std::uint32_t jointFlags = 0;       // NxJointFlag
+    std::uint32_t jointFlags = 0;       // NxJointFlag: collision enabled 1, visualization 2. Bit 0 is clear in every shipped joint
 
     // Revolute: NX_RJF_LIMIT_ENABLED 1, NX_RJF_MOTOR_ENABLED 2, NX_RJF_SPRING_ENABLED 4.
     // Spherical: NX_SJF_TWIST_LIMIT_ENABLED 1, SWING_LIMIT 2, TWIST_SPRING 4, SWING_SPRING 8, JOINT_SPRING 16.
@@ -137,7 +137,7 @@ struct Path {
 
 // The level JSON version this build reads, the one tools/mb3level.py writes (LEVEL_JSON_VERSION
 // there; docs/LEVEL_FORMAT.md lists what each version changed).
-inline constexpr int kLevelJsonVersion = 2;
+inline constexpr int kLevelJsonVersion = 3;
 
 struct Level {
     int version = kLevelJsonVersion;  // of the JSON it was loaded from; 1 when the file has none
