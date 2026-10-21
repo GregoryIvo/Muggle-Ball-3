@@ -44,18 +44,19 @@ def copy_data(extracted, out):
 
 def convert_textures(out):
     stats = textures.convert_all([out / "Textures", out / "Data" / "Fonts"])
-    print(f"textures: DDS converted to PNG: {stats}")
+    print(f"textures: {stats['files']} DDS converted to PNG {stats['formats']}")
 
 
 def convert_materials(out):
     folder = out / "Data" / "Materials"
     stats = materials.convert(folder / "materials.xml", folder / "materials.json")
-    print(f"materials: {stats}")
+    print(f"materials: {stats['materials']} converted, duplicates {stats['duplicates']}")
 
 
 def convert_meshes(out):
     stats = x2glb.convert_all(out / "Data" / "SkinMeshes", out / "Textures", out / "Data" / "Meshes")
-    print(f"meshes: {stats}")
+    print(f"meshes: {stats['files']} converted to glTF, {stats['triangles']} triangles, "
+          f"unresolved textures {sorted(stats['unresolved_textures'])}")
 
 
 def convert_levels(out):
