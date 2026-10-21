@@ -14,6 +14,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 #include <map>
 #include <stdexcept>
 #include <string>
@@ -40,7 +41,19 @@ json element(const char* tag, json attributes, json children = json::array()) {
     return {{"tag", tag}, {"attributes", std::move(attributes)}, {"children", std::move(children)}};
 }
 
-json form(const char* name, json children, json extra = json::object()) {
+// Children written as a braced list. Without this overload a one-element list such as {button(...)} is, for
+// some compilers (Apple clang 15), a copy of that element rather than an array holding it.
+json element(const char* tag, json attributes, std::initializer_list<json> children) {
+    return element(tag, std::move(attributes), json(json::array_t(children.begin(), children.end())));
+}
+
+json form(const char* name, json children, json extra = json::object());
+
+json form(const char* name, std::initializer_list<json> children, json extra = json::object()) {
+    return form(name, json(json::array_t(children.begin(), children.end())), std::move(extra));
+}
+
+json form(const char* name, json children, json extra) {
     json attributes = {{"name", name}, {"fade_time_msec", 400}};
     attributes.update(extra);
     return {{"version", 1}, {"tag", "forms"}, {"attributes", json::object()}, {"children", json::array({element("form", attributes, std::move(children))})}};
