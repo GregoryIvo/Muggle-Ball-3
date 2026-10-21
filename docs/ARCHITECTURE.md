@@ -9,7 +9,7 @@ Goal: native on macOS first, then other platforms without rewriting the game.
 | Rendering | SDL3 GPU API | Metal on macOS, Vulkan elsewhere. Shaders are GLSL, compiled ahead of time to SPIR-V and MSL by `tools/build_shaders.py` (glslang + SPIRV-Cross); the generated headers are committed, so building needs neither tool. |
 | Physics | Jolt Physics (planned) | Replaces PhysX 2.x. Levels store PhysX boxes, spheres, capsules, convexes and joints, all of which map directly. |
 | Audio decode | stb_vorbis (planned) | All sounds and music are Ogg Vorbis. |
-| XML | Converted offline (planned for objects, menus, sounds) | `materials.xml` is already converted to JSON by `tools/materials.py`. |
+| XML | Converted offline | `materials.xml` by `tools/materials.py`; the object and particle definitions by `tools/objects.py` (see `OBJECTS.md`); menus and sounds are planned. |
 | Text | SDL3_ttf (planned) | Original fonts `Bookworm.ttf`, `brushType-SemiBold.TTF`. |
 | Meshes | Offline `.x` → binary glTF, loaded with cgltf | 272 meshes, all `xof 0303bin 0032`. See `ASSET_FORMATS.md`. |
 | Images | stb_image | JPEG and PNG; the 25 DDS files are converted to PNG offline. |

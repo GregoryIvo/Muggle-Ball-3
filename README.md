@@ -20,8 +20,8 @@ physics, gameplay, sound and menus.
 | `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, camera |
 | `app/` | Executable entry point: the level viewer |
 | `platform/macos/` | App bundle metadata (the only per-platform code so far) |
-| `tools/` | Asset pipeline: `convert_assets.py` runs the converters for levels (`mb3level.py`), meshes (`x2glb.py`), materials and textures; also the MoleBox dumper and the shader compiler |
-| `docs/` | Architecture, level format, converted asset formats (`ASSET_FORMATS.md`), how the data was recovered |
+| `tools/` | Asset pipeline: `convert_assets.py` runs the converters for levels (`mb3level.py`), meshes (`x2glb.py`), materials, textures, and object and particle definitions (`objects.py`); also the MoleBox dumper and the shader compiler |
+| `docs/` | Architecture, level format, converted asset formats (`ASSET_FORMATS.md`), what the object definitions say about gameplay (`OBJECTS.md`), how the data was recovered |
 | `tests/` | C++ and Python tests; the ones that read the game data are skipped unless `MB3_ASSETS` is set |
 
 ## Build (macOS)

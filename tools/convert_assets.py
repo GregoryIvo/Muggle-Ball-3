@@ -8,6 +8,9 @@ Usage:
 --game       the installed game folder (holds Textures.dat, Sounds.dat, Musics.dat)
 --extracted  the folder produced by tools/molebox-dump (holds Data/ from MagicBall3.dat)
 --out        destination; created if missing, never committed (see .gitignore)
+
+Converts textures, materials, meshes, levels, and the object and particle XML
+(tools/objects.py writes a .json beside each .xml under Data/Objects and Data/Particles).
 """
 import argparse
 import json
@@ -19,6 +22,7 @@ import zipfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import materials  # noqa: E402
 import mb3level  # noqa: E402
+import objects  # noqa: E402
 import textures  # noqa: E402
 import x2glb  # noqa: E402
 
@@ -69,6 +73,13 @@ def convert_levels(out):
     print(f"levels: {len(levels)} converted to JSON")
 
 
+def convert_objects(out):
+    stats = objects.convert_all(out / "Data")
+    objects.report(stats)
+    if stats["failed"]:
+        sys.exit(f"objects: {len(stats['failed'])} files could not be converted")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--game", required=True, type=pathlib.Path)
@@ -83,6 +94,7 @@ def main():
     convert_materials(args.out)
     convert_meshes(args.out)
     convert_levels(args.out)
+    convert_objects(args.out)
     print(f"done: {args.out.resolve()}")
 
 
