@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <filesystem>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -58,8 +59,12 @@ public:
     void show(const std::string& query) {
         menu_.setScore(kDemoScore);
         menu_.open(query);  // throws if there is no such form
-        index_ = static_cast<std::size_t>(
-            std::ranges::find_if(names_, [&](const std::string& n) { return sameName(n, query); }) - names_.begin());
+        // loadForm also takes "MainMenu.json" or "MainMenu.xml"; names_ holds bare names.
+        const std::filesystem::path asPath(query);
+        const std::string ext = asPath.extension().string();
+        const std::string bare = sameName(ext, ".json") || sameName(ext, ".xml") ? asPath.stem().string() : query;
+        const auto found = std::ranges::find_if(names_, [&](const std::string& n) { return sameName(n, bare); });
+        index_ = found == names_.end() ? 0 : static_cast<std::size_t>(found - names_.begin());
         if (sameName(file(), "Loading")) {
             menu_.setProgress(0.6f);
         }
