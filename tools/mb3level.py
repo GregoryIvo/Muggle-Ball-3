@@ -83,7 +83,8 @@ def read_shape(rd):
     elif stype == 2:
         shape["halfExtents"] = r(struct.unpack_from("<3f", raw, SHAPE_DESC_SIZE[2] - 12))
     elif stype == 3:
-        shape["radiusHeight"] = r(struct.unpack_from("<2f", raw, SHAPE_DESC_SIZE[3] - 8))
+        # NxCapsuleShapeDesc ends with radius, height and a u32 (flags, always 0 in the shipped levels).
+        shape["radiusHeight"] = r(struct.unpack_from("<2f", raw, SHAPE_DESC_SIZE[3] - 12))
     if stype in (4, 5):
         shape["meshName"] = rd.string()
     shape["raw"] = raw.hex()

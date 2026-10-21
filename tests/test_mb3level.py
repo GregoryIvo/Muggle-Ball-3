@@ -31,8 +31,17 @@ def box_shape(half):
     return struct.pack("<I", 2) + bytes(raw)
 
 
+def capsule_shape(radius, height):
+    raw = bytearray(M.SHAPE_DESC_SIZE[3])
+    struct.pack_into("<I", raw, 0, 3)
+    raw[4:52] = IDENTITY_POSE
+    struct.pack_into("<2fI", raw, len(raw) - 12, radius, height, 0)
+    return struct.pack("<I", 3) + bytes(raw)
+
+
 def board_actor():
-    return (actor_desc((0, 0, 0), True) + b"\x00" + struct.pack("<I", 1) + box_shape((3, 22, 15))
+    return (actor_desc((0, 0, 0), True) + b"\x00" + struct.pack("<I", 2) + box_shape((3, 22, 15))
+            + capsule_shape(0.91, 9.8)
             + struct.pack("<III", 1, 2, M.FLAG_MATERIAL | M.FLAG_MESH)
             + string("boardmaterial") + string("boardsea.x"))
 
@@ -73,6 +82,8 @@ class Mb3LevelTest(unittest.TestCase):
         self.assertEqual(board["object"]["type"], "board")
         self.assertEqual(board["object"]["mesh"], "boardsea.x")
         self.assertEqual(board["shapes"][0]["halfExtents"], [3, 22, 15])
+        self.assertEqual(board["shapes"][1]["type"], "capsule")
+        self.assertEqual(board["shapes"][1]["radiusHeight"], [0.91, 9.8])
         cloth = level["actors"][1]["object"]["cloth"]
         self.assertEqual(len(cloth["segments"]), 3)
         self.assertIn("body", cloth["segments"][0])
