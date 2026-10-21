@@ -1,0 +1,12 @@
+# Build output
+/build*/
+/out/
+.DS_Store
+*.xcodeproj/
+__pycache__/
+
+# Game data is never committed: it is converted from your own installed copy.
+/assets/
+/extracted/
+*.mb3
+*.dat
