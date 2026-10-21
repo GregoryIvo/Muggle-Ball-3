@@ -197,7 +197,7 @@ int main() {
     check(level.actors[0].object && level.actors[0].object->mesh == "boardsea.x", "board mesh");
     check(level.actors[0].shapes.at(0).halfExtents[1] == 22.0f, "box half extents");
     check(level.actors[0].object->extra == std::vector<std::uint8_t>{0x03, 0xff}, "extra bytes");
-    check(!level.actors[0].dynamic && level.actors[1].dynamic, "dynamic flag");
+    check(!level.actors[0].body && level.actors[1].body, "body presence");
     check(level.actors[1].shapes.at(0).radius == 1.5f, "sphere radius");
     check(level.actors[1].shapes.at(1).type == mb::ShapeType::Capsule && std::fabs(level.actors[1].shapes.at(1).radius - 0.9f) < 1e-5f &&
               std::fabs(level.actors[1].shapes.at(1).height - 9.8f) < 1e-5f,

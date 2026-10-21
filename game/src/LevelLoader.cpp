@@ -86,7 +86,7 @@ GameObject object(const json& j) {
 Actor actor(const json& j) {
     Actor a;
     a.pose = pose(j.at("pose"));
-    a.dynamic = j.contains("body");
+    if (j.contains("body")) a.body = Body{};
     for (const json& s : j.at("shapes")) {
         a.shapes.push_back(shape(s));
     }
