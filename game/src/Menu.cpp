@@ -16,9 +16,17 @@ namespace mb {
 
 namespace {
 
-constexpr std::size_t kNameLength = 12;  // characters of a high-score name
-constexpr int kScoreRows = 8;            // table lines per page
-constexpr const char* kDefaultName = "Player";
+constexpr int kScoreRows = 8;  // table lines per page
+static_assert(kMaxHighScores % kScoreRows == 0, "the high-score table should end on a full page");
+
+// The sliders count 0 to 100 in steps of 5; the settings hold volumes from 0 to 1.
+float percentOf(float volume) {
+    return std::round(volume * 100.0f);
+}
+
+float volumeOf(float percent) {
+    return std::round(percent) / 100.0f;
+}
 
 // The bat a button of the stage forms stands for, from its name ("Metall-Raketka-Red.jpg"); -1 if it is none.
 int batOf(std::string_view buttonName) {
@@ -61,11 +69,6 @@ void dropLastChar(std::string& text) {
     }
 }
 
-std::string trimmed(std::string_view text) {
-    const std::size_t first = text.find_first_not_of(' ');
-    return first == std::string_view::npos ? std::string() : std::string(text.substr(first, text.find_last_not_of(' ') + 1 - first));
-}
-
 Color colorOf(unsigned rgb, float alpha = 1) {
     return {static_cast<float>((rgb >> 16) & 0xFF) / 255.0f, static_cast<float>((rgb >> 8) & 0xFF) / 255.0f,
             static_cast<float>(rgb & 0xFF) / 255.0f, alpha};
@@ -73,15 +76,12 @@ Color colorOf(unsigned rgb, float alpha = 1) {
 
 }  // namespace
 
-Menu::Menu(FormLoader loadForm, Campaign campaign, MenuHooks hooks)
+Menu::Menu(FormLoader loadForm, Campaign campaign, SaveData& save, MenuHooks hooks)
     : loadForm_(std::move(loadForm)),
       campaign_(std::move(campaign)),
+      save_(save),
       hooks_(std::move(hooks)),
-      imageSizes_([](std::string_view) { return Vec2{}; }) {
-    if (hooks_.loadProfile) {
-        profile_ = hooks_.loadProfile();
-    }
-}
+      imageSizes_([](std::string_view) { return Vec2{}; }) {}
 
 void Menu::setVideoModes(std::vector<VideoMode> modes) {
     videoModes_ = std::move(modes);
@@ -107,14 +107,19 @@ void Menu::open(std::string_view form) {
     form_.layout(layout_, imageSizes_);
 }
 
-void Menu::openGameOver(int score) {
-    setScore(score);
-    open(profile_.qualifies(score) ? "EnterName" : "GameOver");
+void Menu::openGameOver(int score, std::string_view level) {
+    setScore(score, level);
+    open(save_.highScores.qualifies(score) ? "EnterName" : "GameOver");
 }
 
-void Menu::openEnding(int score) {
-    setScore(score);
+void Menu::openEnding(int score, std::string_view level) {
+    setScore(score, level);
     open("endgame");
+}
+
+void Menu::setScore(int score, std::string_view level) {
+    pendingScore_ = score;
+    pendingLevel_ = std::string(level);  // `level` may be a view of pendingLevel_ itself
 }
 
 void Menu::setProgress(float fraction) {
@@ -143,14 +148,14 @@ void Menu::prepare() {
 }
 
 void Menu::prepareOptions() {
-    const MenuSettings& s = profile_.settings;
+    const Settings& s = save_.settings;
     const auto set = [&](std::string_view name, auto apply) {
         if (UiWidget* w = form_.find(name)) {
             apply(*w);
         }
     };
-    set("MusicVolume", [&](UiWidget& w) { w.value = static_cast<float>(s.musicVolume); });
-    set("SoundVolume", [&](UiWidget& w) { w.value = static_cast<float>(s.soundVolume); });
+    set("MusicVolume", [&](UiWidget& w) { w.value = percentOf(s.musicVolume); });
+    set("SoundVolume", [&](UiWidget& w) { w.value = percentOf(s.soundVolume); });
     set("BG", [&](UiWidget& w) { w.checked = s.freezeSky; });
     set("Camera", [&](UiWidget& w) { w.checked = s.smartCamera; });
     set("Shadow", [&](UiWidget& w) { w.checked = s.shadows; });
@@ -194,15 +199,11 @@ void Menu::prepareStage() {
         if (w.userData == "SelectBat") {
             // The bat in use shows its "chosen" frame, which the data gives the disabled state.
             if (const int bat = batOf(w.name); bat >= 0) {
-                w.enabled = bat != profile_.settings.bat;
+                w.enabled = bat != save_.settings.bat;
             }
         } else if (w.userData == "SelectLevel") {
             const int level = levelOf(w.name);
-            w.enabled = level >= 0 && level < campaign_.levelCount() && level < profile_.unlockedLevels;
-        } else if (w.userData == "Navigate") {
-            if (const Stage* stage = campaign_.stageForForm(w.name)) {
-                w.enabled = profile_.unlockedLevels > stage->first;
-            }
+            w.enabled = level >= 0 && level < campaign_.levelCount() && (!lockLevels_ || levelOpen(level));
         }
     }
 }
@@ -239,7 +240,7 @@ void Menu::setLabel(std::string_view name, std::string text) {
 }
 
 int Menu::scorePages() const {
-    const int lines = static_cast<int>(profile_.highScores.size());
+    const int lines = static_cast<int>(save_.highScores.entries.size());
     return std::max(1, (lines + kScoreRows - 1) / kScoreRows);
 }
 
@@ -250,7 +251,7 @@ MenuResult Menu::update(const UiInput& input, double seconds, const UiLayout& la
     layout_ = layout;
     imageSizes_ = imageSizes;
     shown_ += seconds;
-    if (!profile_.settings.freezeSky) {
+    if (!save_.settings.freezeSky) {
         skyTime_ += seconds;
     }
     form_.layout(layout_, imageSizes_);
@@ -340,7 +341,7 @@ void Menu::click(UiWidget& widget, MenuResult& result) {
             submitName();
             break;
         case MenuIntent::FinishGame:
-            openGameOver(pendingScore_);
+            openGameOver(pendingScore_, pendingLevel_);
             break;
         case MenuIntent::Exit:
             result.kind = MenuResult::Kind::Quit;
@@ -402,7 +403,7 @@ void Menu::typeText(std::string_view text) {
         const std::string_view character = text.substr(0, length);
         text.remove_prefix(length);
         const bool control = static_cast<unsigned char>(character.front()) < 0x20 || character.front() == 0x7F;
-        if (!control && charCount(typed) < kNameLength) {
+        if (!control && charCount(typed) < kMaxNameChars) {
             typed += character;
         }
     }
@@ -423,30 +424,27 @@ bool Menu::back() {
 }
 
 void Menu::applyOptions() {
-    // Leaving Options untouched must not put the window back to the size the profile remembers.
-    const MenuSettings& s = profile_.settings;
+    // Leaving Options untouched must not put the window back to the size the settings remember.
+    const Settings& s = save_.settings;
     const bool videoChanged = s.windowWidth != videoAtOpen_.windowWidth || s.windowHeight != videoAtOpen_.windowHeight ||
                               s.fullscreen != videoAtOpen_.fullscreen;
     if (videoChanged && hooks_.applyVideo) {
         hooks_.applyVideo(s);
     }
-    save();
+    save_.saveSettings();
 }
 
 void Menu::submitName() {
     if (edit_ < 0) {
         return;
     }
-    std::string name = trimmed(form_.widgets()[static_cast<std::size_t>(edit_)].text);
-    if (name.empty()) {
-        name = kDefaultName;
-    }
-    const int rank = profile_.addHighScore(std::move(name), pendingScore_);
-    save();
+    const std::optional<std::size_t> rank =
+        save_.highScores.add(form_.widgets()[static_cast<std::size_t>(edit_)].text, pendingScore_, pendingLevel_);
+    save_.saveHighScores();
     open("HighScores");
-    if (rank >= 0) {
-        newScore_ = rank;
-        scorePage_ = rank / kScoreRows;
+    if (rank) {
+        newScore_ = static_cast<int>(*rank);
+        scorePage_ = newScore_ / kScoreRows;
         prepareScores();
     }
 }
@@ -457,18 +455,17 @@ void Menu::setSlider(UiWidget& slider, float value) {
         return;
     }
     slider.value = value;
-    const int stored = static_cast<int>(std::lround(value));
     if (slider.name == "MusicVolume") {
-        profile_.settings.musicVolume = stored;
+        save_.settings.musicVolume = volumeOf(value);
     } else if (slider.name == "SoundVolume") {
-        profile_.settings.soundVolume = stored;
+        save_.settings.soundVolume = volumeOf(value);
     }
     changed();
 }
 
 void Menu::setCheckbox(UiWidget& box, bool checked) {
     box.checked = checked;
-    MenuSettings& s = profile_.settings;
+    Settings& s = save_.settings;
     if (box.name == "BG") {
         s.freezeSky = checked;
     } else if (box.name == "Camera") {
@@ -497,8 +494,8 @@ void Menu::step(const UiWidget& button, int direction) {
             next = (next + count) % count;
         }
         videoMode_ = next;
-        profile_.settings.windowWidth = videoModes_[static_cast<std::size_t>(next)].width;
-        profile_.settings.windowHeight = videoModes_[static_cast<std::size_t>(next)].height;
+        save_.settings.windowWidth = videoModes_[static_cast<std::size_t>(next)].width;
+        save_.settings.windowHeight = videoModes_[static_cast<std::size_t>(next)].height;
         showVideoMode();
     }
 }
@@ -507,22 +504,22 @@ void Menu::selectBat(int bat) {
     if (bat < 0) {
         return;
     }
-    profile_.settings.bat = bat;
+    save_.settings.bat = bat;
     prepareStage();
     changed();
-    save();
+    save_.saveSettings();
 }
 
 void Menu::changed() {
     if (hooks_.settingsChanged) {
-        hooks_.settingsChanged(profile_.settings);
+        hooks_.settingsChanged(save_.settings);
     }
 }
 
-void Menu::save() {
-    if (hooks_.saveProfile) {
-        hooks_.saveProfile(profile_);
-    }
+// The level's place in its stage is below the number of levels the progress opened in that stage.
+bool Menu::levelOpen(int index) const {
+    const Stage* stage = campaign_.stageOf(index);
+    return stage && index - stage->first < save_.progress.unlockedLevels(stage->name);
 }
 
 void Menu::sound(const std::string& name) const {
@@ -617,8 +614,8 @@ void Menu::drawScores(UiAssets& assets, std::vector<Sprite>& out) const {
     const float lineHeight = 33 * s;
     float y = area.y + area.h * 0.095f;
     const std::size_t first = static_cast<std::size_t>(scorePage_ * kScoreRows);
-    for (std::size_t i = first; i < std::min(first + kScoreRows, profile_.highScores.size()); ++i) {
-        const MenuHighScore& entry = profile_.highScores[i];
+    for (std::size_t i = first; i < std::min(first + kScoreRows, save_.highScores.entries.size()); ++i) {
+        const HighScore& entry = save_.highScores.entries[i];
         const bool fresh = static_cast<int>(i) == newScore_;
         params.color = colorOf(fresh ? 0x00ff00 : 0x604020, alpha);
         params.shadowOffset = fresh ? Vec2{s, s} : Vec2{};

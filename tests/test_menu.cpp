@@ -5,7 +5,7 @@
 #include "mb/game/Campaign.h"
 #include "mb/game/GameFlow.h"
 #include "mb/game/Menu.h"
-#include "mb/game/Profile.h"
+#include "mb/game/SaveData.h"
 #include "mb/game/StringTable.h"
 
 #include <nlohmann/json.hpp>
@@ -14,16 +14,21 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <functional>
 #include <initializer_list>
 #include <map>
+#include <random>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace {
 
 using nlohmann::json;
 using namespace mb;
+namespace fs = std::filesystem;
 
 int failures = 0;
 
@@ -163,10 +168,36 @@ Campaign campaign() {
         {"name":"Village","levels":["village-d","village-e"]}]})");
 }
 
-// A Menu on a 1024x768 target with the forms above, recording what it asks of the program.
+// A fresh folder that is removed again: the menus' save data lives in it.
+class TempDir {
+public:
+    TempDir() : path(fs::temp_directory_path() / ("mb3-menu-test-" + std::to_string(std::random_device{}()))) {
+        fs::remove_all(path);
+        fs::create_directories(path);
+    }
+    ~TempDir() {
+        std::error_code ec;
+        fs::remove_all(path, ec);
+    }
+    TempDir(const TempDir&) = delete;
+    TempDir& operator=(const TempDir&) = delete;
+
+    fs::path path;
+};
+
+// A Menu on a 1024x768 target with the forms above, over save data in a temporary folder, recording what it asks of
+// the program. `prepare` sets the save data up before the Menu shows anything. The stage screens start with every
+// level open, which most tests want; testLocking turns that off to see the Menu as it is made.
 struct Harness {
-    explicit Harness(Profile initial = {}) : files(formFiles()), table(strings()), menu(loader(), campaign(), hooks(std::move(initial))) {
+    explicit Harness(const std::function<void(SaveData&)>& prepare = {}, bool openAllLevels = true)
+        : files(formFiles()), table(strings()), save(dir.path), menu(loader(), campaign(), save, hooks()) {
+        if (prepare) {
+            prepare(save);
+        }
         menu.setVideoModes({{800, 600}, {1024, 768}, {1280, 960}});
+        if (openAllLevels) {
+            menu.setLevelsLocked(false);
+        }
         menu.open("MainMenu");
     }
 
@@ -181,17 +212,19 @@ struct Harness {
         };
     }
 
-    MenuHooks hooks(Profile initial) {
+    MenuHooks hooks() {
         MenuHooks h;
         h.playSound = [this](std::string_view s) { sounds.emplace_back(s); };
-        h.loadProfile = [initial = std::move(initial)] { return initial; };
-        h.settingsChanged = [this](const MenuSettings& s) { changes.push_back(s); };
-        h.applyVideo = [this](const MenuSettings& s) { applied.push_back(s); };
-        h.saveProfile = [this](const Profile& p) { saved.push_back(p); };
+        h.settingsChanged = [this](const Settings& s) { changes.push_back(s); };
+        h.applyVideo = [this](const Settings& s) { applied.push_back(s); };
         return h;
     }
 
     MenuResult frame(const UiInput& input = {}, double seconds = 1.0) { return menu.update(input, seconds, layout, sizes); }
+
+    // What the files in the folder say now, as a later run of the game would read it.
+    SaveData reloaded() const { return SaveData(dir.path); }
+    bool wrote(const char* file) const { return fs::exists(dir.path / file); }
 
     const UiWidget& widget(const char* name) const {
         const UiWidget* w = menu.form().find(name);
@@ -223,6 +256,14 @@ struct Harness {
     }
     MenuResult click(const char* name) { return click(center(name)); }
     MenuResult click(const UiWidget& w) { return click(center(w)); }
+    // Presses the track of a slider at this percentage of its length.
+    void dragTo(const char* slider, float percent) {
+        const UiWidget& s = widget(slider);
+        const float x = s.rect.x + s.knobSize.x / 2 + s.rect.w * percent / 100.0f;
+        frame(move({x, s.rect.center().y}, false), 0);
+        frame(move({x, s.rect.center().y}, true), 0);
+        frame(move({x, s.rect.center().y}, false), 0);
+    }
     // Drops the log of sounds and changes.
     void forget() {
         sounds.clear();
@@ -230,13 +271,14 @@ struct Harness {
     }
     int count(const std::string& sound) const { return static_cast<int>(std::count(sounds.begin(), sounds.end(), sound)); }
 
+    TempDir dir;
     std::map<std::string, std::string> files;
     StringTable table;
     UiLayout layout = UiLayout::fit(1024, 768);
     ImageSizeFn sizes = [](std::string_view) { return Vec2{}; };
     std::vector<std::string> sounds;
-    std::vector<MenuSettings> changes, applied;
-    std::vector<Profile> saved;
+    std::vector<Settings> changes, applied;
+    SaveData save;
     Menu menu;
 };
 
@@ -379,21 +421,38 @@ void testQuitAndStart() {
 }
 
 void testLocking() {
-    Profile profile;
-    profile.unlockedLevels = 2;
-    Harness h(profile);
+    // The stage screens open the levels the saved progress opened: the first of each stage, and what finishing levels opened.
+    const auto progress = [](SaveData& save) { save.progress.recordCompletion("Pirates", 0, "piratos-a", 100); };
+    Harness h(progress, false);
     h.menu.open("stagepiratos");
-    check(h.widget("0").enabled && h.widget("1").enabled && !h.widget("2").enabled, "locks: levels from the first locked one on are disabled");
+    check(h.widget("0").enabled && h.widget("1").enabled && !h.widget("2").enabled,
+          "locks: the levels from the first one the progress has not opened on are disabled");
     check(h.click("2").kind == MenuResult::Kind::None, "locks: a locked level cannot be started");
     check(h.click("1").kind == MenuResult::Kind::StartLevel, "locks: an unlocked one can");
+    h.menu.open("stagefarm");
+    check(h.widget("3").enabled && !h.widget("4").enabled, "locks: each stage has its own progress, and its first level is open from the start");
     h.menu.open("selectstage");
-    check(h.widget("StagePiratos").enabled && !h.widget("StageFarm").enabled, "locks: a stage none of whose levels is unlocked is disabled");
-    h.click("StageFarm");
-    check(h.menu.formName() == "selectstage", "locks: and cannot be opened");
+    check(h.widget("StagePiratos").enabled && h.widget("StageFarm").enabled, "locks: so every stage can be opened");
 
-    Harness open;  // a new profile has everything open
+    h.save.progress.recordCompletion("village", 0, "village-d", 50);
+    h.menu.open("stagefarm");
+    check(h.widget("4").enabled, "locks: finishing a level opens the next when the stage is shown again");
+    h.save.progress.recordCompletion("pirates", 2, "Piratos-C", 70);
+    h.menu.open("stagepiratos");
+    check(h.widget("2").enabled, "locks: the stage's name in any case is its key in the progress");
+    h.menu.open("selectstage");
+    check(h.click("QuickStart").level == 0, "locks: Quick Start still starts the first level");
+
+    Harness fresh({}, false);
+    fresh.menu.open("stagepiratos");
+    check(fresh.widget("0").enabled && !fresh.widget("1").enabled && !fresh.widget("2").enabled,
+          "locks: a new player has the first level of a stage only, unless the Menu is told to leave them open");
+
+    Harness open;  // setLevelsLocked(false)
     open.menu.open("stagepiratos");
-    check(open.widget("0").enabled && open.widget("2").enabled, "locks: a new profile has every level open");
+    check(open.widget("0").enabled && open.widget("2").enabled, "locks: with the locks off every level is open");
+    open.menu.open("stagefarm");
+    check(open.widget("3").enabled && open.widget("4").enabled, "locks: ... in every stage");
 }
 
 void testBats() {
@@ -404,26 +463,30 @@ void testBats() {
     h.click("Metall-Raketka-Blue.jpg");
     check(h.menu.settings().bat == 1 && h.widget("Metall-Raketka-Blue.jpg").enabled == false && h.widget("Metall-Raketka-Red.jpg").enabled,
           "bat: clicking another chooses it and releases the old one");
-    check(h.changes.size() == 1 && h.changes[0].bat == 1 && !h.saved.empty() && h.saved.back().settings.bat == 1,
-          "bat: the choice is reported and saved");
+    check(h.changes.size() == 1 && h.changes[0].bat == 1 && h.reloaded().settings.bat == 1, "bat: the choice is reported and saved");
     h.menu.open("stagepiratos");
     check(!h.widget("Metall-Raketka-Blue.jpg").enabled && h.widget("Metall-Raketka-Red.jpg").enabled, "bat: the stage forms show the same choice");
 
-    Profile profile;
-    profile.settings.bat = 2;
-    Harness again(profile);
+    Harness again([](SaveData& save) { save.settings.bat = 2; });
     again.menu.open("selectstage");
     check(!again.widget("Metall-Raketka-Yellow.jpg").enabled && again.widget("Metall-Raketka-Red.jpg").enabled, "bat: a saved choice is shown when the form opens");
 }
 
+// Whether the progress or the high scores were written: only the part that changed should be.
+bool wroteOthers(const Harness& h) {
+    return h.wrote("progress.json") || h.wrote("highscores.json");
+}
+
 void testOptions() {
-    Profile profile;
-    profile.settings.musicVolume = 40;
-    profile.settings.freezeSky = true;
-    profile.settings.mirrors = false;
-    Harness h(profile);
+    Harness h([](SaveData& save) {
+        save.settings.musicVolume = 0.4f;
+        save.settings.freezeSky = true;
+        save.settings.smartCamera = true;
+        save.settings.mirrors = false;
+    });
     h.menu.open("Options");
-    check(near(h.widget("MusicVolume").value, 40) && near(h.widget("SoundVolume").value, 100), "options: the sliders show the settings");
+    check(near(h.widget("MusicVolume").value, 40) && near(h.widget("SoundVolume").value, 80),
+          "options: the sliders show the settings' volumes (0 to 1) as percentages, and the defaults are the save data's");
     check(h.widget("BG").checked && h.widget("Camera").checked && h.widget("Shadow").checked && !h.widget("Mirror").checked,
           "options: the checkboxes show the settings");
     check(h.widget("Video").text == "1024 x 768", "options: the video list shows the current window size");
@@ -441,7 +504,7 @@ void testOptions() {
     h.click("Shadow");
     h.click("Mirror");
     h.click("Fullscreen");
-    const MenuSettings& s = h.menu.settings();
+    const Settings& s = h.menu.settings();
     check(!s.smartCamera && !s.shadows && s.mirrors && s.fullscreen, "checkbox: each box is its own setting (and Fullscreen is a checkbox too)");
     check(h.count("down") == 5 && h.count("in") == 4, "checkbox: each click played the box's down sound, and entering it the in sound");
 
@@ -452,9 +515,10 @@ void testOptions() {
     const float y = music.rect.center().y;
     h.frame(h.move({left + width * 0.5f, y}, false), 0);
     h.frame(h.move({left + width * 0.5f, y}, true), 0);
-    check(near(music.value, 50) && h.menu.settings().musicVolume == 50 && h.changes.size() == 1, "slider: pressing on the track moves the knob there");
+    check(near(music.value, 50) && near(h.menu.settings().musicVolume, 0.5f) && h.changes.size() == 1 && near(h.changes[0].musicVolume, 0.5f),
+          "slider: pressing on the track moves the knob there, and the volume (0 to 1) follows");
     h.frame(h.move({left + width * 0.77f, y + 200}, true), 0);
-    check(near(music.value, 75) && h.menu.settings().musicVolume == 75, "slider: dragging follows the pointer, wherever it is vertically");
+    check(near(music.value, 75) && near(h.menu.settings().musicVolume, 0.75f), "slider: dragging follows the pointer, wherever it is vertically");
     h.frame(h.move({left + width * 3, y}, true), 0);
     check(near(music.value, 100), "slider: dragging past the end clamps");
     h.frame(h.move({left - width, y}, true), 0);
@@ -467,7 +531,7 @@ void testOptions() {
     // The - and + buttons beside a slider step it.
     h.forget();
     h.click(h.stepper("MusicVolume", "+"));
-    check(near(music.value, 5) && h.menu.settings().musicVolume == 5, "slider: + steps up by the slider's step");
+    check(near(music.value, 5) && near(h.menu.settings().musicVolume, 0.05f), "slider: + steps up by the slider's step");
     h.click(h.stepper("MusicVolume", "+"));
     h.click(h.stepper("MusicVolume", "-"));
     check(near(music.value, 5), "slider: - steps down");
@@ -477,7 +541,7 @@ void testOptions() {
     const std::size_t calls = h.changes.size();
     h.click(h.stepper("MusicVolume", "-"));
     check(h.changes.size() == calls, "slider: and a step that changes nothing reports nothing");
-    check(h.menu.settings().soundVolume == 100 && near(h.widget("SoundVolume").value, 100), "slider: the sound volume is its own");
+    check(near(h.menu.settings().soundVolume, 0.8f) && near(h.widget("SoundVolume").value, 80), "slider: the sound volume is its own");
 
     // The video list.
     check(h.widget("Video").text == "1024 x 768", "video: the current mode");
@@ -493,12 +557,15 @@ void testOptions() {
     check(h.applied.empty() && h.menu.settings().windowWidth == 1024, "video: choosing a mode applies nothing yet");
 
     // The Main Menu button applies and saves the settings and goes back.
-    const std::size_t saves = h.saved.size();
+    check(!h.wrote("settings.json"), "apply: nothing was written while the settings were being changed");
     h.click("ApplyVideo");
     check(h.menu.formName() == "mainmenu", "apply: the Main Menu button leaves Options");
     check(h.applied.size() == 1 && h.applied[0].windowWidth == 1024 && h.applied[0].windowHeight == 768 && h.applied[0].fullscreen,
           "apply: the video hook gets the chosen window size and fullscreen");
-    check(h.saved.size() == saves + 1 && h.saved.back().settings.windowWidth == 1024 && h.saved.back().settings.musicVolume == 0, "apply: and the profile is saved");
+    const SaveData stored = h.reloaded();
+    check(stored.settings.windowWidth == 1024 && stored.settings.musicVolume == 0 && stored.settings.fullscreen && !stored.settings.shadows &&
+              !wroteOthers(h),
+          "apply: and the settings, and only the settings, are saved");
 
     // Escape does the same.
     h.menu.open("Options");
@@ -509,11 +576,12 @@ void testOptions() {
     check(h.menu.formName() == "mainmenu" && h.applied.size() == 2 && h.applied[1].windowWidth == 1280, "apply: Escape leaves Options the same way");
 
     // Leaving without touching the video settings applies nothing (the player may have resized the window since), but still saves.
-    const std::size_t savesNow = h.saved.size();
+    const bool cameraBefore = h.reloaded().settings.smartCamera;
     h.menu.open("Options");
     h.click(h.widget("Camera"));
     h.click("ApplyVideo");
-    check(h.applied.size() == 2 && h.saved.size() == savesNow + 1, "apply: with no video change there is nothing to apply, and the profile is saved anyway");
+    check(h.applied.size() == 2 && h.reloaded().settings.smartCamera != cameraBefore,
+          "apply: with no video change there is nothing to apply, and the settings are saved anyway");
     h.menu.open("Options");
     h.click(h.stepper("VideoMode", "-"));
     h.click(h.stepper("VideoMode", "+"));
@@ -527,10 +595,10 @@ void testOptions() {
     check(!none.widget("VideoMode").visible, "video: with no modes the list is hidden");
 
     // A window size that is not in the list shows the nearest mode.
-    Profile odd;
-    odd.settings.windowWidth = 1180;
-    odd.settings.windowHeight = 900;
-    Harness near1(odd);
+    Harness near1([](SaveData& save) {
+        save.settings.windowWidth = 1180;
+        save.settings.windowHeight = 900;
+    });
     near1.menu.open("Options");
     check(near1.widget("Video").text == "1280 x 960", "video: an unlisted size shows the nearest mode");
 
@@ -545,6 +613,75 @@ void testOptions() {
     check(wrap.widget("Video").text == "800 x 600", "video: a list with cycled=\"yes\" wraps past its end");
 }
 
+// The sliders count 0 to 100 in steps of 5; the save data holds volumes from 0 to 1.
+void testVolumeConversion() {
+    Harness odd([](SaveData& save) {
+        save.settings.musicVolume = 0.333f;
+        save.settings.soundVolume = 1.0f;
+    });
+    odd.menu.open("Options");
+    check(near(odd.widget("MusicVolume").value, 33) && near(odd.widget("SoundVolume").value, 100),
+          "volume: a volume between two percents shows at the nearest, and 1 is the slider's end");
+    odd.click(odd.stepper("MusicVolume", "+"));
+    check(near(odd.menu.settings().musicVolume, 0.38f) && near(odd.widget("MusicVolume").value, 38), "volume: a step goes on from there");
+
+    // Every position of the sliders comes back as it was from a save and a load.
+    Harness h;
+    bool allBack = true;
+    for (int percent = 0; percent <= 100; percent += 5) {
+        h.menu.open("Options");
+        h.dragTo("MusicVolume", static_cast<float>(percent));
+        h.dragTo("SoundVolume", static_cast<float>(100 - percent));
+        h.click("ApplyVideo");
+        const Settings stored = h.reloaded().settings;
+        Harness again([&](SaveData& save) { save.settings = stored; });
+        again.menu.open("Options");
+        allBack = allBack && near(stored.musicVolume, static_cast<float>(percent) / 100.0f) &&
+                  near(stored.soundVolume, static_cast<float>(100 - percent) / 100.0f) &&
+                  near(again.widget("MusicVolume").value, static_cast<float>(percent)) &&
+                  near(again.widget("SoundVolume").value, static_cast<float>(100 - percent));
+    }
+    check(allBack, "volume: all 21 positions of both sliders survive the slider, the file and the slider again");
+}
+
+// What the menus write, and when.
+void testSaving() {
+    Harness h;
+    for (const char* form : {"selectstage", "stagepiratos", "highscores", "Info", "Options"}) {
+        h.menu.open(form);
+    }
+    h.click(h.widget("Camera"));
+    check(!h.wrote("settings.json") && !h.wrote("progress.json") && !h.wrote("highscores.json"),
+          "saving: looking around and changing a setting writes nothing yet");
+    h.click("ApplyVideo");
+    check(h.wrote("settings.json") && !wroteOthers(h), "saving: leaving Options writes the settings, and nothing else");
+
+    h.menu.open("selectstage");
+    h.click("Metall-Raketka-Yellow.jpg");
+    check(h.reloaded().settings.bat == 2 && h.reloaded().settings.smartCamera == h.menu.settings().smartCamera && !wroteOthers(h),
+          "saving: picking a bat writes the settings at once, with the changes before it");
+
+    // The saved settings come back whole in the next run's menus.
+    const Settings stored = h.reloaded().settings;
+    Harness next([&](SaveData& save) { save.settings = stored; });
+    next.menu.open("Options");
+    check(next.widget("Camera").checked == stored.smartCamera && next.widget("Camera").checked != Settings{}.smartCamera,
+          "saving: the Options of the next run show what was set");
+    next.menu.open("selectstage");
+    check(!next.widget("Metall-Raketka-Yellow.jpg").enabled, "saving: and the stage screens the bat that was picked");
+
+    // Save data with no folder (userDataDir() found none) keeps the choices in memory for the run; the failed save is no trouble.
+    SaveData memory{fs::path()};
+    Menu inMemory(h.loader(), campaign(), memory);
+    inMemory.open("selectstage");
+    inMemory.update({}, 1.0, h.layout, h.sizes);
+    const Vec2 yellow = inMemory.form().find("Metall-Raketka-Yellow.jpg")->rect.center();
+    UiInput clickYellow;
+    clickYellow.pointer = {{yellow, false}, {yellow, true}, {yellow, false}};
+    inMemory.update(clickYellow, 0, h.layout, h.sizes);
+    check(memory.settings.bat == 2, "saving: without a folder the choice stays in memory");
+}
+
 void testSliderSounds() {
     // The knob has no sound of its own, but the - and + buttons do.
     Harness h;
@@ -557,11 +694,11 @@ void testSliderSounds() {
 }
 
 void testHighScores() {
-    Profile profile;
-    for (int i = 0; i < 20; ++i) {
-        profile.highScores.push_back({"p" + std::to_string(i), 10000 - i * 100});
-    }
-    Harness h(profile);
+    Harness h([](SaveData& save) {
+        for (int i = 0; i < 20; ++i) {
+            save.highScores.add("p" + std::to_string(i), 10000 - i * 100, "piratos-a");
+        }
+    });
     h.menu.open("highscores");
     check(!h.widget("86400").visible && !h.widget("2073600").visible && !h.widget("LeftCaption").visible && !h.widget("PleaseWait").visible,
           "scores: the online buttons and the download text are hidden");
@@ -579,20 +716,19 @@ void testHighScores() {
     check(!empty.widget("PrevPage").visible && !empty.widget("NextPage").visible, "scores: an empty table has no arrows");
     check(empty.click("MainMenu").kind == MenuResult::Kind::None && empty.menu.formName() == "mainmenu", "scores: Main Menu leaves");
 
-    // The profile's own rules.
-    Profile p;
-    check(!p.qualifies(0) && p.qualifies(1), "profile: any score above zero makes an empty table");
-    check(p.addHighScore("a", 500) == 0 && p.addHighScore("b", 900) == 0 && p.addHighScore("c", 700) == 1 && p.addHighScore("d", 700) == 2,
-          "profile: scores are put in order, after equal ones");
-    check(p.highScores[0].name == "b" && p.highScores[1].name == "c" && p.highScores[2].name == "d" && p.highScores[3].name == "a",
-          "profile: the table is best first");
-    check(p.addHighScore("zero", 0) == -1 && p.highScores.size() == 4, "profile: a score of zero is not kept");
-    for (int i = 0; i < 100; ++i) {
-        p.addHighScore("x", 1000 + i);
+    // The table the save data keeps is as long as the form has pages for: a full one ends on a full page.
+    Harness full([](SaveData& save) {
+        for (std::size_t i = 0; i < kMaxHighScores; ++i) {
+            save.highScores.add("p", 5000 - static_cast<int>(i), "");
+        }
+    });
+    full.menu.open("highscores");
+    int pages = 1;
+    while (full.widget("NextPage").visible && pages < 20) {
+        full.click("NextPage");
+        ++pages;
     }
-    check(p.highScores.size() == Profile::kMaxHighScores && p.highScores.back().score >= 1000 && p.highScores.front().score == 1099,
-          "profile: the table keeps its best entries only");
-    check(!p.qualifies(1000) && p.qualifies(1100) && p.addHighScore("low", 5) == -1, "profile: a score that does not beat the last of a full table is out");
+    check(pages == 5 && kMaxHighScores == 5 * 8, "scores: a full table is five pages of eight lines");
 }
 
 void typeInto(Harness& h, const std::string& text, std::vector<UiKey> keys = {}) {
@@ -603,13 +739,15 @@ void typeInto(Harness& h, const std::string& text, std::vector<UiKey> keys = {})
 }
 
 void testNameEntry() {
-    Profile profile;
-    profile.highScores = {{"top", 5000}, {"mid", 3000}, {"low", 100}};
-    Harness h(profile);
+    Harness h([](SaveData& save) {
+        save.highScores.add("top", 5000, "piratos-a");
+        save.highScores.add("mid", 3000, "piratos-a");
+        save.highScores.add("low", 100, "piratos-a");
+    });
 
     h.menu.openGameOver(0);
     check(h.menu.formName() == "gameover" && h.widget("Score").text == "0" && !h.menu.wantsText(), "name: a score of 0 goes to Game Over");
-    h.menu.openGameOver(4000);
+    h.menu.openGameOver(4000, "village-d");
     check(h.menu.formName() == "entername" && h.widget("Score").text == "4000" && h.menu.wantsText(),
           "name: a score that makes the table goes to the name entry, which wants typed text");
 
@@ -635,37 +773,43 @@ void testNameEntry() {
                      UiKey::Backspace, UiKey::Backspace, UiKey::Backspace, UiKey::Backspace, UiKey::Backspace});
     typeInto(h, "  Ann ");
     h.forget();
-    h.saved.clear();
+    check(!h.wrote("highscores.json"), "name: nothing is written before the score is entered");
     typeInto(h, "", {UiKey::Enter});
     check(h.menu.formName() == "highscores", "name: Enter enters the score and shows the table");
-    const Profile& now = h.menu.profile();
-    check(now.highScores.size() == 4 && now.highScores[1].name == "Ann" && now.highScores[1].score == 4000 && now.highScores[0].name == "top",
-          "name: the score is in its place, the name without spaces around it");
-    check(h.saved.size() == 1 && h.saved[0].highScores.size() == 4, "name: and the profile is saved once");
+    const std::vector<HighScore>& now = h.save.highScores.entries;
+    check(now.size() == 4 && now[1].name == "Ann" && now[1].score == 4000 && now[1].level == "village-d" && now[0].name == "top",
+          "name: the score is in its place, with the name without spaces around it and the level it was made on");
+    const SaveData stored = h.reloaded();
+    check(stored.highScores.entries.size() == 4 && stored.highScores.entries[1].name == "Ann" && stored.highScores.entries[1].level == "village-d" &&
+              !h.wrote("settings.json") && !h.wrote("progress.json"),
+          "name: and the table, and only the table, is saved");
 
     h.menu.openGameOver(50000);
     check(h.menu.formName() == "entername" && h.widget("Name").text.empty(), "name: a new entry starts with an empty field");
     h.click("ApplyRecord");
-    check(h.menu.formName() == "highscores" && h.menu.profile().highScores[0].name == "Player" && h.menu.profile().highScores[0].score == 50000,
+    check(h.menu.formName() == "highscores" && now[0].name == "Player" && now[0].score == 50000 && now[0].level.empty(),
           "name: the Apply button enters it, an empty name as Player");
 
     // A full table with a better score than its last entry still has room; one that does not beat it goes to Game Over.
-    Profile full;
-    for (int i = 0; i < static_cast<int>(Profile::kMaxHighScores); ++i) {
-        full.highScores.push_back({"x", 2000 - i});
-    }
-    Harness f(full);
-    f.menu.openGameOver(1000);
+    Harness f([](SaveData& save) {
+        for (int i = 0; i < static_cast<int>(kMaxHighScores); ++i) {
+            save.highScores.add("x", 2000 - i, "");
+        }
+    });
+    const int lowest = 2000 - static_cast<int>(kMaxHighScores) + 1;
+    f.menu.openGameOver(lowest - 1);
     check(f.menu.formName() == "gameover", "name: a score below a full table's last goes to Game Over");
-    f.menu.openGameOver(1970);
+    f.menu.openGameOver(lowest + 1);
     check(f.menu.formName() == "entername", "name: a score above it can be entered");
 
     // The ending leads to the same.
     Harness e;
-    e.menu.openEnding(777);
+    e.menu.openEnding(777, "knight-castle");
     check(e.menu.formName() == "endgame", "ending: the story form");
     e.click("GameOver");
     check(e.menu.formName() == "entername" && e.widget("Score").text == "777", "ending: its last button goes on to the score");
+    e.click("ApplyRecord");
+    check(e.save.highScores.entries.size() == 1 && e.save.highScores.entries[0].level == "knight-castle", "ending: and the level goes with it");
 
     // Typed text outside the name entry goes nowhere.
     Harness other;
@@ -794,6 +938,8 @@ int main() {
     testLocking();
     testBats();
     testOptions();
+    testVolumeConversion();
+    testSaving();
     testSliderSounds();
     testHighScores();
     testNameEntry();
