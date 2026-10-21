@@ -28,3 +28,14 @@ add_executable(mb_scene_smoke scene_smoke.cpp)
 target_link_libraries(mb_scene_smoke PRIVATE mb_game)
 add_test(NAME mb_scene_smoke COMMAND mb_scene_smoke)
 set_tests_properties(mb_scene_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# File helpers and save data, in a temporary folder.
+add_executable(mb_save_tests test_save.cpp)
+target_link_libraries(mb_save_tests PRIVATE mb_game)
+add_test(NAME mb_save_tests COMMAND mb_save_tests)
+
+# Fullscreen shortcuts and the remembered window size, on SDL's dummy video driver; 77 (skipped) if that cannot make a window.
+add_executable(mb_window_tests test_window.cpp)
+target_link_libraries(mb_window_tests PRIVATE mb_engine)
+add_test(NAME mb_window_tests COMMAND mb_window_tests)
+set_tests_properties(mb_window_tests PROPERTIES SKIP_RETURN_CODE 77)

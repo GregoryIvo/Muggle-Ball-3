@@ -8,7 +8,9 @@
 //   MuggleBall3 --check <level.json>         load a converted level JSON, print a summary, exit
 //
 // In the window: Left/Right (or PageUp/PageDown) = previous/next level, F1 = physics wireframes,
-// left-drag = orbit, right-drag = pan, wheel = zoom, R = back to the game camera, Esc = quit.
+// left-drag = orbit, right-drag = pan, wheel = zoom, R = back to the game camera, Esc = quit,
+// F11 / Alt+Enter / Ctrl+Cmd+F = fullscreen. The window size and fullscreen are remembered between runs
+// (--size is a one-off and is not).
 
 #include "mb/engine/Log.h"
 #include "mb/engine/Paths.h"
@@ -20,6 +22,7 @@
 #include "mb/game/LevelScene.h"
 #include "mb/game/MaterialLibrary.h"
 #include "mb/game/ModelCache.h"
+#include "mb/game/SaveData.h"
 #include "mb/game/TextureIndex.h"
 
 #define SDL_MAIN_HANDLED
@@ -52,6 +55,7 @@ struct Options {
     std::string screenshot;  // --screenshot; empty means open a window
     int width = kDefaultWidth;
     int height = kDefaultHeight;
+    bool sizeGiven = false;  // --size was on the command line
     bool shapes = false;
     std::optional<std::array<float, 7>> camera;  // eye, target, vertical fov in degrees
 };
@@ -221,12 +225,24 @@ private:
     int frames_ = 0;
 };
 
+// Remembers how the player left the window. A size from --size was asked for once, so it is not kept.
+void saveWindowState(const mb::Window& window, mb::SaveData& save, bool keepSize) {
+    save.settings.fullscreen = window.fullscreen();
+    if (keepSize) {
+        window.windowedSize(save.settings.windowWidth, save.settings.windowHeight);
+    }
+    save.saveSettings();
+}
+
 int runWindow(const Options& options) {
     // Resolve the assets and the level first, so a bad argument fails before a window flashes up.
     Assets assets;
     const std::size_t first = startLevel(assets, options);
 
-    mb::Window window("Muggle Ball 3", options.width, options.height);
+    mb::SaveData save(mb::userDataDir());
+    mb::logInfo("Save data: {}", save.directory().string());
+    mb::Window window("Muggle Ball 3", options.sizeGiven ? options.width : save.settings.windowWidth,
+                      options.sizeGiven ? options.height : save.settings.windowHeight, save.settings.fullscreen);
     mb::Renderer renderer(window);
     mb::logInfo("GPU backend: {}", renderer.backendName());
     mb::logInfo("Asset root: {}", assets.root.string());
@@ -279,6 +295,7 @@ int runWindow(const Options& options) {
         stats.frame();
     }
     stats.report();
+    saveWindowState(window, save, !options.sizeGiven);
     return 0;
 }
 
@@ -346,6 +363,7 @@ int main(int argc, char** argv) {
             } else if (arg == "--screenshot" && hasValue) {
                 options.screenshot = argv[++i];
             } else if (arg == "--size" && hasValue && parseSize(argv[i + 1], options.width, options.height)) {
+                options.sizeGiven = true;
                 ++i;
             } else if (arg == "--shapes") {
                 options.shapes = true;

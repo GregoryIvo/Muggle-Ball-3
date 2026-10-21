@@ -124,3 +124,22 @@ contents of `Textures.dat`). Every `.dds` file (in `Textures/` and
 `tools/textures.py`, so the runtime only ever decodes JPEG and PNG.
 Game materials name textures without an extension (`"Pushka"`, `"01"`). The
 runtime resolves them with `TextureIndex`.
+
+## App icon: `assets/AppIcon.icns`
+
+macOS only, and not read by the game: `tools/make_icon.py` builds it, `tools/convert_assets.py` runs that
+last (skipped off macOS or if the icon cannot be read), and CMake copies it into the app bundle as
+`Contents/Resources/AppIcon.icns` (with `CFBundleIconFile`) when the file exists. Without it the app has
+the default icon.
+
+The icon is the one in `MagicBall3.exe`: PE resources, `RT_GROUP_ICON` "IDI_APPICON" (the first icon group)
+and the `RT_ICON` images it lists, which are 48, 32, 24 and 16 pixels, 32-bit with alpha. The resource
+directory is intact even though the executable is Alawar's trial wrapper, and the icon data sits in a
+different section than the directory, so every RVA goes through the section table. The `.ico` files in the
+install folder are Alawar's, Gamextazy's and the installer's logos, not the game's; `--ico` reads one if an
+executable's resources ever cannot be parsed.
+
+`make_icon.py` writes an `.iconset` (16 to 512 pixels at 1x and 2x) and runs `iconutil -c icns`. Sizes the
+icon has (16 and 32) are used as they are. The rest (64 to 1024) are resampled from the 48 pixel image with a
+Lanczos filter on alpha-weighted colour, so the 1024 pixel icon is soft: there is nothing sharper in the
+game's files.

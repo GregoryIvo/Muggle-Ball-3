@@ -38,3 +38,16 @@ jobs:
 
       - name: Converter tests
         run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+
+  package-macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: brew install ninja
+
+      # A universal app with SDL3 built from source, signed ad-hoc: the script checks that both
+      # architectures are there, that it links only system libraries, and that the signature verifies.
+      - name: Package
+        run: scripts/package_macos.sh --universal

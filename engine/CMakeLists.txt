@@ -1,6 +1,7 @@
 add_library(mb_engine
   src/Log.cpp
   src/Paths.cpp
+  src/Files.cpp
   src/Window.cpp
   src/Renderer.cpp
   src/PipelineCache.cpp
