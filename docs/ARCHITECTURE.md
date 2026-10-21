@@ -13,6 +13,8 @@ Goal: native on macOS first, then other platforms without rewriting the game.
 | Text | SDL3_ttf (planned) | Original fonts `Bookworm.ttf`, `brushType-SemiBold.TTF`. |
 | Meshes | Offline `.x` → binary glTF, loaded with cgltf | 272 meshes, all `xof 0303bin 0032`. See `ASSET_FORMATS.md`. |
 | Images | stb_image | JPEG and PNG; the 25 DDS files are converted to PNG offline. |
+| Saves | JSON in the per-user folder | Settings, progress and high scores in three small versioned files, written atomically (`SAVES.md`). |
+| macOS app | CMake bundle, `scripts/package_macos.sh` | Universal binary, icon, optional bundled assets, signing and notarization (`MACOS.md`). |
 
 ## Rules
 

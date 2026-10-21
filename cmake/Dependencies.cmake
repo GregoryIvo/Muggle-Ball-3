@@ -5,11 +5,18 @@ include(FetchContent)
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_STATIC ON CACHE BOOL "" FORCE)
 set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+# An installed SDL3 is used unless MB3_FETCH_SDL3 asks for the pinned tag, built from source and linked
+# statically (scripts/package_macos.sh does, so the app needs nothing from /opt/homebrew).
+set(mb3_sdl3_find FIND_PACKAGE_ARGS 3.2 CONFIG)
+if(MB3_FETCH_SDL3)
+  set(mb3_sdl3_find "")
+  message(STATUS "SDL3: building release-3.2.10 from source, linked statically")
+endif()
 FetchContent_Declare(SDL3
   GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
   GIT_TAG release-3.2.10
   GIT_SHALLOW TRUE
-  FIND_PACKAGE_ARGS 3.2 CONFIG)
+  ${mb3_sdl3_find})
 
 # JSON for the converted level, material and mesh files.
 set(JSON_BuildTests OFF CACHE INTERNAL "")

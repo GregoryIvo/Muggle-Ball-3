@@ -12,11 +12,13 @@ Usage:
 import argparse
 import json
 import pathlib
+import platform
 import shutil
 import sys
 import zipfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import make_icon  # noqa: E402
 import materials  # noqa: E402
 import mb3level  # noqa: E402
 import nxconvex  # noqa: E402
@@ -83,6 +85,20 @@ def convert_levels(out):
     print(f"levels: {len(levels)} converted to JSON")
 
 
+def convert_icon(game, out):
+    """The app icon, assets/AppIcon.icns, from the executable's icon resource. macOS only (iconutil);
+    elsewhere, or if the icon cannot be read, the app simply has no custom icon, so nothing here is fatal."""
+    if platform.system() != "Darwin":
+        print("icon: skipped (building an .icns needs macOS)")
+        return
+    try:
+        sizes = make_icon.build_app_icon(game, out / "AppIcon.icns")
+    except (OSError, make_icon.IconError) as e:
+        print(f"icon: skipped ({e})")
+        return
+    print(f"icon: AppIcon.icns built from MagicBall3.exe ({', '.join(f'{s}px' for s in sizes)} images)")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--game", required=True, type=pathlib.Path)
@@ -98,6 +114,7 @@ def main():
     convert_sounds(args.out)
     convert_meshes(args.out)
     convert_levels(args.out)
+    convert_icon(args.game, args.out)
     print(f"done: {args.out.resolve()}")
 
 
