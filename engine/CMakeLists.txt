@@ -3,6 +3,8 @@ add_library(mb_engine
   src/Paths.cpp
   src/Window.cpp
   src/Renderer.cpp
+  src/PipelineCache.cpp
+  src/RenderFrame.cpp
   src/Image.cpp
   src/Model.cpp
   src/StbImpl.cpp
