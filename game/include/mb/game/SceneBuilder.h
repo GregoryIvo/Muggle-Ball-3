@@ -39,8 +39,14 @@ inline constexpr float kDefaultLightAmbient = 0.502f;
 // Everything needed to draw one primitive of one actor, without any GPU handle.
 struct SceneDraw {
     std::string meshFile;  // file under Data/Meshes, e.g. "bg/bg_day.glb"; see meshFileName()
-    // item.mesh and item.material.texture are left 0 for the caller to fill in.
+    // item.mesh and item.material.texture are left 0 for the caller to fill in. item.world is where the primitive
+    // stands with its actor at the pose the level saved.
     DrawItem item;
+    // The actor the primitive belongs to (see flattenActors()) and where it sits in the actor's frame: the node's
+    // transform in the model. When the actor moves, item.world = local * the actor's pose. (A background, the sky,
+    // does not move; its item.world also holds the kSkyOffsetY shift.)
+    ActorIndex actor = kNoActor;
+    Mat4 local;
     // Texture files for item.material.texture: none, one, or (when animTimeMs > 0)
     // the frames of an animation, each shown for animTimeMs.
     std::vector<std::filesystem::path> textures;
@@ -70,7 +76,7 @@ std::string meshFileName(std::string_view levelMeshName);
 // Turns a level into draw descriptions (see docs/ASSET_FORMATS.md for what the
 // data means): every actor whose object names a mesh, cloth segments included,
 // draws its `frame` subtree (all root frames when no frame is named) at
-// model.globalTransform(node) * actor pose. The exception is a cloth object's own
+// model.globalTransform(node) * actor pose (the rigid one, see rigidTransform()). The exception is a cloth object's own
 // mesh, which is only a placeholder for the sail the cloth simulation will build.
 //
 // Which texture a primitive gets, in order:
@@ -99,9 +105,19 @@ std::optional<DirectionalLight> parseLight(std::span<const std::uint8_t> d3dLigh
 // The level's own light object, or the default light.
 DirectionalLight levelLight(const Level& level, const MaterialLibrary& materials);
 
-// Wireframes of the physics shapes (boxes, spheres, capsules) in world space:
-// shape pose * actor pose. Convex and mesh shapes reference cooked meshes that are
-// not loaded yet and are skipped.
+// Wireframes of the physics shapes (boxes, spheres, capsules and convex hulls) in the actor's frame, shape pose
+// applied: one entry per actor that has shapes, cloth segments included. Shapes that take no part in collisions
+// (see collides()) are grey. Planes and triangle meshes are not drawn.
+struct ActorShapeLines {
+    ActorIndex actor = kNoActor;
+    std::vector<DebugLine> lines;
+};
+std::vector<ActorShapeLines> actorShapeLines(const Level& level);
+
+// The same in world space at the poses the level saved.
 std::vector<DebugLine> shapeLines(const Level& level);
+
+// A sphere of the given radius at the origin.
+std::vector<DebugLine> sphereLines(float radius, Color color);
 
 }  // namespace mb

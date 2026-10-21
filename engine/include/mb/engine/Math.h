@@ -211,6 +211,46 @@ inline Mat4 inverse(const Mat4& a) {
     return r;
 }
 
+// The rotation nearest to the upper-left 3x3 of `a` (its polar factor, by Newton iteration), with the
+// translation kept. A matrix that is already a rotation to within 1e-6 comes back as it is. One that
+// is singular or mirrors has no rotation near it and gives the identity rotation.
+inline Mat4 orthonormalised(const Mat4& a) {
+    Vec3 q[3];
+    for (int i = 0; i < 3; ++i) {
+        q[i] = {a.m[i][0], a.m[i][1], a.m[i][2]};
+    }
+    constexpr float kTolerance = 1e-6f;
+    const auto isRotation = [&] {
+        return std::fabs(dot(q[0], q[0]) - 1) < kTolerance && std::fabs(dot(q[1], q[1]) - 1) < kTolerance &&
+               std::fabs(dot(q[2], q[2]) - 1) < kTolerance && std::fabs(dot(q[0], q[1])) < kTolerance &&
+               std::fabs(dot(q[0], q[2])) < kTolerance && std::fabs(dot(q[1], q[2])) < kTolerance &&
+               dot(cross(q[0], q[1]), q[2]) > 0;
+    };
+    for (int iteration = 0; iteration < 32 && !isRotation(); ++iteration) {
+        const float det = dot(q[0], cross(q[1], q[2]));
+        if (!(det > 1e-6f)) {  // also false for NaN
+            Mat4 r;
+            r.m[3][0] = a.m[3][0];
+            r.m[3][1] = a.m[3][1];
+            r.m[3][2] = a.m[3][2];
+            return r;
+        }
+        // Q <- (Q + Q^-T) / 2; the rows of Q^-T are the cofactor rows over the determinant.
+        const Vec3 inverseTransposed[3] = {cross(q[1], q[2]) / det, cross(q[2], q[0]) / det,
+                                           cross(q[0], q[1]) / det};
+        for (int i = 0; i < 3; ++i) {
+            q[i] = (q[i] + inverseTransposed[i]) * 0.5f;
+        }
+    }
+    Mat4 r = a;
+    for (int i = 0; i < 3; ++i) {
+        r.m[i][0] = q[i].x;
+        r.m[i][1] = q[i].y;
+        r.m[i][2] = q[i].z;
+    }
+    return r;
+}
+
 // D3DXMatrixLookAtLH.
 inline Mat4 lookAtLH(Vec3 eye, Vec3 target, Vec3 up) {
     const Vec3 z = normalize(target - eye);

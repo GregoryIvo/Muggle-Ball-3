@@ -357,6 +357,30 @@ float slopeSlide(float friction) {
     return length(position(world, box) - onTop);
 }
 
+// Levels were saved with bodies overlapping (a pile of logs, a ship's planks): woken, they must part slowly, and
+// not through the floor.
+void testDeepOverlap() {
+    PhysicsWorld world(kGravity, settingsFor());
+    world.addBody(staticBody(at({0, -0.42f, 0}), boxShape({50, 0.42f, 50}, materialWith(0.5f, 1.0f))));
+    std::vector<BodyId> column;
+    for (int i = 0; i < 6; ++i) {  // each box 0.8 of its height inside the one under it
+        BodyDesc d = dynamicBody(at({0, 0.5f + 0.2f * static_cast<float>(i), 0}), boxShape({0.5f, 0.5f, 0.5f}, materialWith(0.6f, 0.3f)));
+        d.mass = 50;
+        d.inertia = {8, 8, 8};
+        column.push_back(world.addBody(d));
+    }
+    float fastest = 0, lowest = 1e9f;
+    for (int i = 0; i < 120; ++i) {
+        world.step(kStep);
+        for (const BodyId body : column) {
+            fastest = std::max(fastest, length(world.linearVelocity(body)));
+            lowest = std::min(lowest, position(world, body).y - 0.5f);
+        }
+    }
+    check(fastest < 0.08f, str("overlap: boxes saved 80%% inside each other part at %.3f units per second at most", fastest));
+    check(lowest > -0.3f, str("overlap: and none goes more than 0.3 under the floor (lowest %.3f)", lowest));
+}
+
 void testSlope() {
     const float holds = slopeSlide(0.7f);
     check(holds < 0.01f, str("slope: a box holds on 30 degrees with friction 0.7 (moved %.4f m)", holds));
@@ -640,6 +664,83 @@ void testStartAsleep() {
     runSeconds(sleepless, 5);
     check(sleepless.isAwake(awake) && !sleepless.isAwake(normal),
           "asleep: a body asking for no sleep stays awake, one at rest otherwise falls asleep");
+}
+
+// A level is saved with velocities on its bodies, and asleep it must not move: the velocity it is
+// given is dropped, not carried out the moment it wakes (Jolt asserts on a sleeping body that has one).
+void testStartAsleepDropsVelocity() {
+    PhysicsWorld world(kGravity, settingsFor());
+    BodyDesc d = floating(at({0, 5, 0}), boxShape({0.5f, 0.5f, 0.5f}));
+    d.linearVelocity = {5, 0, 0};
+    d.angularVelocity = {0, 3, 0};
+    d.startAsleep = true;
+    const BodyId body = world.addBody(d);
+    check(!world.isAwake(body), "asleep with velocity: starts asleep");
+    check(length(world.linearVelocity(body)) == 0 && length(world.angularVelocity(body)) == 0,
+          "asleep with velocity: the velocities it was given are zero");
+    runSeconds(world, 0.5f);
+    check(near(world.pose(body), at({0, 5, 0}), 1e-6f), "asleep with velocity: it stays put");
+    world.wake(body);
+    runSeconds(world, 0.5f);
+    check(near(world.pose(body), at({0, 5, 0}), 1e-6f),
+          "asleep with velocity: and wakes with nothing to move it (no gravity here)");
+
+    // A body that is awake keeps what it was given.
+    BodyDesc moving = d;
+    moving.startAsleep = false;
+    const BodyId other = world.addBody(moving);
+    runSeconds(world, 0.5f);
+    check(position(world, other).x > 2, "asleep with velocity: an awake body does move on its velocity");
+}
+
+void testFullyLockedIsStatic() {
+    PhysicsWorld world(kGravity, settingsFor());
+    addGround(world);
+    BodyDesc d = dynamicBody(at({0, 3, 0}), boxShape({0.5f, 0.5f, 0.5f}));
+    d.mass = 2;
+    d.inertia = {1, 1, 1};
+    std::fill(std::begin(d.lockTranslation), std::end(d.lockTranslation), true);
+    std::fill(std::begin(d.lockRotation), std::end(d.lockRotation), true);
+    const BodyId pinned = world.addBody(d);
+    check(pinned != 0 && world.motionType(pinned) == MotionType::Static,
+          "locked: a dynamic body locked on all six axes is static");
+
+    BodyDesc k = d;
+    k.motion = MotionType::Kinematic;
+    k.pose = at({3, 3, 0});
+    const BodyId pinnedKinematic = world.addBody(k);
+    check(pinnedKinematic != 0 && world.motionType(pinnedKinematic) == MotionType::Static,
+          "locked: so is a kinematic one");
+
+    BodyDesc half = d;  // five of six is still dynamic, and free to fall along y
+    half.pose = at({-3, 3, 0});
+    half.lockTranslation[1] = false;
+    const BodyId almost = world.addBody(half);
+    check(world.motionType(almost) == MotionType::Dynamic, "locked: five axes of six leave it dynamic");
+
+    world.addImpulse(pinned, {10, 10, 10}, {0, 3, 0});
+    world.setMotionType(pinned, MotionType::Dynamic);  // refused: it is locked
+    runSeconds(world, 1);
+    check(world.motionType(pinned) == MotionType::Static && near(position(world, pinned), {0, 3, 0}, 1e-6f) &&
+              near(position(world, pinnedKinematic), {3, 3, 0}, 1e-6f),
+          "locked: it does not move, and setMotionType does not free it");
+    check(position(world, almost).y < 1, "locked: the one with a free axis falls");
+}
+
+void testKinematicStopsWhereItWas() {
+    PhysicsWorld world(kGravity, settingsFor());
+    BodyDesc d = floating(at({0, 0, 0}), boxShape({0.5f, 0.5f, 0.5f}));
+    d.linearVelocity = {3, 0, 0};
+    d.angularVelocity = {0, 2, 0};
+    const BodyId body = world.addBody(d);
+    runSeconds(world, 0.25f);
+    check(position(world, body).x > 0.5f, "kinematic switch: the dynamic body was moving");
+    world.setMotionType(body, MotionType::Kinematic);
+    check(length(world.linearVelocity(body)) == 0 && length(world.angularVelocity(body)) == 0,
+          "kinematic switch: becoming kinematic zeroes the velocities");
+    const Mat4 held = world.pose(body);
+    runSeconds(world, 1);
+    check(near(world.pose(body), held, 1e-6f), "kinematic switch: and the body stays where it was");
 }
 
 void testKinematic() {
@@ -1624,12 +1725,16 @@ int main() {
     testFrictionCombine();
     testStackStandsAndSleeps();
     testThinPlateAndSmallBox();
+    testDeepOverlap();
     testSlope();
     testMassProperties();
     testCentreOfMassTips();
     testShapeFrames();
     testLocks();
     testStartAsleep();
+    testStartAsleepDropsVelocity();
+    testFullyLockedIsStatic();
+    testKinematicStopsWhereItWas();
     testKinematic();
     testMotionTypeAndTeleport();
     testFixedJointBreaks();

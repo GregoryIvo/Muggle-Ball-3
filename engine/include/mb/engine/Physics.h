@@ -57,15 +57,17 @@ struct BodyDesc {
     Vec3 inertia{};       // diagonal, in the mass frame
     Mat4 massLocalPose;   // centre-of-mass frame relative to the body's frame
 
-    Vec3 linearVelocity{};
+    Vec3 linearVelocity{};   // ignored (zero) for a body that starts asleep
     Vec3 angularVelocity{};
     float linearDamping = 0;
     float angularDamping = 0.05f;
     float maxAngularVelocity = 7;  // rad/s
     bool gravity = true;
-    bool lockTranslation[3] = {false, false, false};  // NX_BF_FROZEN_POS_X/Y/Z
-    bool lockRotation[3] = {false, false, false};     // NX_BF_FROZEN_ROT_X/Y/Z
-    bool startAsleep = false;
+    // NX_BF_FROZEN_POS_X/Y/Z and ROT_X/Y/Z. A body with all six set cannot move at all and is
+    // created static, whatever `motion` says; setMotionType leaves it that way.
+    bool lockTranslation[3] = {false, false, false};
+    bool lockRotation[3] = {false, false, false};
+    bool startAsleep = false;  // stays put until something touches it or wake() is called
     float sleepLinearVelocity = 0.15f;
     float sleepAngularVelocity = 0.14f;
     bool continuousCollision = false;  // for small fast bodies such as the ball
@@ -163,6 +165,7 @@ public:
     // Kinematic bodies: reach this pose by the end of the next fixed step, pushing what is in the way.
     void setKinematicTarget(BodyId body, const Mat4& pose);
     MotionType motionType(BodyId body) const;
+    // A body that becomes kinematic stops where it is (its velocities are zeroed).
     void setMotionType(BodyId body, MotionType motion);
     bool isAwake(BodyId body) const;
     void wake(BodyId body);
