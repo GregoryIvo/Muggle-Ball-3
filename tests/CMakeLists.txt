@@ -31,6 +31,38 @@ target_link_libraries(mb_scene_smoke PRIVATE mb_game)
 add_test(NAME mb_scene_smoke COMMAND mb_scene_smoke)
 set_tests_properties(mb_scene_smoke PROPERTIES SKIP_RETURN_CODE 77)
 
+# The 2D UI foundation: layout, sprite sheets, string table, bitmap fonts and the form model. Needs no GPU or data.
+add_executable(mb_ui_tests test_ui.cpp)
+target_link_libraries(mb_ui_tests PRIVATE mb_game nlohmann_json::nlohmann_json)
+add_test(NAME mb_ui_tests COMMAND mb_ui_tests)
+
+# Loads every converted form, font and string against the real game data when MB3_ASSETS points at it (and draws
+# them when there is a GPU); exits 77 (skipped) otherwise.
+add_executable(mb_ui_smoke ui_smoke.cpp)
+target_link_libraries(mb_ui_smoke PRIVATE mb_game)
+add_test(NAME mb_ui_smoke COMMAND mb_ui_smoke)
+set_tests_properties(mb_ui_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# The menu runtime and the game flow, driven by synthetic pointer events and keys. Needs no GPU or data.
+add_executable(mb_menu_tests test_menu.cpp)
+target_link_libraries(mb_menu_tests PRIVATE mb_game nlohmann_json::nlohmann_json)
+add_test(NAME mb_menu_tests COMMAND mb_menu_tests)
+
+# The menus and the HUD against the real game data when MB3_ASSETS points at it (and with a GPU, their sprites); exits 77 (skipped)
+# otherwise.
+add_executable(mb_menu_smoke menu_smoke.cpp)
+target_link_libraries(mb_menu_smoke PRIVATE mb_game)
+add_test(NAME mb_menu_smoke COMMAND mb_menu_smoke)
+set_tests_properties(mb_menu_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# The whole front end in a real window, driven by events pushed from a second thread, with the real game data. Exits 77
+# (skipped) without MB3_ASSETS, a window system or a GPU.
+add_executable(mb_frontend_smoke frontend_smoke.cpp ${PROJECT_SOURCE_DIR}/app/FrontEnd.cpp)
+target_include_directories(mb_frontend_smoke PRIVATE ${PROJECT_SOURCE_DIR}/app)
+target_link_libraries(mb_frontend_smoke PRIVATE mb_game)
+add_test(NAME mb_frontend_smoke COMMAND mb_frontend_smoke)
+set_tests_properties(mb_frontend_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
 # File helpers and save data, in a temporary folder.
 add_executable(mb_save_tests test_save.cpp)
 target_link_libraries(mb_save_tests PRIVATE mb_game)

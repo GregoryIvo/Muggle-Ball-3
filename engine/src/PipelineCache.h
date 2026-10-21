@@ -16,6 +16,14 @@ struct LineVertex {
 };
 static_assert(sizeof(LineVertex) == 28);
 
+// Vertex layout of the Sprite pipeline: a pixel position, a texture coordinate and a tint.
+struct SpriteVertex {
+    Vec2 position;
+    Vec2 uv;
+    Color color;
+};
+static_assert(sizeof(SpriteVertex) == 32);
+
 // Everything that selects a graphics pipeline. Per-draw data (matrices, colours,
 // texture) is not part of it, so a handful of pipelines cover a whole level.
 struct PipelineKey {
@@ -27,11 +35,13 @@ struct PipelineKey {
     bool depthWrite = true;
     bool depthTest = true;
     bool lines = false;  // the DebugLine pipeline; blend, cull and depth flags are fixed for it
+    bool sprites = false;  // the Sprite pipeline: alpha blending, no culling, no depth
 
     // Resolves BlendMode::AlphaBlend and Additive to their factors, so materials that blend the same way
     // share one pipeline however they were described.
     static PipelineKey forMaterial(SDL_GPUTextureFormat colorFormat, const MaterialParams& material);
     static PipelineKey forLines(SDL_GPUTextureFormat colorFormat);
+    static PipelineKey forSprites(SDL_GPUTextureFormat colorFormat);
 
     // Unique per distinct key; also used to sort draws so equal pipelines sit together.
     std::uint64_t pack() const;
@@ -59,6 +69,8 @@ private:
     SDL_GPUShader* meshFragment_ = nullptr;
     SDL_GPUShader* lineVertex_ = nullptr;
     SDL_GPUShader* lineFragment_ = nullptr;
+    SDL_GPUShader* spriteVertex_ = nullptr;
+    SDL_GPUShader* spriteFragment_ = nullptr;
     std::unordered_map<std::uint64_t, SDL_GPUGraphicsPipeline*> pipelines_;
 };
 

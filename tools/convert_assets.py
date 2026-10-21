@@ -18,12 +18,14 @@ import sys
 import zipfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import campaign  # noqa: E402
 import make_icon  # noqa: E402
 import materials  # noqa: E402
 import mb3level  # noqa: E402
 import nxconvex  # noqa: E402
 import sounds  # noqa: E402
 import textures  # noqa: E402
+import ui  # noqa: E402
 import x2glb  # noqa: E402
 
 PLAIN_ARCHIVES = {"Textures.dat": "Textures", "Sounds.dat": "Sounds", "Musics.dat": "Musics"}
@@ -62,6 +64,19 @@ def convert_sounds(out):
     stats = sounds.convert(xml, out / "Sounds", out / "Musics", xml)
     print(f"sounds: {stats['sounds']} converted, {stats['samples']} samples, {len(stats['silent'])} sounds silent "
           f"(no file), duplicates {stats['duplicates']}; musics: {stats['musics']}, missing {stats['missingMusics']}")
+
+
+def convert_ui(out):
+    stats = ui.convert(out)
+    print(f"ui: {stats['forms']['files']} menu forms, {len(stats['languages']['languages'])} languages, "
+          f"{len(stats['fonts']['fonts'])} font atlases converted to JSON")
+    for warning in stats["forms"]["problems"] + stats["fonts"]["warnings"]:
+        print(f"ui: warning: {warning}")
+
+
+def convert_campaign(out):
+    stats = campaign.convert(out)
+    print(f"campaign: {stats['levels']} levels in {len(stats['stages'])} stages ({', '.join(stats['stages'])})")
 
 
 def convert_meshes(out):
@@ -112,8 +127,10 @@ def main():
     convert_textures(args.out)
     convert_materials(args.out)
     convert_sounds(args.out)
+    convert_ui(args.out)
     convert_meshes(args.out)
     convert_levels(args.out)
+    convert_campaign(args.out)
     convert_icon(args.game, args.out)
     print(f"done: {args.out.resolve()}")
 

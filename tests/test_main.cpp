@@ -314,6 +314,122 @@ void testDragAttribution() {
     pushButton(SDL_BUTTON_MIDDLE, false);
     window->pollEvents(in);
     check(!in.leftButton && !in.middleButton, "all released");
+
+    // The pointer position (what the 2D UI hit-tests) is the window's pixels, and stays between polls.
+    SDL_WarpMouseInWindow(window->handle(), 10, 20);
+    window->pollEvents(in);
+    check(in.mouseX == 10 && in.mouseY == 20, "pointer position after a warp");
+    window->pollEvents(in);
+    check(in.mouseX == 10 && in.mouseY == 20, "pointer position is kept by a poll with no events");
+}
+
+void pushMotionAt(float x, float y) {
+    SDL_Event e{};
+    e.type = SDL_EVENT_MOUSE_MOTION;
+    e.motion.x = x;
+    e.motion.y = y;
+    SDL_PushEvent(&e);
+}
+
+void pushButtonAt(Uint8 button, bool down, float x, float y) {
+    SDL_Event e{};
+    e.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+    e.button.button = button;
+    e.button.down = down;
+    e.button.x = x;
+    e.button.y = y;
+    SDL_PushEvent(&e);
+}
+
+void pushKey(SDL_Keycode key, bool repeat = false) {
+    SDL_Event e{};
+    e.type = SDL_EVENT_KEY_DOWN;
+    e.key.key = key;
+    e.key.down = true;
+    e.key.repeat = repeat;
+    SDL_PushEvent(&e);
+}
+
+void pushText(const char* text) {
+    SDL_Event e{};
+    e.type = SDL_EVENT_TEXT_INPUT;
+    e.text.text = text;
+    SDL_PushEvent(&e);
+}
+
+void pushWindowEvent(SDL_EventType type) {
+    SDL_Event e{};
+    e.type = type;
+    SDL_PushEvent(&e);
+}
+
+// What the menus need from the window: the pointer's events in order with their positions, Escape as a key, typed text.
+void testMenuInput() {
+    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+    std::unique_ptr<mb::Window> window;
+    try {
+        window = std::make_unique<mb::Window>("test", 64, 64);
+    } catch (const std::exception& e) {
+        std::printf("skipped the menu input test: %s\n", e.what());
+        return;
+    }
+    mb::InputEvents in;
+
+    // A click made inside one poll is a press and a release, each where it happened.
+    pushMotionAt(10, 20);
+    pushButtonAt(SDL_BUTTON_LEFT, true, 10, 20);
+    pushMotionAt(11, 21);
+    pushButtonAt(SDL_BUTTON_LEFT, false, 12, 22);
+    pushButtonAt(SDL_BUTTON_RIGHT, true, 30, 30);  // not the left button: no sample
+    window->pollEvents(in);
+    const auto sample = [&](std::size_t i, float x, float y, bool down) {
+        return i < in.pointer.size() && in.pointer[i].x == x && in.pointer[i].y == y && in.pointer[i].leftDown == down;
+    };
+    check(in.pointer.size() == 4 && sample(0, 10, 20, false) && sample(1, 10, 20, true) && sample(2, 11, 21, true) && sample(3, 12, 22, false),
+          "pointer samples: moves and left-button changes, in order, with the button state just after each");
+    window->pollEvents(in);
+    check(in.pointer.empty(), "pointer samples: a poll with no events has none");
+
+    // The pointer leaving the window hovers nothing; losing focus with the button down lets go of it.
+    pushWindowEvent(SDL_EVENT_WINDOW_MOUSE_LEAVE);
+    window->pollEvents(in);
+    check(in.pointer.size() == 1 && sample(0, -1, -1, false), "pointer samples: leaving the window is a sample off the screen");
+    pushMotionAt(5, 6);
+    pushButtonAt(SDL_BUTTON_LEFT, true, 5, 6);
+    window->pollEvents(in);
+    check(in.leftButton, "pointer samples: the button is held");
+    pushWindowEvent(SDL_EVENT_WINDOW_FOCUS_LOST);
+    window->pollEvents(in);
+    check(in.pointer.size() == 1 && sample(0, 5, 6, false) && !in.leftButton, "pointer samples: losing focus releases the button at the last position");
+
+    // Escape closes the window until the menus take it over; then it is an ordinary key.
+    pushKey(SDLK_ESCAPE);
+    check(!window->pollEvents(in) && in.keysPressed.empty(), "escape: quits by default");
+    window->setEscapeQuits(false);
+    pushKey(SDLK_A);
+    pushKey(SDLK_ESCAPE);
+    pushKey(SDLK_BACKSPACE, true);  // a repeat
+    pushKey(SDLK_RETURN);
+    check(window->pollEvents(in) && in.keysPressed == std::vector<std::uint32_t>({SDLK_A, SDLK_ESCAPE, SDLK_RETURN}),
+          "escape: with setEscapeQuits(false) it arrives as a key, in order, and repeats are left out");
+    window->setEscapeQuits(true);
+    pushKey(SDLK_ESCAPE);
+    check(!window->pollEvents(in), "escape: and quits again when asked to");
+
+    // Typed text is collected, as UTF-8, from the text events SDL sends while text input is on.
+    window->setTextInput(true);
+    pushText("Ann");
+    pushText("\xC3\xA9");
+    window->pollEvents(in);
+    check(in.text == "Ann\xC3\xA9", "text: typed characters, UTF-8, joined in order");
+    window->pollEvents(in);
+    check(in.text.empty(), "text: and cleared by the next poll");
+    window->setTextInput(false);  // SDL then stops sending text events (a pushed one would still arrive)
+
+    // The display this window is on has a size.
+    int width = 0, height = 0;
+    check(!window->displaySize(width, height) || (width > 0 && height > 0), "displaySize: a size, or none known");
 }
 
 }  // namespace
@@ -347,6 +463,7 @@ int main() {
     testLevelVersion();
     testPhysicsFields();
     testDragAttribution();
+    testMenuInput();
 
     if (failures == 0) {
         std::puts("all tests passed");

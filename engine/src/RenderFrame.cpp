@@ -6,6 +6,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <tuple>
@@ -176,65 +177,132 @@ void Renderer::Impl::collectDraws(SDL_GPUTextureFormat colorFormat, const FrameP
     });
 }
 
-Uint32 Renderer::Impl::uploadLines(SDL_GPUCommandBuffer* cmd, std::span<const DebugLine> lines) {
-    constexpr Uint32 kMaxLineVertices = std::numeric_limits<Uint32>::max() / sizeof(LineVertex);
-    const std::size_t wanted = lines.size() * 2;
-    if (wanted == 0 || wanted > kMaxLineVertices) {
-        return 0;
+void Renderer::Impl::releaseStream(StreamBuffer& buffer) {
+    if (buffer.vertices) {
+        SDL_ReleaseGPUBuffer(device, buffer.vertices);
     }
-    const auto vertexCount = static_cast<Uint32>(wanted);
+    if (buffer.transfer) {
+        SDL_ReleaseGPUTransferBuffer(device, buffer.transfer);
+    }
+    buffer = {};
+}
 
-    if (vertexCount > lineBuffer.capacity) {
-        // Doubling keeps a fluctuating line count from reallocating every frame.
-        const Uint32 capacity =
-            std::min(kMaxLineVertices, std::max({vertexCount, lineBuffer.capacity * 2, Uint32{1024}}));
-        if (lineBuffer.vertices) {
-            SDL_ReleaseGPUBuffer(device, lineBuffer.vertices);
-        }
-        if (lineBuffer.transfer) {
-            SDL_ReleaseGPUTransferBuffer(device, lineBuffer.transfer);
-        }
-        lineBuffer = {};
+// Grows the buffer if needed and maps its transfer buffer for writing `bytes` bytes. Null (after logging) if
+// that fails or `bytes` is zero or does not fit.
+void* Renderer::Impl::mapStream(StreamBuffer& buffer, std::size_t bytes, const char* what) {
+    constexpr std::size_t kMaxBytes = std::numeric_limits<Uint32>::max();
+    if (bytes == 0 || bytes > kMaxBytes) {
+        return nullptr;
+    }
+    if (bytes > buffer.capacity) {
+        // Doubling keeps a fluctuating count from reallocating every frame.
+        const auto capacity =
+            static_cast<Uint32>(std::min(kMaxBytes, std::max({bytes, std::size_t{buffer.capacity} * 2, std::size_t{32768}})));
+        releaseStream(buffer);
         SDL_GPUBufferCreateInfo bufferInfo{};
         bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
-        bufferInfo.size = capacity * sizeof(LineVertex);
-        lineBuffer.vertices = SDL_CreateGPUBuffer(device, &bufferInfo);
+        bufferInfo.size = capacity;
+        buffer.vertices = SDL_CreateGPUBuffer(device, &bufferInfo);
         SDL_GPUTransferBufferCreateInfo transferInfo{};
         transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-        transferInfo.size = capacity * sizeof(LineVertex);
-        lineBuffer.transfer = SDL_CreateGPUTransferBuffer(device, &transferInfo);
-        if (!lineBuffer.vertices || !lineBuffer.transfer) {
-            logError("creating the debug line buffer failed: {}", SDL_GetError());
-            if (lineBuffer.vertices) {
-                SDL_ReleaseGPUBuffer(device, lineBuffer.vertices);
-            }
-            if (lineBuffer.transfer) {
-                SDL_ReleaseGPUTransferBuffer(device, lineBuffer.transfer);
-            }
-            lineBuffer = {};
-            return 0;
+        transferInfo.size = capacity;
+        buffer.transfer = SDL_CreateGPUTransferBuffer(device, &transferInfo);
+        if (!buffer.vertices || !buffer.transfer) {
+            logError("creating the {} buffer failed: {}", what, SDL_GetError());
+            releaseStream(buffer);
+            return nullptr;
         }
-        lineBuffer.capacity = capacity;
+        buffer.capacity = capacity;
     }
+    // cycle = true lets the GPU keep reading last frame's vertices while this frame's are written.
+    void* mapped = SDL_MapGPUTransferBuffer(device, buffer.transfer, true);
+    if (!mapped) {
+        logError("mapping the {} buffer failed: {}", what, SDL_GetError());
+    }
+    return mapped;
+}
 
-    // cycle = true lets the GPU keep reading last frame's lines while this frame's are written.
-    auto* out = static_cast<LineVertex*>(SDL_MapGPUTransferBuffer(device, lineBuffer.transfer, true));
+// Ends the write started by mapStream and queues the copy of its first `bytes` bytes to the GPU buffer.
+void Renderer::Impl::uploadStream(SDL_GPUCommandBuffer* cmd, StreamBuffer& buffer, Uint32 bytes) {
+    SDL_UnmapGPUTransferBuffer(device, buffer.transfer);
+    if (bytes == 0) {
+        return;
+    }
+    const SDL_GPUTransferBufferLocation source{buffer.transfer, 0};
+    const SDL_GPUBufferRegion destination{buffer.vertices, 0, bytes};
+    SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
+    SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+    SDL_EndGPUCopyPass(copy);
+}
+
+Uint32 Renderer::Impl::uploadLines(SDL_GPUCommandBuffer* cmd, std::span<const DebugLine> lines) {
+    auto* out = static_cast<LineVertex*>(mapStream(lineBuffer, lines.size() * 2 * sizeof(LineVertex), "debug line"));
     if (!out) {
-        logError("mapping the debug line buffer failed: {}", SDL_GetError());
         return 0;
     }
     for (const DebugLine& line : lines) {
         *out++ = {line.a, line.color};
         *out++ = {line.b, line.color};
     }
-    SDL_UnmapGPUTransferBuffer(device, lineBuffer.transfer);
+    const auto vertexCount = static_cast<Uint32>(lines.size() * 2);
+    uploadStream(cmd, lineBuffer, vertexCount * static_cast<Uint32>(sizeof(LineVertex)));
+    return vertexCount;
+}
 
-    const SDL_GPUTransferBufferLocation source{lineBuffer.transfer, 0};
-    const SDL_GPUBufferRegion destination{lineBuffer.vertices, 0,
-                                          vertexCount * static_cast<Uint32>(sizeof(LineVertex))};
-    SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
-    SDL_UploadToGPUBuffer(copy, &source, &destination, true);
-    SDL_EndGPUCopyPass(copy);
+// Writes the sprites as triangles (six vertices each) and groups them into runs of one texture. Returns the
+// vertex count; the runs are left in spriteRuns.
+Uint32 Renderer::Impl::uploadSprites(SDL_GPUCommandBuffer* cmd, std::span<const Sprite> sprites) {
+    spriteRuns.clear();
+    constexpr std::size_t kVerticesPerSprite = 6;
+    SpriteVertex* const first =
+        static_cast<SpriteVertex*>(mapStream(spriteBuffer, sprites.size() * kVerticesPerSprite * sizeof(SpriteVertex), "sprite"));
+    if (!first) {
+        return 0;
+    }
+    SpriteVertex* out = first;
+    for (const Sprite& sprite : sprites) {
+        if (sprite.width <= 0 || sprite.height <= 0) {
+            continue;
+        }
+        SDL_GPUTexture* texture = whiteTexture;
+        if (sprite.texture != 0) {
+            const auto found = textures.find(sprite.texture);
+            if (found == textures.end()) {
+                warnMissing("texture", sprite.texture);
+                continue;
+            }
+            texture = found->second;
+        }
+
+        // Corners in the order top-left, top-right, bottom-right, bottom-left. Without rotation they are the
+        // rectangle's own edges, so axis-aligned sprites land on exact pixel boundaries.
+        Vec2 corner[4] = {{sprite.x, sprite.y},
+                          {sprite.x + sprite.width, sprite.y},
+                          {sprite.x + sprite.width, sprite.y + sprite.height},
+                          {sprite.x, sprite.y + sprite.height}};
+        if (sprite.rotation != 0) {
+            const float cx = sprite.x + sprite.width * 0.5f, cy = sprite.y + sprite.height * 0.5f;
+            const float cosine = std::cos(sprite.rotation), sine = std::sin(sprite.rotation);
+            for (Vec2& c : corner) {
+                const float dx = c.x - cx, dy = c.y - cy;
+                c = {cx + dx * cosine - dy * sine, cy + dx * sine + dy * cosine};  // clockwise on a y-down screen
+            }
+        }
+        const SpriteVertex tl{corner[0], {sprite.uv0.x, sprite.uv0.y}, sprite.tint};
+        const SpriteVertex tr{corner[1], {sprite.uv1.x, sprite.uv0.y}, sprite.tint};
+        const SpriteVertex br{corner[2], {sprite.uv1.x, sprite.uv1.y}, sprite.tint};
+        const SpriteVertex bl{corner[3], {sprite.uv0.x, sprite.uv1.y}, sprite.tint};
+        const auto vertex = static_cast<Uint32>(out - first);
+        if (spriteRuns.empty() || spriteRuns.back().texture != texture) {
+            spriteRuns.push_back({texture, vertex, 0});
+        }
+        spriteRuns.back().vertexCount += kVerticesPerSprite;
+        for (const SpriteVertex& v : {tl, tr, br, tl, br, bl}) {
+            *out++ = v;
+        }
+    }
+    const auto vertexCount = static_cast<Uint32>(out - first);
+    uploadStream(cmd, spriteBuffer, vertexCount * static_cast<Uint32>(sizeof(SpriteVertex)));
     return vertexCount;
 }
 
@@ -304,11 +372,35 @@ void Renderer::Impl::drawMeshes(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* c
     drawAll(blendedDraws);
 }
 
+void Renderer::Impl::drawSprites(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd,
+                                 SDL_GPUTextureFormat colorFormat, Uint32 width, Uint32 height) {
+    SDL_GPUGraphicsPipeline* pipeline = pipelines->get(PipelineKey::forSprites(colorFormat));
+    if (!pipeline) {
+        return;
+    }
+    SDL_BindGPUGraphicsPipeline(pass, pipeline);
+    const float pixelToClip[4] = {2.0f / static_cast<float>(width), 2.0f / static_cast<float>(height), 0, 0};
+    SDL_PushGPUVertexUniformData(cmd, 0, pixelToClip, sizeof(pixelToClip));
+    const SDL_GPUBufferBinding binding{spriteBuffer.vertices, 0};
+    SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
+    SDL_GPUTexture* bound = nullptr;
+    for (const SpriteRun& run : spriteRuns) {
+        if (run.texture != bound) {
+            const SDL_GPUTextureSamplerBinding textureBinding{run.texture, sampler};
+            SDL_BindGPUFragmentSamplers(pass, 0, &textureBinding, 1);
+            bound = run.texture;
+        }
+        SDL_DrawGPUPrimitives(pass, run.vertexCount, 1, run.firstVertex, 0);
+    }
+}
+
 void Renderer::Impl::drawFrame(SDL_GPUCommandBuffer* cmd, SDL_GPUTexture* color, SDL_GPUTextureFormat colorFormat,
                                SDL_GPUTexture* depth, Uint32 width, Uint32 height, const FrameParams& frame,
-                               std::span<const DrawItem> items, std::span<const DebugLine> lines) {
+                               std::span<const DrawItem> items, std::span<const DebugLine> lines,
+                               std::span<const Sprite> sprites) {
     collectDraws(colorFormat, frame, items);
     const Uint32 lineVertexCount = uploadLines(cmd, lines);  // copy passes cannot run inside the render pass
+    const Uint32 spriteVertexCount = uploadSprites(cmd, sprites);
 
     SDL_GPUColorTargetInfo colorTarget{};
     colorTarget.texture = color;
@@ -347,11 +439,14 @@ void Renderer::Impl::drawFrame(SDL_GPUCommandBuffer* cmd, SDL_GPUTexture* color,
             SDL_DrawGPUPrimitives(pass, lineVertexCount, 1, 0, 0);
         }
     }
+    if (spriteVertexCount > 0) {
+        drawSprites(pass, cmd, colorFormat, width, height);
+    }
     SDL_EndGPURenderPass(pass);
 }
 
 void Renderer::Impl::renderWindow(const FrameParams& frame, std::span<const DrawItem> items,
-                                  std::span<const DebugLine> lines) {
+                                  std::span<const DebugLine> lines, std::span<const Sprite> sprites) {
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
     if (!cmd) {
         logError("SDL_AcquireGPUCommandBuffer failed: {}", SDL_GetError());
@@ -377,13 +472,14 @@ void Renderer::Impl::renderWindow(const FrameParams& frame, std::span<const Draw
         return;
     }
     if (ensureWindowDepth(width, height)) {
-        drawFrame(cmd, swapchain, swapchainFormat, windowDepth.texture, width, height, frame, items, lines);
+        drawFrame(cmd, swapchain, swapchainFormat, windowDepth.texture, width, height, frame, items, lines, sprites);
     }
     SDL_SubmitGPUCommandBuffer(cmd);
 }
 
 Image Renderer::Impl::renderOffscreen(int width, int height, const FrameParams& frame,
-                                      std::span<const DrawItem> items, std::span<const DebugLine> lines) {
+                                      std::span<const DrawItem> items, std::span<const DebugLine> lines,
+                                      std::span<const Sprite> sprites) {
     if (width <= 0 || height <= 0) {
         logError("renderToImage: invalid size {}x{}", width, height);
         return {};
@@ -398,7 +494,7 @@ Image Renderer::Impl::renderOffscreen(int width, int height, const FrameParams& 
         logError("SDL_AcquireGPUCommandBuffer failed: {}", SDL_GetError());
         return {};
     }
-    drawFrame(cmd, offscreen.color, kColorFormat, offscreen.depth, w, h, frame, items, lines);
+    drawFrame(cmd, offscreen.color, kColorFormat, offscreen.depth, w, h, frame, items, lines, sprites);
 
     SDL_GPUTextureRegion source{};
     source.texture = offscreen.color;

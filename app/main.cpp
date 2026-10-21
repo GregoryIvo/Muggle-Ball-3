@@ -1,27 +1,33 @@
 // Muggle Ball 3: entry point.
 //
-//   MuggleBall3                              open the game window on the first level
-//   MuggleBall3 --level <name|path.json>     ... on this level (file stem or name, any case, or a path)
+//   MuggleBall3                              open the game: the main menu, from which levels are played
+//   MuggleBall3 --level <name|path.json>     open the level viewer on this level (file stem or name, any case, or a path)
 //   MuggleBall3 --screenshot out.png [--size WxH] [--level ...] [--shapes] [--camera ex,ey,ez,tx,ty,tz,fov]
 //                                    [--simulate seconds] [--ball [x,degrees]]
 //                                            render one frame without a window, write it as PNG
-//                                            (--size, --shapes and --camera also apply to the window)
+//                                            (--size, --shapes and --camera also apply to the viewer window)
 //                                            --simulate runs the physics that long first; --ball shoots a test ball
 //                                            at t = 0, from (x, 1.2, -15) at that angle off +z (default: at the
 //                                            middle of everything that can move)
+//   ... [--hud] [--hud-state lives,score,level[,icon...]]
+//                                            draw the in-game HUD over the level (screenshot or viewer)
 //   MuggleBall3 --check <level.json>         load a converted level JSON, print a summary, exit
+//   MuggleBall3 --form <name> [--screenshot out.png] [--size WxH] [--language L] [--hover W | --press W] [--no-background]
+//                                            show a menu form alone (FormViewer.h); Left/Right switch form in the window
 //   MuggleBall3 --play-sound <name> [--seconds N]
 //   MuggleBall3 --play-music <name> [--seconds N]
 //                                            play a named sound (see sounds.xml) or one pass of a music
 //                                            track (Menu, Village, Pirates, Cowboys, Knights), wait, exit
 //
-// In the window: Left/Right (or PageUp/PageDown) = previous/next level, Space = shoot a test ball, P = pause
+// In the level viewer: Left/Right (or PageUp/PageDown) = previous/next level, Space = shoot a test ball, P = pause
 // the physics, L = reload the level, F1 = physics wireframes, left-drag = orbit, right-drag = pan, wheel = zoom,
 // R = back to the game camera, Esc = quit, F11 / Alt+Enter / Ctrl+Cmd+F = fullscreen. The window size and
 // fullscreen are remembered between runs (--size is a one-off and is not).
 
 #include "GameAudio.h"
 
+#include "FormViewer.h"
+#include "FrontEnd.h"
 #include "mb/engine/Log.h"
 #include "mb/engine/Paths.h"
 #include "mb/engine/Renderer.h"
@@ -85,6 +91,9 @@ struct Options {
     bool sizeGiven = false;  // --size was on the command line
     bool shapes = false;
     std::optional<std::array<float, 7>> camera;  // eye, target, vertical fov in degrees
+    mb_app::HudOptions hud;                      // --hud
+    mb_app::FormViewerOptions form;              // --form: the other fields are its options
+    bool viewer = false;                         // an option for the level viewer was given: no menu
     float simulate = 0;                          // --simulate: seconds of physics before the screenshot
     std::optional<BallShot> ball;                // --ball: a test ball at t = 0
 };
@@ -247,6 +256,38 @@ private:
     Clock::time_point shown_ = Clock::now();
 };
 
+// The front end's way into the scene code: levels are built by the viewer and drawn from the game camera. The
+// per-frame work of a level (physics, the rules, the HUD's numbers) goes into update().
+class ViewerSession : public mb_app::LevelSession {
+public:
+    ViewerSession(Viewer& viewer, Assets& assets) : viewer_(viewer), assets_(assets) {}
+
+    bool start(std::string_view levelName, const Progress&) override {
+        const std::optional<std::size_t> index = assets_.catalog.find(levelName);
+        if (!index) {
+            mb::logError("the campaign names the level \"{}\", which is not among the converted levels", levelName);
+            return false;
+        }
+        return viewer_.show(*index);
+    }
+
+    void update(const mb::InputEvents&, double seconds, mb::GameHud&) override {
+        viewer_.stepPhysics(std::min(static_cast<float>(seconds), kMaxFrameSeconds));
+        viewer_.follow(false);
+    }
+
+    void render(mb::Renderer& renderer, std::span<const mb::Sprite> overlay) override {
+        int width = 0, height = 0;
+        renderer.drawableSize(width, height);
+        const float aspect = height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 4.0f / 3.0f;
+        renderer.renderToWindow(viewer_.frame(aspect), viewer_.scene().items(), {}, overlay);
+    }
+
+private:
+    Viewer& viewer_;
+    Assets& assets_;
+};
+
 std::size_t startLevel(Assets& assets, const Options& options) {
     if (assets.catalog.levels().empty()) {
         throw std::runtime_error("no levels found in " + (assets.root / "Data" / "Levels").string());
@@ -276,16 +317,32 @@ int runScreenshot(const Options& options) {
         viewer.stepPhysics(kPhysicsStep);
     }
     viewer.follow(options.shapes);
+    mb_app::HudOverlay hud(renderer, options.hud);
     const mb::FrameParams frame = viewer.frame(static_cast<float>(options.width) / static_cast<float>(options.height));
     const mb::Image image = renderer.renderToImage(options.width, options.height, frame, viewer.scene().items(),
                                                    options.shapes ? viewer.scene().shapeLines()
-                                                                  : std::span<const mb::DebugLine>());
+                                                                  : std::span<const mb::DebugLine>(),
+                                                   hud.sprites(options.width, options.height, viewer.levelName()));
     if (image.empty() || !mb::writePng(options.screenshot, image)) {
         mb::logError("cannot write screenshot {}", options.screenshot);
         return 1;
     }
     mb::logInfo("wrote {} ({}x{})", options.screenshot, image.width, image.height);
     return 0;
+}
+
+// The game: the main menu on a window, levels played from it.
+int runGame(const Options& options) {
+    Assets assets;
+    mb::Window window("Muggle Ball 3", options.width, options.height);
+    mb::Renderer renderer(window);
+    mb::logInfo("GPU backend: {}", renderer.backendName());
+    mb::logInfo("Asset root: {}", assets.root.string());
+    Viewer viewer(renderer, assets, options);
+    ViewerSession session(viewer, assets);
+    mb_app::FrontEndOptions frontEnd;
+    frontEnd.language = options.form.language;
+    return mb_app::runFrontEnd(window, renderer, session, frontEnd);
 }
 
 // Average time per frame (and how much of it the physics took), logged every few seconds and when the window closes.
@@ -357,6 +414,7 @@ int runWindow(const Options& options) {
         viewer.launchBall(*options.ball);
     }
 
+    mb_app::HudOverlay hud(renderer, options.hud);
     bool shapes = options.shapes;
     bool paused = false;
     FrameStats stats;
@@ -424,7 +482,8 @@ int runWindow(const Options& options) {
         renderer.drawableSize(width, height);
         const float aspect = height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 4.0f / 3.0f;
         renderer.renderToWindow(viewer.frame(aspect), viewer.scene().items(),
-                                shapes ? viewer.scene().shapeLines() : std::span<const mb::DebugLine>());
+                                shapes ? viewer.scene().shapeLines() : std::span<const mb::DebugLine>(),
+                                hud.sprites(width, height, viewer.levelName()));
         stats.frame();
     }
     stats.report();
@@ -497,7 +556,10 @@ void printUsage() {
         "usage: MuggleBall3 [--level <name|path.json>] [--ball [x,degrees]]\n"
         "       MuggleBall3 --screenshot out.png [--size WxH] [--level ...] [--shapes] [--camera ex,ey,ez,tx,ty,tz,fov]\n"
         "                   [--simulate seconds] [--ball [x,degrees]]\n"
+        "       MuggleBall3 [--level ...] [--hud] [--hud-state lives,score,level[,icon...]]\n"
         "       MuggleBall3 --check <level.json>\n"
+        "       MuggleBall3 --form <name> [--screenshot out.png] [--size WxH] [--language L] [--hover W | --press W]"
+        " [--no-background]\n"
         "       MuggleBall3 --play-sound <name> [--seconds N]\n"
         "       MuggleBall3 --play-music <Menu|Village|Pirates|Cowboys|Knights> [--seconds N]\n",
         stderr);
@@ -516,10 +578,33 @@ int main(int argc, char** argv) {
                 return checkLevel(argv[i + 1]);
             } else if (arg == "--level" && hasValue) {
                 options.level = argv[++i];
+                options.viewer = true;
             } else if (arg == "--screenshot" && hasValue) {
                 options.screenshot = argv[++i];
             } else if (arg == "--size" && hasValue && parseSize(argv[i + 1], options.width, options.height)) {
                 options.sizeGiven = true;
+                ++i;
+            } else if (arg == "--form" && hasValue) {
+                options.form.form = argv[++i];
+            } else if (arg == "--language" && hasValue) {
+                options.form.language = argv[++i];
+            } else if (arg == "--hover" && hasValue) {
+                options.form.hover = argv[++i];
+            } else if (arg == "--press" && hasValue) {
+                options.form.press = argv[++i];
+            } else if (arg == "--no-background") {
+                options.form.background = false;
+            } else if (arg == "--hud") {
+                options.hud.enabled = true;
+                options.viewer = true;
+            } else if (arg == "--hud-state" && hasValue) {
+                mb::GameHud state;
+                if (!mb_app::parseHudState(argv[i + 1], state)) {
+                    printUsage();
+                    return 2;
+                }
+                options.hud = {true, state};
+                options.viewer = true;
                 ++i;
             } else if (arg == "--play-sound" && hasValue) {
                 options.playSound = argv[++i];
@@ -529,6 +614,7 @@ int main(int argc, char** argv) {
                 options.seconds = std::strtod(argv[++i], nullptr);
             } else if (arg == "--shapes") {
                 options.shapes = true;
+                options.viewer = true;
             } else if (arg == "--simulate" && hasValue) {
                 char* end = nullptr;
                 options.simulate = std::strtof(argv[i + 1], &end);
@@ -536,6 +622,7 @@ int main(int argc, char** argv) {
                     printUsage();
                     return 2;
                 }
+                options.viewer = true;
                 ++i;
             } else if (arg == "--ball") {
                 BallShot shot;
@@ -548,6 +635,7 @@ int main(int argc, char** argv) {
                     ++i;
                 }
                 options.ball = shot;
+                options.viewer = true;
             } else if (arg == "--camera" && hasValue) {
                 std::array<float, 7> values{};
                 if (!parseCamera(argv[i + 1], values)) {
@@ -555,11 +643,18 @@ int main(int argc, char** argv) {
                     return 2;
                 }
                 options.camera = values;
+                options.viewer = true;
                 ++i;
             } else {
                 printUsage();
                 return 2;
             }
+        }
+        if (!options.form.form.empty()) {
+            options.form.screenshot = options.screenshot;
+            options.form.width = options.width;
+            options.form.height = options.height;
+            return mb_app::runFormViewer(options.form);
         }
         if (!options.playSound.empty()) {
             return mb::playSoundAndWait(mb::assetRoot(), options.playSound, options.seconds);
@@ -571,7 +666,10 @@ int main(int argc, char** argv) {
             printUsage();
             return 2;
         }
-        return options.screenshot.empty() ? runWindow(options) : runScreenshot(options);
+        if (!options.screenshot.empty()) {
+            return runScreenshot(options);
+        }
+        return options.viewer ? runWindow(options) : runGame(options);
     } catch (const std::exception& e) {
         mb::logError("fatal: {}", e.what());
         return 1;
