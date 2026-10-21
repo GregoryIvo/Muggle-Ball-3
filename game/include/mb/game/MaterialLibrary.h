@@ -49,9 +49,13 @@ struct GameMaterial {
     // Direct3D 8 render states as (D3DRENDERSTATETYPE, value) pairs.
     std::vector<std::pair<int, int>> renderStates;
 
-    // From renderStates: D3DRS_ALPHABLENDENABLE (27) = 1 turns blending on;
-    // D3DRS_DESTBLEND (20) = D3DBLEND_ONE (2) makes it additive, anything else is AlphaBlend.
-    BlendMode blendMode() const;
+    // Blending from renderStates: D3DRS_ALPHABLENDENABLE (27) = 1 turns it on, D3DRS_SRCBLEND (19) and
+    // D3DRS_DESTBLEND (20) hold the D3DBLEND factors. A factor that is missing, or not one of D3DBLEND 1 to 10,
+    // is the alpha blend's (source alpha, inverse source alpha).
+    BlendMode blendMode() const;  // Opaque, AlphaBlend, Additive (source alpha, one), or Custom for any other pair
+    std::pair<BlendFactor, BlendFactor> blendFactors() const;  // (source, destination)
+    // Sets blend, srcBlend and dstBlend of a draw's material.
+    void applyBlend(MaterialParams& material) const;
 };
 
 class MaterialLibrary {

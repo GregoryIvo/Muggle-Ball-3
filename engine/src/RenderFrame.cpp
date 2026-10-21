@@ -151,11 +151,7 @@ void Renderer::Impl::collectDraws(SDL_GPUTextureFormat colorFormat, const FrameP
         draw.item = &item;
         draw.mesh = &mesh->second;
         draw.texture = texture;
-        draw.pipeline.colorFormat = colorFormat;
-        draw.pipeline.blend = material.blend;
-        draw.pipeline.cull = material.cull;
-        draw.pipeline.depthWrite = material.depthWrite;
-        draw.pipeline.depthTest = material.depthTest;
+        draw.pipeline = PipelineKey::forMaterial(colorFormat, material);
         if (material.blend == BlendMode::Opaque) {
             opaqueDraws.push_back(draw);
         } else {
@@ -417,13 +413,14 @@ Image Renderer::Impl::renderOffscreen(int width, int height, const FrameParams& 
     SDL_DownloadFromGPUTexture(copy, &source, &destination);
     SDL_EndGPUCopyPass(copy);
 
-    SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
-    if (!fence) {
+    // Not SDL_SubmitGPUCommandBufferAndAcquireFence: SDL 3.4's Metal back end does not recycle a command
+    // buffer submitted that way when its fence is waited on and released, so each call kept a new set of
+    // uniform buffers and a new cycled depth texture (about 4 MB at 1024x768). A plain submit plus an
+    // idle wait recycles them.
+    if (!SDL_SubmitGPUCommandBuffer(cmd) || !SDL_WaitForGPUIdle(device)) {
         logError("renderToImage: submit failed: {}", SDL_GetError());
         return {};
     }
-    SDL_WaitForGPUFences(device, true, &fence, 1);
-    SDL_ReleaseGPUFence(device, fence);
 
     const void* pixels = SDL_MapGPUTransferBuffer(device, offscreen.readback, false);
     if (!pixels) {

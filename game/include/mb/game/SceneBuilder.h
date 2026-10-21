@@ -79,12 +79,13 @@ std::string meshFileName(std::string_view levelMeshName);
 //      one for a fresh brick (see SceneBuilder.cpp). With no game material, a material
 //      name that is itself a texture ("sky.jpg") is used.
 //   2. Otherwise the .x texture, unless its name is a game material too ("water.png"),
-//      which then supplies the textures and the blend mode.
+//      which then supplies the textures, the colours and the blending.
 // Colours come from the object's game material when it has one, else from the .x. A board is the
 // exception: its material "BoardMaterial" is a placeholder (the same in all 83 levels, every
-// colour 1.0, the ball's texture), so a board takes its textures and colours from its .x, where the
-// self-lit white would otherwise hide all shading on the walls and fences. A background object is
-// the sky: drawn first, unlit and from inside, hung kSkyOffsetY lower than its pose.
+// colour 1.0, the ball's texture), so a board takes its textures and colours from its .x (unless the
+// .x texture names a game material, see 2), where the self-lit white would otherwise hide all shading
+// on the walls and fences. A background object is the sky: drawn first, unlit and from inside, hung
+// kSkyOffsetY lower than its pose.
 SceneDescription describeScene(const Level& level, const ModelLookup& models, const MaterialLibrary& materials,
                                const TextureIndex& textures);
 

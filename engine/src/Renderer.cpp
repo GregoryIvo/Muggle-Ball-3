@@ -36,6 +36,24 @@ const char* formatName(SDL_GPUTextureFormat format) {
     }
 }
 
+// MB3_GPU_DEBUG=1 turns on the back end's validation layer.
+bool gpuDebugRequested() {
+    const char* env = SDL_getenv_unsafe("MB3_GPU_DEBUG");
+    return env && *env && *env != '0';
+}
+
+#ifdef __APPLE__
+// Metal reads MTL_DEBUG_LAYER once, as it creates its first device. In a windowed run that happens inside
+// SDL_CreateWindow, well before the Renderer exists, so the variable is set while the program loads and
+// MB3_GPU_DEBUG=1 alone enables validation in both modes. A value the user set themselves is kept.
+const bool metalValidationSet = [] {
+    if (gpuDebugRequested()) {
+        SDL_setenv_unsafe("MTL_DEBUG_LAYER", "1", 0);
+    }
+    return true;
+}();
+#endif
+
 }  // namespace
 
 Renderer::Impl::~Impl() {
@@ -108,9 +126,7 @@ void Renderer::Impl::logConfiguration() const {
 
 void Renderer::Impl::createDevice() {
     const SDL_GPUShaderFormat formats = SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL;
-    // Set MB3_GPU_DEBUG=1 to turn on the back end's validation layer.
-    const char* debugEnv = SDL_getenv("MB3_GPU_DEBUG");
-    const bool debug = debugEnv && *debugEnv && *debugEnv != '0';
+    const bool debug = gpuDebugRequested();
     device = SDL_CreateGPUDevice(formats, debug, nullptr);
     if (!device && !SDL_WasInit(SDL_INIT_VIDEO)) {
         // Metal needs no video subsystem, but Vulkan does even without a window (the headless case).

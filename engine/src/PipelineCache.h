@@ -20,12 +20,17 @@ static_assert(sizeof(LineVertex) == 28);
 // texture) is not part of it, so a handful of pipelines cover a whole level.
 struct PipelineKey {
     SDL_GPUTextureFormat colorFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
-    BlendMode blend = BlendMode::Opaque;
+    bool blend = false;
+    BlendFactor srcBlend = BlendFactor::One;  // only meaningful when blend is set
+    BlendFactor dstBlend = BlendFactor::Zero;
     CullMode cull = CullMode::Back;
     bool depthWrite = true;
     bool depthTest = true;
     bool lines = false;  // the DebugLine pipeline; blend, cull and depth flags are fixed for it
 
+    // Resolves BlendMode::AlphaBlend and Additive to their factors, so materials that blend the same way
+    // share one pipeline however they were described.
+    static PipelineKey forMaterial(SDL_GPUTextureFormat colorFormat, const MaterialParams& material);
     static PipelineKey forLines(SDL_GPUTextureFormat colorFormat);
 
     // Unique per distinct key; also used to sort draws so equal pipelines sit together.

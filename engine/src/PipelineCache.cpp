@@ -63,7 +63,23 @@ SDL_GPUCullMode toSdl(CullMode mode) {
     return SDL_GPU_CULLMODE_BACK;
 }
 
-SDL_GPUColorTargetBlendState blendState(BlendMode mode) {
+SDL_GPUBlendFactor toSdl(BlendFactor factor) {
+    switch (factor) {
+        case BlendFactor::Zero: return SDL_GPU_BLENDFACTOR_ZERO;
+        case BlendFactor::One: return SDL_GPU_BLENDFACTOR_ONE;
+        case BlendFactor::SrcColor: return SDL_GPU_BLENDFACTOR_SRC_COLOR;
+        case BlendFactor::InvSrcColor: return SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_COLOR;
+        case BlendFactor::SrcAlpha: return SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+        case BlendFactor::InvSrcAlpha: return SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        case BlendFactor::DestAlpha: return SDL_GPU_BLENDFACTOR_DST_ALPHA;
+        case BlendFactor::InvDestAlpha: return SDL_GPU_BLENDFACTOR_ONE_MINUS_DST_ALPHA;
+        case BlendFactor::DestColor: return SDL_GPU_BLENDFACTOR_DST_COLOR;
+        case BlendFactor::InvDestColor: return SDL_GPU_BLENDFACTOR_ONE_MINUS_DST_COLOR;
+    }
+    return SDL_GPU_BLENDFACTOR_ONE;
+}
+
+SDL_GPUColorTargetBlendState blendState(const PipelineKey& key) {
     SDL_GPUColorTargetBlendState state{};
     // The alpha channel is never written: it keeps the clear value, so screenshots
     // stay opaque whatever the textures' alpha was.
@@ -73,26 +89,41 @@ SDL_GPUColorTargetBlendState blendState(BlendMode mode) {
     state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
     state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
     state.color_blend_op = SDL_GPU_BLENDOP_ADD;
-    switch (mode) {
-        case BlendMode::Opaque:
-            state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-            state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
-            break;
-        case BlendMode::AlphaBlend:
-            state.enable_blend = true;
-            state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
-            state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-            break;
-        case BlendMode::Additive:
-            state.enable_blend = true;
-            state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
-            state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-            break;
-    }
+    state.enable_blend = key.blend;
+    state.src_color_blendfactor = key.blend ? toSdl(key.srcBlend) : SDL_GPU_BLENDFACTOR_ONE;
+    state.dst_color_blendfactor = key.blend ? toSdl(key.dstBlend) : SDL_GPU_BLENDFACTOR_ZERO;
     return state;
 }
 
 }  // namespace
+
+PipelineKey PipelineKey::forMaterial(SDL_GPUTextureFormat colorFormat, const MaterialParams& material) {
+    PipelineKey key;
+    key.colorFormat = colorFormat;
+    key.cull = material.cull;
+    key.depthWrite = material.depthWrite;
+    key.depthTest = material.depthTest;
+    switch (material.blend) {
+        case BlendMode::Opaque:
+            break;
+        case BlendMode::AlphaBlend:
+            key.blend = true;
+            key.srcBlend = BlendFactor::SrcAlpha;
+            key.dstBlend = BlendFactor::InvSrcAlpha;
+            break;
+        case BlendMode::Additive:
+            key.blend = true;
+            key.srcBlend = BlendFactor::SrcAlpha;
+            key.dstBlend = BlendFactor::One;
+            break;
+        case BlendMode::Custom:
+            key.blend = true;
+            key.srcBlend = material.srcBlend;
+            key.dstBlend = material.dstBlend;
+            break;
+    }
+    return key;
+}
 
 PipelineKey PipelineKey::forLines(SDL_GPUTextureFormat colorFormat) {
     PipelineKey key;
@@ -104,9 +135,12 @@ PipelineKey PipelineKey::forLines(SDL_GPUTextureFormat colorFormat) {
 }
 
 std::uint64_t PipelineKey::pack() const {
-    return (static_cast<std::uint64_t>(colorFormat) << 8) | (static_cast<std::uint64_t>(lines) << 7) |
-           (static_cast<std::uint64_t>(depthTest) << 6) | (static_cast<std::uint64_t>(depthWrite) << 5) |
-           (static_cast<std::uint64_t>(cull) << 2) | static_cast<std::uint64_t>(blend);
+    // The blend factors are D3DBLEND numbers, 1 to 10, which fit four bits.
+    const std::uint64_t factors =
+        blend ? (static_cast<std::uint64_t>(srcBlend) << 4) | static_cast<std::uint64_t>(dstBlend) : 0;
+    return (static_cast<std::uint64_t>(colorFormat) << 16) | (static_cast<std::uint64_t>(lines) << 13) |
+           (static_cast<std::uint64_t>(depthTest) << 12) | (static_cast<std::uint64_t>(depthWrite) << 11) |
+           (static_cast<std::uint64_t>(cull) << 9) | (static_cast<std::uint64_t>(blend) << 8) | factors;
 }
 
 PipelineCache::PipelineCache(SDL_GPUDevice* device, SDL_GPUTextureFormat depthFormat)
@@ -175,7 +209,7 @@ SDL_GPUGraphicsPipeline* PipelineCache::create(const PipelineKey& key) {
 
     SDL_GPUColorTargetDescription colorTarget{};
     colorTarget.format = key.colorFormat;
-    colorTarget.blend_state = blendState(key.lines ? BlendMode::Opaque : key.blend);
+    colorTarget.blend_state = blendState(key);
 
     SDL_GPUGraphicsPipelineCreateInfo info{};
     info.vertex_shader = key.lines ? lineVertex_ : meshVertex_;

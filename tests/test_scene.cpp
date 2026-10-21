@@ -114,6 +114,7 @@ MaterialLibrary makeMaterials() {
       {"name": "Spin", "textures": ["F1", "F2", "F3"], "animated": true, "animTimeMs": 150},
       {"name": "Glass", "textures": ["Wood"], "renderStates": [[19, 5], [20, 6], [27, 1]]},
       {"name": "Water.png", "textures": ["W1", "W2"], "animated": true, "animTimeMs": 150,
+       "d3d": {"diffuse": [0.75, 0.75, 0.75, 1], "ambient": [0.5, 0.5, 0.5, 1], "emissive": [0, 0, 0, 1]},
        "renderStates": [[19, 5], [20, 3], [27, 1]]},
       {"name": "Lost", "textures": ["Nowhere"]},
       {"name": "BoardMaterial", "textures": ["Ball"], "animated": true,
@@ -357,7 +358,12 @@ void testTextureRules() {
     check(scene.draws.size() == 2, "board: both primitives are drawn");
     check(scene.draws.at(0).textures == std::vector<fs::path>{w1, w2} && scene.draws.at(0).animTimeMs == 150,
           "texture: the .x texture's own game material supplies animation frames");
-    check(scene.draws.at(0).item.material.blend == BlendMode::AlphaBlend, "blend: ... and the blend mode");
+    check(scene.draws.at(0).item.material.blend == BlendMode::Custom &&
+              scene.draws.at(0).item.material.srcBlend == BlendFactor::SrcAlpha &&
+              scene.draws.at(0).item.material.dstBlend == BlendFactor::SrcColor,
+          "blend: ... and the blend factors (source alpha, source colour)");
+    check(near(scene.draws.at(0).item.material.diffuse.g, 0.75f) && near(scene.draws.at(0).item.material.ambient.b, 0.5f),
+          "colour: ... and the colours, not the .x's");
     check(near(scene.draws.at(1).item.material.emissive.r, 0.1f) && near(scene.draws.at(1).item.material.diffuse.g, 0.4f),
           "board: colours come from the .x, not from BoardMaterial's all-ones");
     check(scene.draws.at(1).textures == std::vector<fs::path>{own} && scene.draws.at(1).item.material.blend == BlendMode::Opaque,

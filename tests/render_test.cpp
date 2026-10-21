@@ -18,6 +18,10 @@
 #include <string>
 #include <vector>
 
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
+
 #ifndef MB3_TEST_OUTPUT_DIR
 #define MB3_TEST_OUTPUT_DIR "test-output"
 #endif
@@ -336,6 +340,83 @@ void testBlending(Scene& s) {
     }
 }
 
+// What a blend factor multiplies, per channel, for the given source colour and alpha and destination colour and alpha.
+float factorValue(BlendFactor factor, float src, float srcAlpha, float dst, float dstAlpha) {
+    switch (factor) {
+        case BlendFactor::Zero: return 0;
+        case BlendFactor::One: return 1;
+        case BlendFactor::SrcColor: return src;
+        case BlendFactor::InvSrcColor: return 1 - src;
+        case BlendFactor::SrcAlpha: return srcAlpha;
+        case BlendFactor::InvSrcAlpha: return 1 - srcAlpha;
+        case BlendFactor::DestAlpha: return dstAlpha;
+        case BlendFactor::InvDestAlpha: return 1 - dstAlpha;
+        case BlendFactor::DestColor: return dst;
+        case BlendFactor::InvDestColor: return 1 - dst;
+    }
+    return 0;
+}
+
+void testBlendFactors(Scene& s) {
+    std::printf("blend factors\n");
+    // The clear alpha is the destination alpha, since the alpha channel is never written.
+    FrameParams frame = s.frame;
+    frame.clear = {0.2f, 0.4f, 0.6f, 0.25f};
+    const float dst[3] = {0.2f, 0.4f, 0.6f}, dstAlpha = 0.25f;
+    const float src[3] = {0.8f, 0.5f, 0.3f}, srcAlpha = 0.6f;
+    const int center = kSize / 2;
+
+    const auto drawn = [&](BlendFactor srcFactor, BlendFactor dstFactor) {
+        DrawItem d = item(s.quad, unlitColor({src[0], src[1], src[2], srcAlpha}), {0, 0, 0});
+        d.material.blend = BlendMode::Custom;
+        d.material.srcBlend = srcFactor;
+        d.material.dstBlend = dstFactor;
+        return s.renderWith(frame, one(d));
+    };
+    const auto expected = [&](BlendFactor srcFactor, BlendFactor dstFactor) {
+        float rgb[3];
+        for (int c = 0; c < 3; ++c) {
+            rgb[c] = src[c] * factorValue(srcFactor, src[c], srcAlpha, dst[c], dstAlpha) +
+                     dst[c] * factorValue(dstFactor, src[c], srcAlpha, dst[c], dstAlpha);
+        }
+        return rgb8(rgb[0], rgb[1], rgb[2]);
+    };
+
+    // Each of the ten factors on its own, as the source factor against zero and as the destination factor
+    // against zero, so a swapped or misnumbered factor shows.
+    const char* const names[] = {"zero", "one", "src colour", "inv src colour", "src alpha", "inv src alpha",
+                                 "dest alpha", "inv dest alpha", "dest colour", "inv dest colour"};
+    for (int i = 0; i < 10; ++i) {
+        const auto factor = static_cast<BlendFactor>(i + 1);
+        expectPixel(std::string("source factor ") + names[i], drawn(factor, BlendFactor::Zero), center, center,
+                    expected(factor, BlendFactor::Zero));
+        expectPixel(std::string("destination factor ") + names[i], drawn(BlendFactor::Zero, factor), center, center,
+                    expected(BlendFactor::Zero, factor));
+    }
+
+    // The sea of the original: Direct3D SRCBLEND = SRCALPHA, DESTBLEND = SRCCOLOR.
+    const Image water = drawn(BlendFactor::SrcAlpha, BlendFactor::SrcColor);
+    save(water, "05e_water_blend.png");
+    expectPixel("src * a + dst * src (the original's water)", water, center, center,
+                expected(BlendFactor::SrcAlpha, BlendFactor::SrcColor));
+
+    // Custom blended items are sorted back to front like the other blended ones. With these factors the order
+    // shows: the far red quad first gives green only, the far red quad last gives red only.
+    frame.clear = {0, 0, 0, 1};
+    MaterialParams nearGreen = unlitColor({0, 1, 0, 0.5f});
+    MaterialParams farRed = unlitColor({1, 0, 0, 0.5f});
+    for (MaterialParams* m : {&nearGreen, &farRed}) {
+        m->blend = BlendMode::Custom;
+        m->srcBlend = BlendFactor::SrcAlpha;
+        m->dstBlend = BlendFactor::SrcColor;
+        m->depthWrite = false;
+    }
+    const DrawItem items[] = {item(s.quad, nearGreen, {0, 0, -1}), item(s.quad, farRed, {0, 0, 1})};
+    const Image ordered = s.renderWith(frame, items);
+    save(ordered, "05f_custom_blend_order.png");
+    expectPixel("far custom blend first, near over it", ordered, center, center, rgb8(0, 0.5f, 0));
+}
+
 // One channel of the documented lighting equation, for a white-textured surface.
 float litChannel(float diffuse, float ambient, float emissive, float lightDiffuse, float lightAmbient, float facing) {
     return std::clamp(emissive + ambient * lightAmbient + diffuse * lightDiffuse * std::max(facing, 0.0f), 0.0f, 1.0f);
@@ -563,6 +644,69 @@ void testMipmaps(Scene& s) {
     }
 }
 
+// Memory this process holds, which on Apple silicon includes the GPU's allocations; 0 where it cannot be read.
+std::size_t footprintBytes() {
+#ifdef __APPLE__
+    task_vm_info_data_t info;
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, reinterpret_cast<task_info_t>(&info), &count) == KERN_SUCCESS) {
+        return static_cast<std::size_t>(info.phys_footprint);
+    }
+#endif
+    return 0;
+}
+
+// Rendering the same scene again and again must not grow the process. SDL's Metal back end used to keep
+// about 4 MB of depth buffers and uniform buffers per call at 1024x768 after a fence-based submit.
+void testNoGrowth(Scene& s) {
+    std::printf("repeated renders do not grow the process\n");
+    if (footprintBytes() == 0) {
+        std::printf("  SKIP: no way to read the process footprint on this platform\n");
+        return;
+    }
+    MaterialParams glass = unlitColor({1, 0, 0, 0.5f});
+    glass.blend = BlendMode::AlphaBlend;
+    MaterialParams water = unlitColor({0, 0, 1, 0.5f});
+    water.blend = BlendMode::Custom;
+    water.srcBlend = BlendFactor::SrcAlpha;
+    water.dstBlend = BlendFactor::SrcColor;
+    // Hundreds of draws, since each batch of about a hundred needs another uniform buffer.
+    const DrawItem layers[] = {item(s.quad, unlitColor({0, 1, 0, 1}), {0, 0, 1}), item(s.quad, glass, {0, 0, 0}),
+                               item(s.quad, water, {0, 0, -1})};
+    std::vector<DrawItem> items;
+    for (int i = 0; i < 600; ++i) {
+        items.push_back(layers[i % 3]);
+    }
+    const DebugLine lines[] = {{{-1, 0, 0}, {1, 0, 0}, {1, 1, 0, 1}}, {{0, -1, 0}, {0, 1, 0}, {1, 1, 0, 1}}};
+
+    // The old submit grew the process by about 4 MB with every call. The first frames are not counted: the
+    // first render of a size allocates its targets and the driver warms up. A one-off allocation after that
+    // lands in one window of frames, a leak grows every window, so two growing windows fail the test.
+    constexpr int kWarmUp = 20, kWindows = 3, kFramesPerWindow = 100;
+    constexpr std::size_t kAllowedGrowth = 12u << 20;
+    bool rendered = true;
+    const auto renderMany = [&](int count) {
+        for (int i = 0; i < count; ++i) {
+            rendered = rendered && !s.renderer.renderToImage(1024, 768, s.frame, items, lines).empty();
+        }
+    };
+    renderMany(kWarmUp);
+    std::size_t previous = footprintBytes();
+    int growing = 0;
+    for (int window = 0; window < kWindows; ++window) {
+        renderMany(kFramesPerWindow);
+        const std::size_t now = footprintBytes();
+        const std::size_t growth = now > previous ? now - previous : 0;
+        std::printf("  %d renders at 1024x768: process grew by %zu KB\n", kFramesPerWindow, growth / 1024);
+        growing += growth > kAllowedGrowth;
+        previous = now;
+    }
+    check(rendered, "every 1024x768 render succeeded");
+    check(growing < 2, std::to_string(growing) + " of " + std::to_string(kWindows) +
+                           " windows grew the process by more than " + std::to_string(kAllowedGrowth / 1024) +
+                           " KB (a leak grows every window)");
+}
+
 void testHandles(Scene& s) {
     std::printf("handles and cleanup\n");
     check(s.renderer.createTexture(Image{}, true) == 0, "an empty image gives handle 0");
@@ -609,10 +753,12 @@ int main() {
     testDepth(scene);
     testCulling(scene);
     testBlending(scene);
+    testBlendFactors(scene);
     testLighting(scene);
     testDebugLines(scene);
     testAlphaTest(scene);
     testMipmaps(scene);
+    testNoGrowth(scene);
     testHandles(scene);
 
     renderer.reset();
