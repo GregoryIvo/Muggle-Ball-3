@@ -28,3 +28,8 @@ add_executable(mb_scene_smoke scene_smoke.cpp)
 target_link_libraries(mb_scene_smoke PRIVATE mb_game)
 add_test(NAME mb_scene_smoke COMMAND mb_scene_smoke)
 set_tests_properties(mb_scene_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# Rigid bodies over Jolt: conventions, materials, mass, joints, contacts. CPU only.
+add_executable(mb_physics_test physics_test.cpp)
+target_link_libraries(mb_physics_test PRIVATE mb_engine)
+add_test(NAME mb_physics_test COMMAND mb_physics_test)
