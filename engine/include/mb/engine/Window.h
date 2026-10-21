@@ -12,6 +12,9 @@ namespace mb {
 struct InputEvents {
     std::vector<std::uint32_t> keysPressed;  // SDL_Keycode values, in order
     float mouseDX = 0, mouseDY = 0;          // all pointer motion, in window points
+    // Where the pointer is now, in window pixels (the units of Renderer::drawableSize, origin top-left): the
+    // position the 2D UI hit-tests against. Not reset by a poll; it is whatever SDL reports for this window.
+    float mouseX = 0, mouseY = 0;
     // The part of that motion made while a button was held. Each motion event is attributed to the
     // buttons held at that moment, so motion just before a press or just after a release does not
     // count, and a drag that spans several polls keeps counting. Two held buttons both count it.

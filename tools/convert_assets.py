@@ -20,6 +20,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import materials  # noqa: E402
 import mb3level  # noqa: E402
 import textures  # noqa: E402
+import ui  # noqa: E402
 import x2glb  # noqa: E402
 
 PLAIN_ARCHIVES = {"Textures.dat": "Textures", "Sounds.dat": "Sounds", "Musics.dat": "Musics"}
@@ -53,6 +54,14 @@ def convert_materials(out):
     print(f"materials: {stats['materials']} converted, duplicates {stats['duplicates']}")
 
 
+def convert_ui(out):
+    stats = ui.convert(out)
+    print(f"ui: {stats['forms']['files']} menu forms, {len(stats['languages']['languages'])} languages, "
+          f"{len(stats['fonts']['fonts'])} font atlases converted to JSON")
+    for warning in stats["forms"]["problems"] + stats["fonts"]["warnings"]:
+        print(f"ui: warning: {warning}")
+
+
 def convert_meshes(out):
     stats = x2glb.convert_all(out / "Data" / "SkinMeshes", out / "Textures", out / "Data" / "Meshes")
     print(f"meshes: {stats['files']} converted to glTF, {stats['triangles']} triangles, "
@@ -81,6 +90,7 @@ def main():
     copy_data(args.extracted, args.out)
     convert_textures(args.out)
     convert_materials(args.out)
+    convert_ui(args.out)
     convert_meshes(args.out)
     convert_levels(args.out)
     print(f"done: {args.out.resolve()}")

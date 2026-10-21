@@ -6,10 +6,13 @@
 //                                            render one frame without a window, write it as PNG
 //                                            (--size, --shapes and --camera also apply to the window)
 //   MuggleBall3 --check <level.json>         load a converted level JSON, print a summary, exit
+//   MuggleBall3 --form <name> [--screenshot out.png] [--size WxH] [--language L] [--hover W | --press W] [--no-background]
+//                                            show a menu form alone (FormViewer.h); Left/Right switch form in the window
 //
 // In the window: Left/Right (or PageUp/PageDown) = previous/next level, F1 = physics wireframes,
 // left-drag = orbit, right-drag = pan, wheel = zoom, R = back to the game camera, Esc = quit.
 
+#include "FormViewer.h"
 #include "mb/engine/Log.h"
 #include "mb/engine/Paths.h"
 #include "mb/engine/Renderer.h"
@@ -54,6 +57,7 @@ struct Options {
     int height = kDefaultHeight;
     bool shapes = false;
     std::optional<std::array<float, 7>> camera;  // eye, target, vertical fov in degrees
+    mb_app::FormViewerOptions form;              // --form: the other fields are its options
 };
 
 int checkLevel(const char* path) {
@@ -326,7 +330,9 @@ void printUsage() {
     std::fputs(
         "usage: MuggleBall3 [--level <name|path.json>]\n"
         "       MuggleBall3 --screenshot out.png [--size WxH] [--level ...] [--shapes] [--camera ex,ey,ez,tx,ty,tz,fov]\n"
-        "       MuggleBall3 --check <level.json>\n",
+        "       MuggleBall3 --check <level.json>\n"
+        "       MuggleBall3 --form <name> [--screenshot out.png] [--size WxH] [--language L] [--hover W | --press W]"
+        " [--no-background]\n",
         stderr);
 }
 
@@ -347,6 +353,16 @@ int main(int argc, char** argv) {
                 options.screenshot = argv[++i];
             } else if (arg == "--size" && hasValue && parseSize(argv[i + 1], options.width, options.height)) {
                 ++i;
+            } else if (arg == "--form" && hasValue) {
+                options.form.form = argv[++i];
+            } else if (arg == "--language" && hasValue) {
+                options.form.language = argv[++i];
+            } else if (arg == "--hover" && hasValue) {
+                options.form.hover = argv[++i];
+            } else if (arg == "--press" && hasValue) {
+                options.form.press = argv[++i];
+            } else if (arg == "--no-background") {
+                options.form.background = false;
             } else if (arg == "--shapes") {
                 options.shapes = true;
             } else if (arg == "--camera" && hasValue) {
@@ -361,6 +377,12 @@ int main(int argc, char** argv) {
                 printUsage();
                 return 2;
             }
+        }
+        if (!options.form.form.empty()) {
+            options.form.screenshot = options.screenshot;
+            options.form.width = options.width;
+            options.form.height = options.height;
+            return mb_app::runFormViewer(options.form);
         }
         return options.screenshot.empty() ? runWindow(options) : runScreenshot(options);
     } catch (const std::exception& e) {

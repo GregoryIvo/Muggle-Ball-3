@@ -186,6 +186,13 @@ void testDragAttribution() {
     pushButton(SDL_BUTTON_MIDDLE, false);
     window->pollEvents(in);
     check(!in.leftButton && !in.middleButton, "all released");
+
+    // The pointer position (what the 2D UI hit-tests) is the window's pixels, and stays between polls.
+    SDL_WarpMouseInWindow(window->handle(), 10, 20);
+    window->pollEvents(in);
+    check(in.mouseX == 10 && in.mouseY == 20, "pointer position after a warp");
+    window->pollEvents(in);
+    check(in.mouseX == 10 && in.mouseY == 20, "pointer position is kept by a poll with no events");
 }
 
 }  // namespace

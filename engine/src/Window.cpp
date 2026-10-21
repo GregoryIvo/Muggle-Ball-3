@@ -94,6 +94,16 @@ bool Window::pollEvents(InputEvents& input) {
     input.leftButton = leftHeld_;
     input.rightButton = rightHeld_;
     input.middleButton = middleHeld_;
+
+    // SDL reports the pointer in window points; the renderer's pixels differ on a high-density display.
+    float x = 0, y = 0;
+    int points = 0, pointsHigh = 0, pixels = 0, pixelsHigh = 0;
+    SDL_GetMouseState(&x, &y);
+    if (SDL_GetWindowSize(window_, &points, &pointsHigh) && SDL_GetWindowSizeInPixels(window_, &pixels, &pixelsHigh) &&
+        points > 0 && pointsHigh > 0) {
+        input.mouseX = x * static_cast<float>(pixels) / static_cast<float>(points);
+        input.mouseY = y * static_cast<float>(pixelsHigh) / static_cast<float>(pointsHigh);
+    }
     return running;
 }
 

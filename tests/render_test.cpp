@@ -658,6 +658,247 @@ std::size_t footprintBytes() {
 
 // Rendering the same scene again and again must not grow the process. SDL's Metal back end used to keep
 // about 4 MB of depth buffers and uniform buffers per call at 1024x768 after a fence-based submit.
+// A solid-colour sprite: texture 0 draws the tint.
+Sprite solid(float x, float y, float w, float h, Color tint) {
+    Sprite sprite;
+    sprite.x = x;
+    sprite.y = y;
+    sprite.width = w;
+    sprite.height = h;
+    sprite.tint = tint;
+    return sprite;
+}
+
+// 16x16: four 8x8 quadrants, red and green on top, blue and white below.
+Image quadrantsImage() {
+    const Rgba8 red{255, 0, 0, 255}, green{0, 255, 0, 255}, blue{0, 0, 255, 255}, white{255, 255, 255, 255};
+    return makeImage(16, 16, [&](int x, int y) { return y < 8 ? (x < 8 ? red : green) : (x < 8 ? blue : white); });
+}
+
+void testSpritePlacement(Scene& s) {
+    std::printf("sprites: pixel placement, tint and alpha\n");
+    const Rgb clear = rgb8(0.2f, 0.4f, 0.6f);
+    const Sprite box = solid(40, 30, 50, 20, {1, 0, 0, 1});
+    const Image image = s.renderer.renderToImage(kSize, kSize, s.frame, {}, {}, std::span(&box, 1));
+    save(image, "11a_sprite_placement.png");
+    // Pixel (x, y) is covered when x0 <= x < x0 + w: the origin is the top-left corner and y runs down.
+    expectPixel("top-left pixel", image, 40, 30, {255, 0, 0}, 0);
+    expectPixel("bottom-right pixel", image, 89, 49, {255, 0, 0}, 0);
+    expectPixel("left of the box", image, 39, 40, clear, 0);
+    expectPixel("right of the box", image, 90, 40, clear, 0);
+    expectPixel("above the box", image, 60, 29, clear, 0);
+    expectPixel("below the box", image, 60, 50, clear, 0);
+
+    // The coordinates are the target's own pixels, whatever its size.
+    const Sprite corner = solid(100, 40, 28, 24, {0, 1, 0, 1});
+    const Image small = s.renderer.renderToImage(128, 64, s.frame, {}, {}, std::span(&corner, 1));
+    expectPixel("128x64: last pixel is covered", small, 127, 63, {0, 255, 0}, 0);
+    expectPixel("128x64: first pixel is covered", small, 100, 40, {0, 255, 0}, 0);
+    expectPixel("128x64: outside", small, 99, 40, clear, 0);
+
+    // Tint colours a solid sprite; alpha blends it with what is behind.
+    const Sprite sprites[] = {solid(0, 0, 40, 40, {0.5f, 1.0f, 0.25f, 1}), solid(50, 0, 40, 40, {1, 1, 1, 0.5f}),
+                              solid(100, 0, 40, 40, {1, 1, 1, 0})};
+    const Image tinted = s.renderer.renderToImage(kSize, kSize, s.frame, {}, {}, sprites);
+    save(tinted, "11b_sprite_tint_alpha.png");
+    expectPixel("tint", tinted, 20, 20, rgb8(0.5f, 1.0f, 0.25f), 1);
+    expectPixel("half alpha white over the clear colour", tinted, 70, 20, rgb8(0.6f, 0.7f, 0.8f), 1);
+    expectPixel("zero alpha leaves the clear colour", tinted, 120, 20, clear, 0);
+    check(pixelAt(tinted, 70, 20).r != 0 && tinted.rgba[(20 * kSize + 70) * 4 + 3] == 255,
+          "the alpha channel stays opaque");
+}
+
+void testSpriteTexture(Scene& s) {
+    std::printf("sprites: texture, UV rectangle, texture alpha\n");
+    const Rgb clear = rgb8(0.2f, 0.4f, 0.6f);
+    const TextureHandle texture = s.renderer.createTexture(quadrantsImage(), false);
+    const Rgb red{255, 0, 0}, green{0, 255, 0}, blue{0, 0, 255}, white{255, 255, 255};
+
+    // The whole texture on 64x64 pixels at (20, 20): each quadrant is 32x32 pixels. Points sit well inside a
+    // quadrant, away from the filtered seams.
+    Sprite sprite = solid(20, 20, 64, 64, {1, 1, 1, 1});
+    sprite.texture = texture;
+    const Image whole = s.renderer.renderToImage(kSize, kSize, s.frame, {}, {}, std::span(&sprite, 1));
+    save(whole, "11c_sprite_texture.png");
+    expectPixel("top-left quadrant", whole, 36, 36, red);
+    expectPixel("top-right quadrant", whole, 68, 36, green);
+    expectPixel("bottom-left quadrant", whole, 36, 68, blue);
+    expectPixel("bottom-right quadrant", whole, 68, 68, white);
+
+    // A sub-rectangle: only the top-right quadrant, stretched over the whole sprite.
+    sprite.uv0 = {0.5f, 0.0f};
+    sprite.uv1 = {1.0f, 0.5f};
+    const Image sub = s.renderer.renderToImage(kSize, kSize, s.frame, {}, {}, std::span(&sprite, 1));
+    save(sub, "11d_sprite_uv_rect.png");
+    expectPixel("UV rect, centre", sub, 52, 52, green);
+    expectPixel("UV rect, near top-left", sub, 26, 26, green);
+    expectPixel("UV rect, near bottom-right", sub, 78, 78, green);
+
+    // Swapped corners mirror the image: left and right (or top and bottom) change places.
+    sprite.uv0 = {1.0f, 0.0f};
+    sprite.uv1 = {0.0f, 1.0f};
+    const Image mirrored = s.renderer.renderToImage(kSize, kSize, s.frame, {}, {}, std::span(&sprite, 1));
+    expectPixel("mirrored: top-left shows the green quadrant", mirrored, 36, 36, green);
+    expectPixel("mirrored: top-right shows the red one", mirrored, 68, 36, red);
+    sprite.uv0 = {0.0f, 1.0f};
+    sprite.uv1 = {1.0f, 0.0f};
+    const Image flipped = s.renderer.renderToImage(kSize, kSize, s.frame, {}, {}, std::span(&sprite, 1));
+    expectPixel("flipped: top-left shows the blue quadrant", flipped, 36, 36, blue);
+    expectPixel("flipped: bottom-left shows the red one", flipped, 36, 68, red);
+
+    // Coordinates past 1 repeat the texture: two whole copies side by side.
+    sprite = solid(20, 20, 128, 64, {1, 1, 1, 1});
+    sprite.texture = texture;
+    sprite.uv1 = {2.0f, 1.0f};
+    const Image tiled = s.renderer.renderToImage(kSize, kSize, s.frame, {}, {}, std::span(&sprite, 1));
+    save(tiled, "11e_sprite_repeat.png");
+    expectPixel("repeat: first copy", tiled, 36, 36, red);
+    expectPixel("repeat: second copy starts again with red", tiled, 100, 36, red);
+    expectPixel("repeat: second copy, green quadrant", tiled, 132, 36, green);
+    expectPixel("repeat: second copy, blue quadrant", tiled, 100, 68, blue);
+
+    // Texture and tint multiply; texture alpha cuts the sprite out.
+    sprite = solid(20, 20, 64, 64, {0.5f, 1, 1, 1});
+    sprite.texture = texture;
+    const Image multiplied = s.renderer.renderToImage(kSize, kSize, s.frame, {}, {}, std::span(&sprite, 1));
+    expectPixel("tint times texture", multiplied, 36, 36, rgb8(0.5f, 0, 0));
+    expectPixel("tint times a white texel", multiplied, 68, 68, rgb8(0.5f, 1, 1));
+
+    const Image cutout = makeImage(16, 16, [](int x, int) {
+        return x < 8 ? Rgba8{255, 255, 0, 0} : Rgba8{255, 255, 0, 255};
+    });
+    const TextureHandle cutoutTexture = s.renderer.createTexture(cutout, false);
+    sprite = solid(20, 20, 64, 64, {1, 1, 1, 1});
+    sprite.texture = cutoutTexture;
+    const Image cut = s.renderer.renderToImage(kSize, kSize, s.frame, {}, {}, std::span(&sprite, 1));
+    save(cut, "11f_sprite_texture_alpha.png");
+    expectPixel("transparent texels show what is behind", cut, 30, 52, clear);
+    expectPixel("opaque texels draw", cut, 74, 52, {255, 255, 0});
+    s.renderer.destroyTexture(texture);
+    s.renderer.destroyTexture(cutoutTexture);
+}
+
+void testSpriteOrder(Scene& s) {
+    std::printf("sprites: submission order, over the 3D scene\n");
+    const Rgb red{255, 0, 0}, green{0, 255, 0}, blue{0, 0, 255};
+    const Sprite first = solid(20, 20, 60, 60, {1, 0, 0, 1}), second = solid(50, 20, 60, 60, {0, 1, 0, 1});
+    const Sprite forward[] = {first, second}, backward[] = {second, first};
+    const Image a = s.renderer.renderToImage(kSize, kSize, s.frame, {}, {}, forward);
+    const Image b = s.renderer.renderToImage(kSize, kSize, s.frame, {}, {}, backward);
+    save(a, "11g_sprite_order.png");
+    expectPixel("the later sprite is on top", a, 65, 50, green);
+    expectPixel("reversed submission reverses the overlap", b, 65, 50, red);
+    expectPixel("the earlier sprite shows where it is not covered", a, 30, 50, red);
+
+    // Textures are batched, but only runs of neighbours: A B A keeps its order.
+    const TextureHandle t1 = s.renderer.createTexture(makeImage(2, 2, [](int, int) { return Rgba8{255, 0, 0, 255}; }), false);
+    const TextureHandle t2 = s.renderer.createTexture(makeImage(2, 2, [](int, int) { return Rgba8{0, 0, 255, 255}; }), false);
+    Sprite a1 = solid(20, 100, 60, 60, {1, 1, 1, 1}), b2 = solid(40, 100, 60, 60, {1, 1, 1, 1}),
+           a3 = solid(60, 100, 60, 60, {1, 1, 1, 1});
+    a1.texture = t1;
+    b2.texture = t2;
+    a3.texture = t1;
+    const Sprite interleaved[] = {a1, b2, a3};
+    const Image runs = s.renderer.renderToImage(kSize, kSize, s.frame, {}, {}, interleaved);
+    save(runs, "11h_sprite_texture_runs.png");
+    expectPixel("only the first sprite", runs, 30, 130, red);
+    expectPixel("second over first", runs, 50, 130, blue);
+    expectPixel("third over second", runs, 70, 130, red);
+    expectPixel("third alone", runs, 110, 130, red);
+    s.renderer.destroyTexture(t1);
+    s.renderer.destroyTexture(t2);
+
+    // Over the scene: sprites ignore depth and draw after meshes and debug lines, whatever their order.
+    const DrawItem wall[] = {item(s.quad, unlitColor({1, 0, 0, 1}), {0, 0, 0})};
+    const DebugLine line{{-1, 0, -2}, {1, 0, -2}, {1, 1, 0, 1}};  // in front of the quad
+    const Sprite over = solid(100, 100, 56, 56, {0, 0, 1, 1});
+    const Image scene = s.renderer.renderToImage(kSize, kSize, s.frame, wall, one(line), std::span(&over, 1));
+    save(scene, "11i_sprite_over_scene.png");
+    expectPixel("the sprite covers the mesh and the line", scene, 128, 128, blue);
+    expectPixel("the mesh is there around it", scene, 128, 90, red);
+    const Image meshOnly = s.render(wall);
+    expectPixel("the mesh alone is unchanged at the sprite's spot", meshOnly, 128, 128, red);
+
+    // The same frame in the same call without any scene: the clear colour and the sprite.
+    const Image only = s.renderer.renderToImage(kSize, kSize, s.frame, {}, {}, std::span(&over, 1));
+    expectPixel("no scene: sprite", only, 128, 128, blue);
+    expectPixel("no scene: clear colour", only, 20, 20, rgb8(0.2f, 0.4f, 0.6f));
+}
+
+void testSpriteRotation(Scene& s) {
+    std::printf("sprites: rotation\n");
+    const Rgb clear = rgb8(0.2f, 0.4f, 0.6f), red{255, 0, 0}, blue{0, 0, 255};
+    // Left half red, right half blue.
+    const Image halves = makeImage(16, 16, [](int x, int) { return x < 8 ? Rgba8{255, 0, 0, 255} : Rgba8{0, 0, 255, 255}; });
+    const TextureHandle texture = s.renderer.createTexture(halves, false);
+
+    // 80x20 centred on (128, 128), turned a quarter circle clockwise: now 20 wide and 80 tall, the red left
+    // end at the top and the blue right end at the bottom.
+    Sprite sprite = solid(88, 118, 80, 20, {1, 1, 1, 1});
+    sprite.texture = texture;
+    sprite.rotation = kPi / 2;
+    const Image quarter = s.renderer.renderToImage(kSize, kSize, s.frame, {}, {}, std::span(&sprite, 1));
+    save(quarter, "11j_sprite_rotated_90.png");
+    expectPixel("clockwise: red end is on top", quarter, 128, 95, red);
+    expectPixel("clockwise: blue end is below", quarter, 128, 161, blue);
+    expectPixel("now narrow: left of the old extent", quarter, 100, 128, clear);
+    expectPixel("now narrow: right of the old extent", quarter, 156, 128, clear);
+    expectPixel("now tall: above the old extent", quarter, 128, 80, clear);
+
+    // A 40x40 square at 45 degrees is a diamond: its corners reach 28.3 pixels from the centre along the axes
+    // and its old corners, 28.3 pixels diagonally, are now empty.
+    Sprite square = solid(108, 108, 40, 40, {1, 1, 0, 1});
+    square.rotation = kPi / 4;
+    const Image diamond = s.renderer.renderToImage(kSize, kSize, s.frame, {}, {}, std::span(&square, 1));
+    save(diamond, "11k_sprite_rotated_45.png");
+    expectPixel("diamond: top corner", diamond, 128, 128 - 26, {255, 255, 0});
+    expectPixel("diamond: right corner", diamond, 128 + 26, 128, {255, 255, 0});
+    expectPixel("diamond: the square's old corner is empty", diamond, 128 + 17, 128 - 17, clear);
+    expectPixel("diamond: beyond the tip", diamond, 128, 128 - 31, clear);
+
+    // Rotating twice a half turn (negative: anticlockwise) puts the halves back where they were.
+    sprite.rotation = -kPi;
+    sprite.x = 88;
+    sprite.y = 118;
+    const Image half = s.renderer.renderToImage(kSize, kSize, s.frame, {}, {}, std::span(&sprite, 1));
+    expectPixel("half turn: red is now on the right", half, 150, 128, red);
+    expectPixel("half turn: blue is now on the left", half, 106, 128, blue);
+    s.renderer.destroyTexture(texture);
+}
+
+void testSpriteEdgeCases(Scene& s) {
+    std::printf("sprites: bad input and many sprites\n");
+    const Rgb clear = rgb8(0.2f, 0.4f, 0.6f);
+    Sprite lost = solid(10, 10, 50, 50, {1, 0, 0, 1});
+    lost.texture = 9999;  // never created
+    const Sprite nothing = solid(70, 10, 0, 50, {0, 1, 0, 1});
+    const Sprite fine = solid(130, 10, 50, 50, {0, 0, 1, 1});
+    const Sprite batch[] = {lost, nothing, fine};
+    const Image image = s.renderer.renderToImage(kSize, kSize, s.frame, {}, {}, batch);
+    save(image, "11l_sprite_bad_input.png");
+    expectPixel("an unknown texture draws nothing", image, 30, 30, clear, 0);
+    expectPixel("a zero-width sprite draws nothing", image, 70, 30, clear, 0);
+    expectPixel("the valid sprite after them still draws", image, 150, 30, {0, 0, 255}, 0);
+    const Image none = s.renderer.renderToImage(kSize, kSize, s.frame, {}, {}, std::span<const Sprite>(&lost, 1));
+    expectPixel("a frame whose only sprite is invalid", none, 30, 30, clear, 0);
+
+    // More sprites than the initial buffer holds: a 70 x 70 grid of 3 pixel squares.
+    std::vector<Sprite> grid;
+    for (int y = 0; y < 70; ++y) {
+        for (int x = 0; x < 70; ++x) {
+            grid.push_back(solid(static_cast<float>(x * 3), static_cast<float>(y * 3), 2, 2,
+                                 {(x % 2) ? 1.0f : 0.0f, (y % 2) ? 1.0f : 0.0f, 0, 1}));
+        }
+    }
+    const Image many = s.renderer.renderToImage(kSize, kSize, s.frame, {}, {}, grid);
+    save(many, "11m_many_sprites.png");
+    expectPixel("4900 sprites: first", many, 0, 0, {0, 0, 0}, 0);
+    expectPixel("4900 sprites: red one", many, 3, 0, {255, 0, 0}, 0);
+    expectPixel("4900 sprites: green one", many, 0, 3, {0, 255, 0}, 0);
+    expectPixel("4900 sprites: last", many, 69 * 3, 69 * 3, {255, 255, 0}, 0);
+    expectPixel("4900 sprites: the gap between squares", many, 2, 2, clear, 0);
+}
+
 void testNoGrowth(Scene& s) {
     std::printf("repeated renders do not grow the process\n");
     if (footprintBytes() == 0) {
@@ -757,6 +998,11 @@ int main() {
     testLighting(scene);
     testDebugLines(scene);
     testAlphaTest(scene);
+    testSpritePlacement(scene);
+    testSpriteTexture(scene);
+    testSpriteOrder(scene);
+    testSpriteRotation(scene);
+    testSpriteEdgeCases(scene);
     testMipmaps(scene);
     testNoGrowth(scene);
     testHandles(scene);

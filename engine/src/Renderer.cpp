@@ -63,11 +63,8 @@ Renderer::Impl::~Impl() {
         if (windowDepth.texture) {
             SDL_ReleaseGPUTexture(device, windowDepth.texture);
         }
-        if (lineBuffer.vertices) {
-            SDL_ReleaseGPUBuffer(device, lineBuffer.vertices);
-        }
-        if (lineBuffer.transfer) {
-            SDL_ReleaseGPUTransferBuffer(device, lineBuffer.transfer);
+        for (StreamBuffer* stream : {&lineBuffer, &spriteBuffer}) {
+            releaseStream(*stream);
         }
         for (const auto& entry : textures) {
             SDL_ReleaseGPUTexture(device, entry.second);
@@ -356,17 +353,17 @@ void Renderer::drawableSize(int& width, int& height) const {
 }
 
 void Renderer::renderToWindow(const FrameParams& frame, std::span<const DrawItem> items,
-                              std::span<const DebugLine> lines) {
+                              std::span<const DebugLine> lines, std::span<const Sprite> sprites) {
     if (!impl_->window) {
         logError("renderToWindow called on a headless Renderer");
         return;
     }
-    impl_->renderWindow(frame, items, lines);
+    impl_->renderWindow(frame, items, lines, sprites);
 }
 
 Image Renderer::renderToImage(int width, int height, const FrameParams& frame, std::span<const DrawItem> items,
-                              std::span<const DebugLine> lines) {
-    return impl_->renderOffscreen(width, height, frame, items, lines);
+                              std::span<const DebugLine> lines, std::span<const Sprite> sprites) {
+    return impl_->renderOffscreen(width, height, frame, items, lines, sprites);
 }
 
 }  // namespace mb
