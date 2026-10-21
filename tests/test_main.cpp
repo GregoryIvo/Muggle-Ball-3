@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -89,7 +90,9 @@ void testLevelVersion() {
     check(threw, "a version that is not a number is rejected");
 
     // Loading a file converted before versions existed warns once, naming the file; a current one does not.
-    const std::filesystem::path dir = std::filesystem::temp_directory_path() / "mb3_test_level_version";
+    // Unique per run: ctest -j and concurrent builds may run this test twice at once.
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() /
+                                      ("mb3_test_level_version_" + std::to_string(std::random_device{}()));
     std::filesystem::create_directories(dir);
     const std::filesystem::path oldFile = dir / "old.json", newFile = dir / "new.json";
     std::ofstream(oldFile) << R"({"gravity":[0,0,0],"actors":[]})";
