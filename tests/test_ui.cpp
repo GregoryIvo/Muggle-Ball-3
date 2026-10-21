@@ -391,13 +391,16 @@ json formJson() {
     const json list = element("list", {{"name", "Modes"}, {"text", "%s"}});
     const json panel = element("label", {{"name", "Panel"}, {"pos", {0.0, 0.0}}, {"size", {1.0, 1.0}}, {"img_name", "forms/panel.dds"}},
                                json::array({button, locked, box, slider, natural, unknown, caption, list}));
+    const json sky = element("label", {{"name", "Sky"}, {"pos", {0.0, 0.5}}, {"size", {1.0, 0.5}}, {"img_name", "forms/sky.jpg"},
+                                       {"img_tile", {2.0, 1.0}}, {"img_translation", {3.0, 0.0}}});
     const json form = element("form", {{"name", "Test"},
                                        {"font_name", "FontName"},
                                        {"font_size", 16},
                                        {"font_color", {1, 1, 0, 1}},
                                        {"font_shadow", {2.0, 2.0}},
-                                       {"fade_time_msec", 400}},
-                              json::array({panel}));
+                                       {"fade_time_msec", 400},
+                                       {"show_time_msec", 250}},
+                              json::array({panel, sky}));
     return {{"version", 1}, {"tag", "forms"}, {"attributes", json::object()}, {"children", json::array({form})}};
 }
 
@@ -420,10 +423,10 @@ UiWidget* widget(UiForm& form, const char* name) {
 void testFormParse() {
     const StringTable strings = StringTable::parse(kStrings);  // current language "Second": FontName is other.ttf
     UiForm form = UiForm::parse(formJson().dump(), strings);
-    check(form.name() == "Test" && form.fadeTimeMs() == 400, "form: name and fade time");
-    const char* order[] = {"Test", "Panel", "Play", "Locked", "Sound", "Volume", "SliderBg", "Natural", "Caption", "Modes"};
-    bool inOrder = form.widgets().size() == 10;  // the unknown <blink> and the label inside it are not widgets
-    for (std::size_t i = 0; i < 10 && inOrder; ++i) {
+    check(form.name() == "Test" && form.fadeTimeMs() == 400 && form.showTimeMs() == 250, "form: name, fade time and show time");
+    const char* order[] = {"Test", "Panel", "Play", "Locked", "Sound", "Volume", "SliderBg", "Natural", "Caption", "Modes", "Sky"};
+    bool inOrder = form.widgets().size() == 11;  // the unknown <blink> and the label inside it are not widgets
+    for (std::size_t i = 0; i < 11 && inOrder; ++i) {
         inOrder = form.widgets()[i].name == order[i];
     }
     check(inOrder, "form: widgets in document order (the drawing order), parents before children");
@@ -475,7 +478,12 @@ void testFormAttributes() {
               box.text == "Quick Start",
           "attributes: checkbox text on the right");
     UiWidget& natural = *widget(form, "Natural");
-    check(natural.kind == WidgetKind::Label && natural.tag == "La1bel", "attributes: the misspelt tag is a label, kept as written");
+    check(natural.kind == WidgetKind::Checkbox && natural.tag == "La1bel" && natural.interactive(),
+          "attributes: the misspelt tag is a checkbox, kept as written");
+    const UiWidget& sky = *widget(form, "Sky");
+    check(near(sky.image.tile, {2, 1}) && near(sky.image.scroll, {3, 0}) && near(widget(form, "Panel")->image.tile, {1, 1}) && near(widget(form, "Panel")->image.scroll, {0, 0}),
+          "attributes: img_tile and img_translation, defaulting to one repeat that does not move");
+    check(form.showTimeMs() == 250 && UiForm::parse(formJson().dump(), strings).fadeTimeMs() == 400, "attributes: show time");
     UiWidget& slider = *widget(form, "Volume");
     check(slider.kind == WidgetKind::Slider && near(slider.rangeMin, 0) && near(slider.rangeMax, 100) &&
               near(slider.step, 5) && near(slider.value, 0) && near(slider.sizePos, {0.03f, 0.05f}),

@@ -17,6 +17,7 @@ import sys
 import zipfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import campaign  # noqa: E402
 import materials  # noqa: E402
 import mb3level  # noqa: E402
 import textures  # noqa: E402
@@ -62,6 +63,11 @@ def convert_ui(out):
         print(f"ui: warning: {warning}")
 
 
+def convert_campaign(out):
+    stats = campaign.convert(out)
+    print(f"campaign: {stats['levels']} levels in {len(stats['stages'])} stages ({', '.join(stats['stages'])})")
+
+
 def convert_meshes(out):
     stats = x2glb.convert_all(out / "Data" / "SkinMeshes", out / "Textures", out / "Data" / "Meshes")
     print(f"meshes: {stats['files']} converted to glTF, {stats['triangles']} triangles, "
@@ -93,6 +99,7 @@ def main():
     convert_ui(args.out)
     convert_meshes(args.out)
     convert_levels(args.out)
+    convert_campaign(args.out)
     print(f"done: {args.out.resolve()}")
 
 

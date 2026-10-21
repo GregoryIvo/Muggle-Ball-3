@@ -35,9 +35,11 @@ int frameAt(const std::vector<int>& frames, std::size_t index) {
 std::optional<WidgetKind> kindOf(const std::string& tag) {
     const std::string lower = lowerAscii(tag);
     if (lower == "form") return WidgetKind::Form;
-    if (lower == "label" || lower == "la1bel") return WidgetKind::Label;  // "La1bel" is the data's one misspelt tag
+    if (lower == "label") return WidgetKind::Label;
     if (lower == "button") return WidgetKind::Button;
-    if (lower == "checkbox") return WidgetKind::Checkbox;
+    // "La1bel" is the data's one misspelt tag, on Options' Fullscreen: it carries a checkbox's sprite sheet and
+    // sounds, so it is the checkbox the layout was made for (the original most likely skipped it as unknown).
+    if (lower == "checkbox" || lower == "la1bel") return WidgetKind::Checkbox;
     if (lower == "slider") return WidgetKind::Slider;
     if (lower == "list") return WidgetKind::List;
     if (lower == "textedit") return WidgetKind::TextEdit;
@@ -131,6 +133,8 @@ SpriteSheet parseSheet(const Attributes& attributes) {
     SpriteSheet sheet;
     sheet.name = attributes.string("img_name", "");
     sheet.tiled = attributes.boolean("tiled", false);
+    sheet.tile = attributes.vec2("img_tile", {1, 1});
+    sheet.scroll = attributes.vec2("img_translation", {});
     const std::vector<float> params = attributes.numbers("img_params");
     if (params.size() >= 2 && params[0] >= 1 && params[1] >= 1) {
         sheet.columns = static_cast<int>(params[0]);
@@ -310,7 +314,9 @@ UiForm UiForm::parse(std::string_view text, const StringTable& strings) {
         const json& element = root.at("children")[0];
         form.name_ = Attributes(element, "").name();
         Builder(form.widgets_, strings, form.name_).add(element, -1, {});
-        form.fadeTimeMs_ = static_cast<int>(Attributes(element, form.name_).number("fade_time_msec", 0));
+        const Attributes attributes(element, form.name_);
+        form.fadeTimeMs_ = static_cast<int>(attributes.number("fade_time_msec", 0));
+        form.showTimeMs_ = static_cast<int>(attributes.number("show_time_msec", 0));
         if (root.at("children").size() > 1) {
             logWarn("{}: only the first of {} forms in the file is used", form.name_, root.at("children").size());
         }

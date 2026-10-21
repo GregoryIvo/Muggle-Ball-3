@@ -16,9 +16,9 @@ namespace mb {
 // widget is drawn and which ones the pointer can touch.
 enum class WidgetKind {
     Form,      // the root <form>: the form's own settings, and an image if it has one (the sky of "background")
-    Label,     // an image and/or text, never interactive. The data's one misspelt <La1bel> is a Label too
+    Label,     // an image and/or text, never interactive
     Button,
-    Checkbox,  // a sprite sheet of two frames, unchecked and checked
+    Checkbox,  // a sprite sheet of two frames, unchecked and checked. The data's one misspelt <La1bel> is a Checkbox too
     Slider,    // `image` is the knob; the track and the - and + buttons are its child widgets
     List,      // a choice among strings. Draws nothing itself: its `text` is a "%s" format for the child label that
                // shows the selected item, and its - and + buttons are child widgets
@@ -50,6 +50,8 @@ struct SpriteSheet {
     // than states repeat the last one, and none at all means frame 0.
     std::vector<int> frames;
     bool tiled = false;  // repeat the image at its own size across the rectangle instead of stretching it
+    Vec2 tile{1, 1};     // img_tile: how many times the picture repeats across the rectangle, along x and along y
+    Vec2 scroll;         // img_translation: how fast the picture slides, in hundredths of its width and height a second
 
     bool empty() const { return name.empty(); }
 };
@@ -170,6 +172,8 @@ public:
     const std::string& name() const { return name_; }
     // The time the form takes to fade in, in milliseconds (the data's fade_time_msec).
     int fadeTimeMs() const { return fadeTimeMs_; }
+    // The least time the form stays on screen, in milliseconds (the data's show_time_msec); 0 for none.
+    int showTimeMs() const { return showTimeMs_; }
 
     // Document order: parents before their children, siblings in file order. This is the drawing order; the
     // pointer reaches the last widget first. Index 0 is the root form. Change widgets' state freely, but do not add
@@ -198,6 +202,7 @@ public:
 private:
     std::string name_;
     int fadeTimeMs_ = 0;
+    int showTimeMs_ = 0;
     std::vector<UiWidget> widgets_;
     UiLayout screen_;
     int hovered_ = -1;  // indices into widgets_

@@ -17,6 +17,8 @@ struct Context {
     std::vector<Sprite>& out;
     float scale;  // target pixels per reference pixel
     float fade;
+    double scrollSeconds;
+    const UiWidget* caret;
 };
 
 // Where `rect` of the widget is drawn right now: grown on hover, and moved while pressed if asked to.
@@ -30,6 +32,13 @@ Rect shownRect(const UiWidget& w, Rect r, float scale, bool pressedOffset) {
         r.y += w.pressOffset.y * scale;
     }
     return r;
+}
+
+// How far a scrolling image has slid after `seconds`, as a fraction of the picture, wrapped to 0..1 so that a long
+// run keeps its precision.
+float slideOf(float hundredthsPerSecond, double seconds) {
+    const double turns = hundredthsPerSecond * 0.01 * seconds;
+    return static_cast<float>(turns - std::floor(turns));
 }
 
 // One frame of the widget's image into `rect`, preceded by its drop shadow.
@@ -52,10 +61,18 @@ void drawImage(Context& c, const UiWidget& w, const Rect& rect, const Rect& shad
         const float shown = w.fraction();
         sprite.width *= shown;
         sprite.uv1.x = uv.uv0.x + (uv.uv1.x - uv.uv0.x) * shown;
-    } else if (w.image.tiled && w.image.columns == 1 && w.image.rows == 1) {
-        // Repeat the picture at its own size (the sampler wraps coordinates past 1).
-        sprite.uv1 = {rect.w / (static_cast<float>(image->width) * c.scale),
-                      rect.h / (static_cast<float>(image->height) * c.scale)};
+    } else if (w.image.columns == 1 && w.image.rows == 1) {
+        // The sampler wraps coordinates past 1, which repeats the picture.
+        if (w.image.tiled) {
+            // At its own size.
+            sprite.uv1 = {rect.w / (static_cast<float>(image->width) * c.scale),
+                          rect.h / (static_cast<float>(image->height) * c.scale)};
+        } else {
+            sprite.uv1 = {w.image.tile.x, w.image.tile.y};
+        }
+        const Vec2 slide{slideOf(w.image.scroll.x, c.scrollSeconds), slideOf(w.image.scroll.y, c.scrollSeconds)};
+        sprite.uv0 = slide;
+        sprite.uv1 = {sprite.uv1.x + slide.x, sprite.uv1.y + slide.y};
     }
     if (sprite.width <= 0) {
         return;
@@ -74,7 +91,8 @@ void drawImage(Context& c, const UiWidget& w, const Rect& rect, const Rect& shad
 
 void drawText(Context& c, const UiWidget& w, const Rect& box, float alpha) {
     // A list's text is the format its child label shows the selected item with, not something to draw.
-    if (w.text.empty() || w.kind == WidgetKind::List) {
+    const bool caret = &w == c.caret;
+    if ((w.text.empty() && !caret) || w.kind == WidgetKind::List) {
         return;
     }
     const UiAssets::FontChoice choice = c.assets.font(w.fontFace, w.fontSize);
@@ -91,11 +109,12 @@ void drawText(Context& c, const UiWidget& w, const Rect& box, float alpha) {
     const float gap = w.textOffset * c.scale;
     const Vec2 center = box.center();
     Vec2 anchor{center.x, center.y};
+    Vec2 size;
     if (w.textPlacement == TextPlacement::CenterMultiline) {
         params.maxWidth = box.w;
         anchor.y = box.y;
     } else {
-        const Vec2 size = choice.font->measure(w.text, params);
+        size = choice.font->measure(w.text, params);
         switch (w.textPlacement) {
             case TextPlacement::Right:
                 params.align = HAlign::Left;
@@ -115,6 +134,19 @@ void drawText(Context& c, const UiWidget& w, const Rect& box, float alpha) {
         }
     }
     choice.font->draw(c.out, w.text, anchor, params);
+    if (caret) {
+        // A bar after the last character, as tall as the lettering.
+        const float width = std::max(2.0f * c.scale, 1.0f);
+        const float left = params.align == HAlign::Center ? anchor.x + size.x * 0.5f : anchor.x + size.x;
+        const float height = static_cast<float>(choice.font->lineHeight()) * params.scale * 0.8f;
+        Sprite bar;
+        bar.x = std::round(left + c.scale);
+        bar.y = std::round(anchor.y + (size.y - height) * 0.5f);
+        bar.width = width;
+        bar.height = std::round(height);
+        bar.tint = params.color;
+        c.out.push_back(bar);
+    }
 }
 
 void drawWidget(Context& c, const UiWidget& w, bool imageToo) {
@@ -130,7 +162,7 @@ void drawWidget(Context& c, const UiWidget& w, bool imageToo) {
 }  // namespace
 
 void drawForm(const UiForm& form, UiAssets& assets, std::vector<Sprite>& out, const UiDrawOptions& options) {
-    Context c{assets, out, form.screen().scale(), std::clamp(options.fade, 0.0f, 1.0f)};
+    Context c{assets, out, form.screen().scale(), std::clamp(options.fade, 0.0f, 1.0f), options.scrollSeconds, options.caret};
     const std::vector<UiWidget>& widgets = form.widgets();
 
     std::vector<std::size_t> knobs;  // sliders whose knob waits for their children

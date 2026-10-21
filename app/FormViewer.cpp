@@ -1,18 +1,18 @@
 #include "FormViewer.h"
 
+#include "FrontEnd.h"
 #include "mb/engine/Log.h"
 #include "mb/engine/Paths.h"
 #include "mb/engine/Renderer.h"
 #include "mb/engine/Window.h"
+#include "mb/game/Menu.h"
 #include "mb/game/UiAssets.h"
-#include "mb/game/UiDraw.h"
 
 #include <SDL3/SDL.h>
 
 #include <algorithm>
 #include <cctype>
 #include <chrono>
-#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -24,22 +24,45 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-// A form on screen, with the background form behind it unless it stands on its own.
-class Screen {
+constexpr int kDemoScore = 1234;
+
+// A table to show on the high-score form: made up, for looking at the screen only.
+mb::Profile demoProfile() {
+    mb::Profile profile;
+    int score = 48500;
+    for (const char* name : {"Ivan", "Alexey", "Sergey", "Lena", "Artem", "Igor", "Andrew", "Maria", "Olga", "Nikolay"}) {
+        profile.highScores.push_back({name, score});
+        score -= 2750;
+    }
+    return profile;
+}
+
+bool sameName(const std::string& a, const std::string& b) {
+    return a.size() == b.size() &&
+           std::ranges::equal(a, b, [](unsigned char x, unsigned char y) { return std::tolower(x) == std::tolower(y); });
+}
+
+// The menus on their own, with the sounds and the saving written to the log.
+class Viewer {
 public:
-    Screen(mb::UiAssets& assets, bool background) : assets_(assets), names_(assets.formNames()), background_(background) {}
+    Viewer(mb::UiAssets& assets, bool background)
+        : assets_(assets),
+          names_(assets.formNames()),
+          campaign_(mb::Campaign::load(assets.root() / "Data" / "xml" / "levels.json")),
+          menu_([this](std::string_view name) { return assets_.loadForm(name); }, campaign_, hooks()) {
+        menu_.setBackground(background);
+        menu_.setVideoModes({{800, 600}, {1024, 768}, {1280, 960}});
+    }
 
     // `query` is a file name from Data/Menu, any case.
     void show(const std::string& query) {
-        form_ = assets_.loadForm(query);  // throws if there is no such form
-        const auto stem = std::ranges::find_if(names_, [&](const std::string& n) { return sameName(n, query); });
-        index_ = static_cast<std::size_t>(stem - names_.begin());
-        withBackground_ = background_ && !sameName(file(), "Loading") && !sameName(file(), "background");
-        if (withBackground_ && backdrop_.widgets().empty()) {
-            backdrop_ = assets_.loadForm("background");
+        menu_.setScore(kDemoScore);
+        menu_.open(query);  // throws if there is no such form
+        index_ = static_cast<std::size_t>(
+            std::ranges::find_if(names_, [&](const std::string& n) { return sameName(n, query); }) - names_.begin());
+        if (sameName(file(), "Loading")) {
+            menu_.setProgress(0.6f);
         }
-        showcase(form_);
-        shown_ = Clock::now();
     }
 
     // The next (or previous) form in Data/Menu, wrapping around.
@@ -49,85 +72,70 @@ public:
     }
 
     const std::string& file() const { return names_[index_]; }
+    mb::Menu& menu() { return menu_; }
 
-    // Lays the forms out for the target and draws them.
-    std::vector<mb::Sprite> draw(int width, int height, mb::Vec2 pointer, bool down, bool fadeIn) {
-        const mb::UiLayout layout = mb::UiLayout::fit(width, height);
-        form_.layout(layout, assets_.imageSizes());
-        const mb::PointerEvents events = form_.updatePointer(pointer, down);
-        if (events.clicked) {
-            mb::logInfo("clicked \"{}\" (user_data \"{}\")", events.clicked->name, events.clicked->userData);
+    // Runs a frame of the menus; true while the player has not asked to leave.
+    bool update(const mb::UiInput& input, double seconds, int width, int height) {
+        const mb::MenuResult result = menu_.update(input, seconds, mb::UiLayout::fit(width, height), assets_.imageSizes());
+        if (result.kind == mb::MenuResult::Kind::StartLevel) {
+            const std::string* name = campaign_.levelName(result.level);
+            mb::logInfo("would start level {} ({})", result.level, name ? *name : "?");
         }
-        mb::UiDrawOptions options;
-        if (fadeIn && form_.fadeTimeMs() > 0) {
-            const double elapsed = std::chrono::duration<double, std::milli>(Clock::now() - shown_).count();
-            options.fade = static_cast<float>(std::min(elapsed / form_.fadeTimeMs(), 1.0));
-        }
+        return result.kind != mb::MenuResult::Kind::Quit;
+    }
+
+    std::vector<mb::Sprite> draw() {
         std::vector<mb::Sprite> sprites;
-        if (withBackground_) {
-            backdrop_.layout(layout, assets_.imageSizes());
-            mb::drawForm(backdrop_, assets_, sprites);
-        }
-        mb::drawForm(form_, assets_, sprites, options);
+        menu_.draw(assets_, sprites);
         return sprites;
     }
 
-    // The centre, in pixels of a target, of the first widget with this name; empty if there is none.
-    std::optional<mb::Vec2> centerOf(const std::string& widgetName, int width, int height) {
-        form_.layout(mb::UiLayout::fit(width, height), assets_.imageSizes());
-        const mb::UiWidget* widget = form_.find(widgetName);
-        return widget ? std::optional<mb::Vec2>(widget->rect.center()) : std::nullopt;
-    }
-
 private:
-    // Fills in state the game would set, so that every frame of the widgets can be seen: checkboxes alternate
-    // between checked and not, sliders sit at the middle, progress bars are 60% full.
-    static void showcase(mb::UiForm& form) {
-        bool checked = true;
-        for (mb::UiWidget& w : form.widgets()) {
-            if (w.kind == mb::WidgetKind::Checkbox) {
-                w.checked = checked;
-                checked = !checked;
-            } else if (w.kind == mb::WidgetKind::Slider) {
-                w.value = (w.rangeMin + w.rangeMax) * 0.5f;
-            } else if (w.kind == mb::WidgetKind::Progress) {
-                w.value = w.rangeMin + 0.6f * (w.rangeMax - w.rangeMin);
-            }
-        }
-    }
-
-    static bool sameName(const std::string& a, const std::string& b) {
-        return a.size() == b.size() &&
-               std::ranges::equal(a, b, [](unsigned char x, unsigned char y) { return std::tolower(x) == std::tolower(y); });
+    static mb::MenuHooks hooks() {
+        mb::MenuHooks hooks;
+        hooks.playSound = [](std::string_view sound) { mb::logInfo("sound \"{}\"", sound); };
+        hooks.loadProfile = demoProfile;
+        hooks.settingsChanged = [](const mb::Settings& s) {
+            mb::logInfo("settings: music {} sound {} smart camera {} freeze sky {} shadows {} mirrors {} fullscreen {} bat {}", s.musicVolume,
+                        s.soundVolume, s.smartCamera, s.freezeSky, s.shadows, s.mirrors, s.fullscreen, s.bat);
+        };
+        hooks.applyVideo = [](const mb::Settings& s) { mb::logInfo("video: {}x{}, fullscreen {}", s.windowWidth, s.windowHeight, s.fullscreen); };
+        hooks.saveProfile = [](const mb::Profile& p) { mb::logInfo("profile saved ({} scores)", p.highScores.size()); };
+        return hooks;
     }
 
     mb::UiAssets& assets_;
     std::vector<std::string> names_;
-    bool background_;
-    bool withBackground_ = false;
+    mb::Campaign campaign_;
+    mb::Menu menu_;
     std::size_t index_ = 0;
-    mb::UiForm form_;
-    mb::UiForm backdrop_;
-    Clock::time_point shown_ = Clock::now();
 };
 
 int writeScreenshot(const FormViewerOptions& o) {
     mb::Renderer renderer;
     mb::logInfo("GPU backend: {}", renderer.backendName());
     mb::UiAssets assets(renderer, mb::assetRoot(), o.language);
-    Screen screen(assets, o.background);
-    screen.show(o.form);
+    Viewer viewer(assets, o.background);
+    viewer.show(o.form);
+    // The form has faded in by the time the picture is taken.
+    viewer.update({}, 1.0, o.width, o.height);
+
     // The pointer rests on the widget asked for, or off the screen.
     const std::string& target = !o.press.empty() ? o.press : o.hover;
-    mb::Vec2 pointer{-1, -1};
     if (!target.empty()) {
-        const std::optional<mb::Vec2> at = screen.centerOf(target, o.width, o.height);
-        if (!at) {
-            throw std::runtime_error("the form " + screen.file() + " has no widget named \"" + target + "\"");
+        const mb::UiWidget* widget = viewer.menu().form().find(target);
+        if (!widget) {
+            throw std::runtime_error("the form " + viewer.file() + " has no widget named \"" + target + "\"");
         }
-        pointer = *at;
+        const mb::Vec2 at = widget->rect.center();
+        mb::UiInput input;
+        input.pointer.push_back({at, false});
+        if (!o.press.empty()) {
+            input.pointer.push_back({at, true});
+        }
+        viewer.update(input, 0, o.width, o.height);
     }
-    const std::vector<mb::Sprite> sprites = screen.draw(o.width, o.height, pointer, !o.press.empty(), false);
+    const std::vector<mb::Sprite> sprites = viewer.draw();
     const mb::Image image = renderer.renderToImage(o.width, o.height, {}, {}, {}, sprites);
     if (image.empty() || !mb::writePng(o.screenshot, image)) {
         mb::logError("cannot write screenshot {}", o.screenshot);
@@ -142,28 +150,36 @@ int showWindow(const FormViewerOptions& o) {
     mb::Renderer renderer(window);
     mb::logInfo("GPU backend: {}", renderer.backendName());
     mb::UiAssets assets(renderer, mb::assetRoot(), o.language);
-    Screen screen(assets, o.background);
-    screen.show(o.form);
-    window.setTitle("Muggle Ball 3 - form " + screen.file());
+    Viewer viewer(assets, o.background);
+    viewer.show(o.form);
+    window.setTitle("Muggle Ball 3 - form " + viewer.file());
 
     mb::InputEvents input;
-    while (window.pollEvents(input)) {
+    bool textInput = false;
+    bool running = true;
+    Clock::time_point last = Clock::now();
+    while (running && window.pollEvents(input)) {
         for (const std::uint32_t key : input.keysPressed) {
             if (key != SDLK_LEFT && key != SDLK_RIGHT) {
                 continue;
             }
             try {
-                screen.showRelative(key == SDLK_LEFT ? -1 : 1);
-                window.setTitle("Muggle Ball 3 - form " + screen.file());
+                viewer.showRelative(key == SDLK_LEFT ? -1 : 1);
+                window.setTitle("Muggle Ball 3 - form " + viewer.file());
             } catch (const std::exception& e) {
                 mb::logError("cannot show the next form: {}", e.what());
             }
         }
+        const Clock::time_point now = Clock::now();
         int width = 0, height = 0;
         renderer.drawableSize(width, height);
-        const std::vector<mb::Sprite> sprites =
-            screen.draw(width, height, {input.mouseX, input.mouseY}, input.leftButton, true);
-        renderer.renderToWindow({}, {}, {}, sprites);
+        running = viewer.update(toUiInput(input), std::chrono::duration<double>(now - last).count(), width, height);
+        last = now;
+        if (viewer.menu().wantsText() != textInput) {
+            textInput = viewer.menu().wantsText();
+            window.setTextInput(textInput);
+        }
+        renderer.renderToWindow({}, {}, {}, viewer.draw());
     }
     return 0;
 }

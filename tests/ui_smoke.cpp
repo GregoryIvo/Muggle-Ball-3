@@ -162,7 +162,8 @@ void checkData(const fs::path& root) {
     const mb::UiWidget* music = options.find("MusicVolume");
     check(music && music->kind == mb::WidgetKind::Slider && music->rangeMax == 100 && music->step == 5, "Options: the music slider");
     const mb::UiWidget* fullscreen = options.find("Fullscreen");
-    check(fullscreen && fullscreen->kind == mb::WidgetKind::Label && fullscreen->tag == "La1bel", "Options: the misspelt Fullscreen label");
+    check(fullscreen && fullscreen->kind == mb::WidgetKind::Checkbox && fullscreen->tag == "La1bel" && fullscreen->image.frames == std::vector<int>({1, 0}),
+          "Options: the misspelt Fullscreen element is a checkbox");
     mb::UiForm select = mb::UiForm::load(root / "Data" / "Menu" / "stagepiratos.json", strings);
     int levelButtons = 0;
     for (const mb::UiWidget& w : select.widgets()) {

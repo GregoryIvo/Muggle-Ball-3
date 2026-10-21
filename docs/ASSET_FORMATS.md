@@ -128,7 +128,8 @@ runtime resolves them with `TextureIndex`.
 ## Menus, strings and fonts: `tools/ui.py`
 
 `tools/ui.py` (run by `convert_assets.py` after the textures, because it reads the font atlas PNGs) converts the
-2D UI data. Nothing is written to the original files; each JSON file sits next to its source.
+2D UI data. Nothing is written to the original files; each JSON file sits next to its source. The level list,
+`tools/campaign.py`, is described after the menu forms.
 
 ### Menu forms: `assets/Data/Menu/<Name>.json`
 
@@ -205,10 +206,40 @@ Worked out from the data and the textures; the UI code follows it.
   the file of that name in `Data/Menu`, ignoring case), `SelectLevel` (the `name` is the level's index, 0 to 82 over
   the four stage forms), `SelectBat`, `ApplyVideo`, `ApplyRecord`, `OnlineScore`, `FinishGame`.
   `sound_mouse_in` and `sound_mouse_down` name `<Sound>` entries of `Data/xml/sounds.xml`, ignoring case.
+  What each button does and how the screens lead into each other is in the "Menus and screens" part of
+  `docs/ARCHITECTURE.md`. Buttons with no `user_data` are told apart by `name`: `Exit`, `QuickStart`, `LocalScores`,
+  `PrevPage`, `NextPage`, the `-` and `+` of a slider or list, and the stage emblem `Logo` (which only plays its sound).
 - **`fade_time_msec`** is how long the form takes to fade in (400); elements with `no_fading="yes"` (the logo) stay
-  opaque meanwhile.
-- Not used: `tiled` is always `no` in the shipped files (the loader tiles the image at its own size when it is
-  `yes`); the `background` form's `img_tile` and `img_translation` (a scrolling sky) are kept in the JSON only.
+  opaque meanwhile. **`show_time_msec`** (0 on the two forms that have it) is taken as the least time the form stays up.
+- **`img_tile`** and **`img_translation`** are on the `background` form's sky only (`1 1` and `3. 0.`): the picture
+  repeats `img_tile` times across the element and slides by `img_translation`; taken as hundredths of the picture's
+  width and height a second (the unit is a guess: 3 gives a full turn in about 33 seconds). `tiled` is always `no` in
+  the shipped files (the loader tiles the image at its own size when it is `yes`).
+- **`<La1bel name="Fullscreen">`**, the one misspelt tag, is Options' fullscreen switch: it has a checkbox's sprite sheet
+  and sounds, so it is loaded as a checkbox (the original most likely skipped it as an unknown tag).
+
+### Level list: `assets/Data/xml/levels.json`
+
+`tools/campaign.py` (run by `convert_assets.py` last) converts `Data/Levels/levels.xml`, the game's list of its 83
+levels, to JSON. It is the only file that says which levels exist in which stage and in which order the menus number
+them; it sits in `Data/xml`, not `Data/Levels`, where every `.json` is taken for a level.
+
+```json
+{"version": 1, "stages": [
+  {"name": "Pirates", "levels": ["piratos-ostrovok", "piratos-birthday", "Piratos-Chyu-u-dishe", "..."]},
+  {"name": "Village", "levels": ["village-apple", "..."]}, {"name": "Cowboys", "levels": ["..."]}, {"name": "Knights", "levels": ["..."]}]}
+```
+
+- A stage is a run of levels with the same `musicName` (a `<Music name>` of `musics.xml`): Pirates 20 levels, Village
+  26, Cowboys 17, Knights 20. The order of the file is kept; a level's **campaign index** is its place in the whole
+  list, 0 to 82, and is what the stage forms' level buttons are named with (`stagepiratos` has 0 to 19, `stagefarm`
+  20 to 45, `stagecowboys` 46 to 62, `stageknights` 63 to 82).
+- A level is its file name without `.mb3`, in the case the XML writes it (`piratos-SOS`, where the file is
+  `Piratos-SOS.mb3`): look it up ignoring case.
+- That is all the data says about the order. It is not the order the original plays in: the screenshot of the
+  Saloon in `reference/` shows `LEVEL : 62`, while the saloon is the twelfth cowboys level here, number 58. Within a
+  stage the file is alphabetical, except that the first pirates level, `piratos-ostrovok`, is first (it is `LEVEL : 1`
+  in the other screenshot).
 
 ### String table: `assets/Data/xml/languages.json`
 
