@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""Round-trip a small synthetic .mb3 file through tools/mb3level.py."""
+"""Round-trip a small synthetic .mb3 file through tools/mb3level.py and the level step of convert_assets.py."""
+import contextlib
+import io
+import json
 import pathlib
+import re
 import struct
 import sys
+import tempfile
 import unittest
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "tools"))
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "tools"))
+import convert_assets  # noqa: E402
 import mb3level as M  # noqa: E402
 
 IDENTITY_POSE = struct.pack("<12f", 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
@@ -31,8 +38,17 @@ def box_shape(half):
     return struct.pack("<I", 2) + bytes(raw)
 
 
+def capsule_shape(radius, height):
+    raw = bytearray(M.SHAPE_DESC_SIZE[3])
+    struct.pack_into("<I", raw, 0, 3)
+    raw[4:52] = IDENTITY_POSE
+    struct.pack_into("<2fI", raw, len(raw) - 12, radius, height, 0)
+    return struct.pack("<I", 3) + bytes(raw)
+
+
 def board_actor():
-    return (actor_desc((0, 0, 0), True) + b"\x00" + struct.pack("<I", 1) + box_shape((3, 22, 15))
+    return (actor_desc((0, 0, 0), True) + b"\x00" + struct.pack("<I", 2) + box_shape((3, 22, 15))
+            + capsule_shape(0.91, 9.8)
             + struct.pack("<III", 1, 2, M.FLAG_MATERIAL | M.FLAG_MESH)
             + string("boardmaterial") + string("boardsea.x"))
 
@@ -67,18 +83,38 @@ def level_bytes():
 class Mb3LevelTest(unittest.TestCase):
     def test_parse(self):
         level = M.parse(level_bytes())
+        self.assertEqual(level["version"], 2)
         self.assertEqual(level["trailingBytes"], 0)
         self.assertEqual(len(level["actors"]), 2)
         board = level["actors"][0]
         self.assertEqual(board["object"]["type"], "board")
         self.assertEqual(board["object"]["mesh"], "boardsea.x")
         self.assertEqual(board["shapes"][0]["halfExtents"], [3, 22, 15])
+        self.assertEqual(board["shapes"][1]["type"], "capsule")
+        self.assertEqual(board["shapes"][1]["radiusHeight"], [0.91, 9.8])
         cloth = level["actors"][1]["object"]["cloth"]
         self.assertEqual(len(cloth["segments"]), 3)
         self.assertIn("body", cloth["segments"][0])
         self.assertEqual(level["joints"][0]["type"], 2)
         self.assertEqual(level["paths"][0]["points"][0]["pos"], [1, 2, 3])
         self.assertEqual(level["paths"][0]["points"][0]["up"], [0, 1, 0])
+
+    def test_version_matches_runtime(self):
+        header = (ROOT / "game" / "include" / "mb" / "game" / "Level.h").read_text()
+        match = re.search(r"kLevelJsonVersion\s*=\s*(\d+)", header)
+        self.assertIsNotNone(match)
+        self.assertEqual(int(match.group(1)), M.LEVEL_JSON_VERSION)
+
+    def test_converted_json_carries_the_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            levels = pathlib.Path(tmp) / "Data" / "Levels"
+            levels.mkdir(parents=True)
+            (levels / "test.mb3").write_bytes(level_bytes())
+            with contextlib.redirect_stdout(io.StringIO()):
+                convert_assets.convert_levels(pathlib.Path(tmp))
+            converted = json.loads((levels / "test.json").read_text())
+        self.assertEqual(converted["version"], M.LEVEL_JSON_VERSION)
+        self.assertEqual(converted["actors"][0]["shapes"][1]["radiusHeight"], [0.91, 9.8])
 
     def test_rejects_other_files(self):
         with self.assertRaises(ValueError):

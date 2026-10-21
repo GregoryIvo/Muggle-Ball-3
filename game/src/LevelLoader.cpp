@@ -1,5 +1,7 @@
 #include "mb/game/LevelLoader.h"
 
+#include "mb/engine/Log.h"
+
 #include <nlohmann/json.hpp>
 
 #include <fstream>
@@ -52,6 +54,17 @@ Shape shape(const json& j) {
 
 Actor actor(const json& j);
 
+std::vector<std::uint8_t> hexBytes(const std::string& hex) {
+    if (hex.size() % 2 != 0) {
+        throw std::runtime_error("odd-length hex string");
+    }
+    std::vector<std::uint8_t> bytes(hex.size() / 2);
+    for (std::size_t i = 0; i < bytes.size(); ++i) {
+        bytes[i] = static_cast<std::uint8_t>(std::stoul(hex.substr(i * 2, 2), nullptr, 16));
+    }
+    return bytes;
+}
+
 GameObject object(const json& j) {
     GameObject o;
     o.type = objectTypeFromName(j.at("type").get<std::string>());
@@ -61,6 +74,7 @@ GameObject object(const json& j) {
     o.mesh = j.value("mesh", "");
     o.frame = j.value("frame", "");
     o.prize = j.value("prize", "");
+    if (j.contains("extra")) o.extra = hexBytes(j["extra"].get<std::string>());
     if (j.contains("cloth")) {
         for (const json& seg : j["cloth"].at("segments")) {
             o.clothSegments.push_back(actor(seg));
@@ -87,6 +101,7 @@ Actor actor(const json& j) {
 Level parseLevelJson(std::string_view text) {
     const json j = json::parse(text);
     Level level;
+    level.version = j.value("version", 1);
     level.gravity = vec3(j.at("gravity"));
     for (const json& a : j.at("actors")) {
         level.actors.push_back(actor(a));
@@ -109,7 +124,13 @@ Level loadLevelJson(const std::filesystem::path& path) {
     }
     std::ostringstream buf;
     buf << in.rdbuf();
-    return parseLevelJson(buf.str());
+    Level level = parseLevelJson(buf.str());
+    if (level.version < kLevelJsonVersion) {
+        logWarn("{}: level JSON is version {}, this build reads version {}; "
+                "run tools/convert_assets.py again to refresh it",
+                path.string(), level.version, kLevelJsonVersion);
+    }
+    return level;
 }
 
 }  // namespace mb

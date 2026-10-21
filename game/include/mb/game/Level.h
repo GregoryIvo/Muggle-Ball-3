@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mb/engine/Math.h"
 #include "mb/game/ObjectType.h"
 
 #include <array>
@@ -9,7 +10,6 @@
 
 namespace mb {
 
-using Vec3 = std::array<float, 3>;
 using Mat3 = std::array<float, 9>;  // row-major, as stored by PhysX 2.x (NxMat33)
 
 struct Pose {
@@ -38,6 +38,7 @@ struct GameObject {
     std::string mesh;
     std::string frame;
     std::string prize;              // Prize: which power-up it drops
+    std::vector<std::uint8_t> extra;   // flags & 0x200: 0x68 bytes (a D3DLIGHT8 for lights)
     std::vector<Actor> clothSegments;  // Cloth: the extra segment actors
 };
 
@@ -57,7 +58,12 @@ struct Path {
     std::vector<PathPoint> points;
 };
 
+// The level JSON version this build reads, the one tools/mb3level.py writes (LEVEL_JSON_VERSION
+// there; docs/LEVEL_FORMAT.md lists what each version changed).
+inline constexpr int kLevelJsonVersion = 2;
+
 struct Level {
+    int version = kLevelJsonVersion;  // of the JSON it was loaded from; 1 when the file has none
     Vec3 gravity{};
     std::vector<Actor> actors;
     std::vector<Path> paths;

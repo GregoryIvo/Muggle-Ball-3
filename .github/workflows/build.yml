@@ -37,4 +37,4 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
       - name: Converter tests
-        run: python3 tests/test_mb3level.py
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v

@@ -5,21 +5,24 @@ Alawar, 2006), built macOS-first. The runtime is new code; the game's art,
 sound, music and levels are loaded from **your own installed copy** and are
 never committed to this repository.
 
-Status: early skeleton. The window opens through the SDL3 GPU API (Metal on
-macOS), and converted levels load and can be inspected. Rendering, physics and
-gameplay come next.
+Status: early. Step 2, drawing a level standing still, is done: the window opens
+through the SDL3 GPU API (Metal on macOS) and shows any of the 83 converted
+levels from the original's fixed camera, with models, textures (animated ones
+included), sky and the level's own light, and wireframes of the physics shapes on
+request. Not there yet: sails (cloth), shadows and reflections, model animation,
+physics, gameplay, sound and menus.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
-| `engine/` | Platform-neutral runtime: window, GPU renderer, logging, paths |
-| `game/` | Magic Ball rules: object types, level model, level loader |
-| `app/` | Executable entry point |
+| `engine/` | Platform-neutral runtime: window and input, GPU renderer and shaders, model and image loading, logging, paths |
+| `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, camera |
+| `app/` | Executable entry point: the level viewer |
 | `platform/macos/` | App bundle metadata (the only per-platform code so far) |
-| `tools/` | Asset pipeline: `.mb3` level converter, archive unpacker, MoleBox dumper |
-| `docs/` | Architecture, level format, how the data was recovered |
-| `tests/` | C++ and Python tests that need no game data |
+| `tools/` | Asset pipeline: `convert_assets.py` runs the converters for levels (`mb3level.py`), meshes (`x2glb.py`), materials and textures; also the MoleBox dumper and the shader compiler |
+| `docs/` | Architecture, level format, converted asset formats (`ASSET_FORMATS.md`), how the data was recovered |
+| `tests/` | C++ and Python tests; the ones that read the game data are skipped unless `MB3_ASSETS` is set |
 
 ## Build (macOS)
 
@@ -28,16 +31,24 @@ brew install cmake ninja
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build
+python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
-SDL3 and nlohmann/json are fetched automatically by CMake. Use
-`-G Xcode` instead of Ninja to get an Xcode project.
+SDL3 and nlohmann/json come from Homebrew if installed (`brew install sdl3
+nlohmann-json`) and are fetched by CMake otherwise; stb and cgltf are always
+fetched. Use `-G Xcode` instead of Ninja to get an Xcode project.
+
+The compiled shaders are committed (`engine/shaders/generated/`), so building
+needs no shader tools. After editing a shader, run `python3 tools/build_shaders.py`
+to regenerate them; that is the only thing that needs `glslangValidator` and
+`spirv-cross` (`brew install glslang spirv-cross`).
 
 ## Game data
 
 1. Install Magic Ball 3 and extract `MagicBall3.dat` with
    [`tools/molebox-dump`](tools/molebox-dump/README.md).
-2. Convert everything into `assets/`:
+2. Convert everything into `assets/` (Python 3, nothing else to install; the
+   formats are described in [`docs/ASSET_FORMATS.md`](docs/ASSET_FORMATS.md)):
 
    ```sh
    python3 tools/convert_assets.py --game "/path/to/Magic Ball 3" \
@@ -47,9 +58,21 @@ SDL3 and nlohmann/json are fetched automatically by CMake. Use
 3. Run from the repo root, or point `MB3_ASSETS` at the folder:
 
    ```sh
-   ./build/app/MuggleBall3.app/Contents/MacOS/MuggleBall3
-   ./build/app/MuggleBall3.app/Contents/MacOS/MuggleBall3 --check assets/Data/Levels/piratos-po-krugy.json
+   MuggleBall3=./build/app/MuggleBall3.app/Contents/MacOS/MuggleBall3
+   $MuggleBall3                                  # first level
+   $MuggleBall3 --level piratos-ostrovok         # a level by name (any case) or by .json path
+   $MuggleBall3 --screenshot out.png --level cowboys-napadenie [--size 1024x768] [--shapes]
+   $MuggleBall3 --check assets/Data/Levels/piratos-po-krugy.json
    ```
+
+   In the window: Left/Right (or PageUp/PageDown) switch level, F1 shows the
+   physics shapes, left-drag orbits, right-drag pans, the wheel zooms, R returns
+   to the game camera, Esc quits. `--screenshot` renders one frame without a
+   window; `--camera ex,ey,ez,tx,ty,tz,fov` overrides the camera and `--size`
+   sets the window or image size. `MB3_GPU_DEBUG=1` turns on the GPU back end's
+   validation layer. A level JSON written by an older `tools/mb3level.py` still
+   loads but logs a warning (old files drew wrong capsules with F1 / `--shapes`):
+   run `convert_assets.py` again to refresh it.
 
 ## Legal
 
