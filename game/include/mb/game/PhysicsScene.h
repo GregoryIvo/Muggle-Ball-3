@@ -27,7 +27,8 @@ bool collides(const Shape& shape);
 // Where the physics starts from. The levels were saved from a running simulation, with small
 // velocities on their bodies and a few asleep; tests/physics_smoke.cpp --measure compares these.
 enum class StartState {
-    Asleep,           // every moving body asleep with zero velocity: nothing moves until something hits it
+    Asleep,           // every moving body asleep with zero velocity: nothing moves until something hits it, but the
+                      // machines (what is joined to a motor) start awake with the velocity they were saved with
     SavedVelocities,  // awake, with the velocities the level was saved with
     Still,            // awake, with zero velocity
 };
@@ -81,6 +82,7 @@ struct PhysicsPlan {
     std::vector<ActorPlan> actors;  // indexed by ActorIndex, see flattenActors()
     std::vector<JointPlan> joints;
     std::vector<ZoneBox> zones;
+    std::size_t pinnedBodies = 0;  // dynamic bodies made static because an unbreakable joint welds them to the world
 
     // What was left out, and why; all zero for the shipped levels but the cloth joints, see PhysicsScene.
     std::size_t unresolvedJoints = 0;   // a reference names no actor, or both ends are the world
@@ -95,7 +97,9 @@ struct PhysicsPlan {
 //   - Motion: all six frozen bits set (markers, the board) -> static; the kinematic flag -> kinematic;
 //     otherwise dynamic with the frozen bits as locks and "disable gravity" as no gravity. Cloth and its
 //     segments are kinematic: the original simulates them in game code, not in PhysX.
-//   - Mass, inertia, mass frame, damping and sleep thresholds are the body's, as saved.
+//   - A dynamic body that an unbreakable fixed joint welds to the world is static, and the joint is dropped.
+//   - Mass, inertia, mass frame, damping and sleep thresholds are the body's, as saved. Dynamic bodies get swept
+//     collision.
 //   - Friction, restitution and their combine modes come from the game material named by the owning object
 //     (a cloth segment: the cloth's); none, or one the library does not have, gives 0.5 / 0.5 / 0.
 //   - A joint's actors are resolved as docs/LEVEL_FORMAT.md ("Joint actor references") says.
@@ -109,6 +113,11 @@ PhysicsMaterial physicsMaterial(const GameMaterial& material);
 std::vector<Vec3> lowestPoints(const BodyDesc& body, const Mat4& pose);
 
 inline constexpr float kBallRadius = 0.6f;
+
+// How far under its lowest points a body may have the surface it rests on and still count as supported by it: the
+// levels were saved with bricks above what holds them (320 dynamic bodies, by 8 mm to 15 cm, 175 of them by more than
+// 2 cm), which no contact reaches.
+inline constexpr float kSupportGap = 0.15f;
 
 // A level running in a physics world, with the test balls that are shot into it.
 class PhysicsScene {
@@ -127,8 +136,10 @@ public:
     BodyId body(ActorIndex actor) const { return bodies_[actor]; }
     // Where the actor is now; for one with no body, where it was saved.
     Mat4 actorPose(ActorIndex actor) const;
-    // Whether a surface is within 15 cm under its lowest points.
+    // Whether a surface is within kSupportGap under its lowest points.
     bool supported(ActorIndex actor) const;
+    // Whether a joint that has not broken still holds the actor.
+    bool held(ActorIndex actor) const;
 
     struct Counts {
         std::size_t dynamicBodies = 0, kinematicBodies = 0, staticBodies = 0;
@@ -143,11 +154,15 @@ public:
     //  - breaks the joints that were hit hard enough (JointBreaking::Impact): a hit is a contact that begins at more
     //    than PhysicsSettings::bounceThreshold. It strikes a force of effective mass * closing speed / fixed step (the
     //    mass of the body that is hit if the other cannot move, else the reduced mass) and breaks every joint of both
-    //    bodies whose maxForce is below that. The step a hit begins in still solves with the joints;
-    //  - wakes dynamic bodies that fell asleep in the air. A body falls asleep when it has moved little for 0.4 s,
-    //    whether or not it is about to fall, so if what held it up slides away at that moment it stays there, asleep.
-    //    One with nothing within 15 cm under it and no joint holding it is woken again (three times at most: a body
-    //    that leans on something touches it away from where the check looks);
+    //    bodies whose maxForce is below that. The step a hit begins in still solves with the joints; the bodies the
+    //    broken joint held wake up, or one asleep would stay where the joint left it;
+    //  - wakes dynamic bodies that would hang in the air. Jolt wakes what a moving body touches, which does not
+    //    reach a body a few centimetres above what it rests on, nor a body that fell asleep in the moment its
+    //    support slid away (it falls asleep after 0.4 s of moving little, whether or not it is about to fall). So
+    //    every body that rests on something (kSupportGap, looked at when the level is built and whenever it falls
+    //    asleep) and has no joint holding it is looked at again every tenth of a second, and woken when that is
+    //    gone. One that fell asleep with nothing under it is woken at once (three times at most: a body that leans
+    //    on something touches it away from where the check looks);
     //  - removes test balls that are older than 20 s or have fallen below y = -30.
     void step(float dt);
 
@@ -182,7 +197,9 @@ private:
 
     std::vector<ActorIndex> fallingActors_;  // dynamic, with gravity and free to move down: see wakeUnsupported()
     std::vector<std::uint8_t> wasAwake_;     // by ActorIndex
-    std::vector<std::uint8_t> rewoken_;      // by ActorIndex: times wakeUnsupported() woke it
+    std::vector<std::uint8_t> rewoken_;      // by ActorIndex: times wakeUnsupported() woke it in the air
+    std::vector<std::uint8_t> restsOn_;      // by ActorIndex: it stood on something when last looked at
+    std::uint64_t steps_ = 0;
 
     JointBreaking breaking_;
     float fixedStep_;
@@ -192,9 +209,11 @@ private:
     std::vector<std::size_t> planJointOfId_;               // by JointId, for Load breaking
     std::vector<std::size_t> broken_;
 
+    bool isActor(std::uint64_t userData) const { return userData < plan_.actors.size(); }  // else it is a ball
     float massOf(std::uint64_t userData) const;  // infinity for what a hit cannot move
     void breakByHit(const ContactEvent& contact);
     void breakJoint(std::size_t planJoint);
+    void jointBroke(std::size_t planJoint);
     void wakeUnsupported();
 };
 

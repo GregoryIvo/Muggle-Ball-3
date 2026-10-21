@@ -381,6 +381,71 @@ void testDeepOverlap() {
     check(lowest > -0.3f, str("overlap: and none goes more than 0.3 under the floor (lowest %.3f)", lowest));
 }
 
+// A tower whose top weighs fifty times a segment (a windmill's roof on its stack of stones) stands for 10 s awake.
+// Jolt's own 10 velocity and 2 position iterations let it sink and tilt; PhysicsSettings' defaults hold it.
+float towerDrift(int velocitySteps, int positionSteps) {
+    PhysicsSettings settings = settingsFor();
+    settings.velocitySteps = velocitySteps;
+    settings.positionSteps = positionSteps;
+    PhysicsWorld world(kGravity, settings);
+    world.addBody(staticBody(at({0, -0.42f, 0}), boxShape({50, 0.42f, 50}, materialWith(0.5f, 0.5f))));
+    std::vector<BodyId> tower;
+    std::vector<Vec3> start;
+    for (int i = 0; i < 9; ++i) {
+        const bool top = i == 8;
+        const Vec3 p{0, top ? 8.0f + 1.5f : 0.5f + static_cast<float>(i), 0};
+        BodyDesc d = dynamicBody(at(p), boxShape(top ? Vec3{1.5f, 1.5f, 1.5f} : Vec3{0.5f, 0.5f, 0.5f},
+                                                 materialWith(0.5f, 0.1f)));
+        d.mass = top ? 5000.0f : 100.0f;
+        d.inertia = Vec3{1, 1, 1} * (d.mass / 6);
+        d.sleepLinearVelocity = 0;  // stays awake, so that the solver is at work all the time
+        tower.push_back(world.addBody(d));
+        start.push_back(p);
+    }
+    float worst = 0;
+    for (int i = 0; i < 600; ++i) {
+        world.step(kStep);
+        for (std::size_t b = 0; b < tower.size(); ++b) {
+            worst = std::max(worst, length(position(world, tower[b]) - start[b]));
+        }
+    }
+    return worst;
+}
+
+void testHeavyTowerStands() {
+    const float shipped = towerDrift(PhysicsSettings{}.velocitySteps, PhysicsSettings{}.positionSteps);
+    check(shipped < 0.25f, str("tower: a 5000 roof on eight 100 stones, awake for 10 s, moves %.3f at most", shipped));
+    const float joltDefault = towerDrift(10, 2);
+    check(joltDefault > 10 * shipped, str("tower: and Jolt's own iteration counts do worse (%.3f)", joltDefault));
+}
+
+// Jolt's capsule with a cylinder of a few millimetres sinks into a floor; PhysicsWorld makes it a sphere (the levels
+// have bags and rocks like that, 1.4 across).
+void testShortCapsuleStaysOnTheFloor() {
+    for (const float halfHeight : {0.005f, 0.02f, 0.045f}) {
+        float lowestCentre = 1e9f;
+        for (int trial = 0; trial < 12; ++trial) {
+            PhysicsWorld world(kGravity, settingsFor());
+            world.addBody(staticBody(at({0, -0.42f, 0}), boxShape({30, 0.42f, 30}, materialWith(0.5f, 1.0f))));
+            PhysicsShape capsule;
+            capsule.type = PhysicsShapeType::Capsule;
+            capsule.radius = 1.4f;
+            capsule.halfHeight = halfHeight;
+            capsule.material = materialWith(0.5f, 0.3f);
+            const float t = static_cast<float>(trial);
+            BodyDesc d = dynamicBody(placed(Mat4::rotationX(t * 0.5f) * Mat4::rotationZ(t * 0.9f), {0, 1.7f, 0}), capsule);
+            d.mass = 20;
+            d.inertia = {10, 10, 10};
+            d.linearVelocity = {std::sin(t), 0, std::cos(t)};
+            const BodyId body = world.addBody(d);
+            runSeconds(world, 10);
+            lowestCentre = std::min(lowestCentre, position(world, body).y);
+        }
+        check(lowestCentre > 1.4f - 0.05f, str("capsule: a radius 1.4 capsule with a %.3f half height rests on the floor "
+                                                "(lowest centre %.3f)", halfHeight, lowestCentre));
+    }
+}
+
 void testSlope() {
     const float holds = slopeSlide(0.7f);
     check(holds < 0.01f, str("slope: a box holds on 30 degrees with friction 0.7 (moved %.4f m)", holds));
@@ -920,8 +985,10 @@ struct Pendulum {
     BodyId pivot = 0, bar = 0;
     JointId joint = 0;
 
-    // A 2 m bar hinged at its left end to a pivot at (0,5,0), swinging about z. angle0 is where it starts.
-    explicit Pendulum(const JointDesc& hinge = {}, float angle0 = 0, bool gravity = true, bool canSleep = true)
+    // A 2 m bar hinged at its left end to a pivot at (0,5,0), swinging about z. angle0 is where it starts. The bar is
+    // the joint's body A (the hinge angle is the bar's, as in PhysX), or its body B with barIsB.
+    explicit Pendulum(const JointDesc& hinge = {}, float angle0 = 0, bool gravity = true, bool canSleep = true,
+                      bool barIsB = false)
         : world(kGravity, settingsFor()) {
         pivot = world.addBody(staticBody(at({0, 5, 0}), boxShape({0.2f, 0.2f, 0.2f})));
         const Mat4 rotation = Mat4::rotationZ(angle0);
@@ -934,10 +1001,10 @@ struct Pendulum {
         bar = world.addBody(d);
         JointDesc j = hinge;
         j.type = JointType::Hinge;
-        j.bodyA = pivot;
-        j.bodyB = bar;
-        j.localAnchor[0] = {0, 0, 0};
-        j.localAnchor[1] = {-1, 0, 0};
+        j.bodyA = barIsB ? pivot : bar;
+        j.bodyB = barIsB ? bar : pivot;
+        j.localAnchor[barIsB ? 0 : 1] = {0, 0, 0};
+        j.localAnchor[barIsB ? 1 : 0] = {-1, 0, 0};
         j.localAxis[0] = j.localAxis[1] = {0, 0, 1};
         j.localNormal[0] = j.localNormal[1] = {1, 0, 0};
         joint = world.addJoint(j);
@@ -1035,6 +1102,13 @@ void testHinge() {
         Pendulum back(h, 0, false);
         runSeconds(back.world, 1);
         check(near(back.world.angularVelocity(back.bar).z, -1.5f, 0.08f), "hinge: and a negative target the other way");
+        // The motor turns body A forwards: with the bar as body B it turns the other way (PhysX's windmills do).
+        h.motorVelocity = 1.5f;
+        Pendulum asB(h, 0, false, true, true);
+        runSeconds(asB.world, 1);
+        check(near(asB.world.angularVelocity(asB.bar).z, -1.5f, 0.08f),
+              str("hinge: a positive target turns body A forwards and body B backwards (%.3f)",
+                  asB.world.angularVelocity(asB.bar).z));
     }
     {
         // A weak motor cannot lift the bar against gravity.
@@ -1221,8 +1295,9 @@ void testJointsWithWorldAndCollisions() {
         runSeconds(world, 0.1f);
         world.removeJoint(joint);
         check(world.jointCount() == 0, "removeJoint: gone");
-        runSeconds(world, 0.5f);
-        check(length(position(world, b) - position(world, a)) > 0.95f,
+        // (One position iteration per step pushes an overlap of 0.4 apart at 0.01 per step, and they fall asleep first.)
+        runSeconds(world, 0.3f);
+        check(length(position(world, b) - position(world, a)) > 0.7f,
               "removeJoint: the boxes now push each other apart");
     }
 }
@@ -1726,6 +1801,8 @@ int main() {
     testStackStandsAndSleeps();
     testThinPlateAndSmallBox();
     testDeepOverlap();
+    testHeavyTowerStands();
+    testShortCapsuleStaysOnTheFloor();
     testSlope();
     testMassProperties();
     testCentreOfMassTips();

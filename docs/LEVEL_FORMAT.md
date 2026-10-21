@@ -286,7 +286,10 @@ Nine have a motor: in each of four windmill levels the sails turn about z at
 2 rad/s and the roof about y at 0.5 rad/s (motor `maxForce` 100, joint
 thresholds 150), and the ferris wheel in `village-park` turns at 3 rad/s (motor
 `maxForce` 80, `freeSpin` set, joint thresholds 500,000). None has a limit or a
-spring.
+spring. A positive `velTarget` turns actor A forwards and actor B backwards about the
+axis: in the saved velocities of all nine, `(wA - wB) . axis` (the axis from A's
+pose and `localAxis[0]`) equals `+velTarget` (0.500 and 1.997 in `village-dinner`; the
+wheel is still spinning up, +0.136 towards +3).
 
 ### Spherical joint (type 3, 0xC8 bytes: the base, then 96 bytes)
 

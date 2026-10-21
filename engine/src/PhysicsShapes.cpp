@@ -30,6 +30,9 @@ float convexRadius(float smallestHalfExtent) {
     return std::min(JPH::cDefaultConvexRadius, 0.25f * smallestHalfExtent);
 }
 
+// A capsule with a shorter cylinder than this (half of it) is made a sphere, see makeConvex().
+constexpr float kMinCapsuleHalfHeight = 0.05f;
+
 JPH::RefConst<JPH::Shape> create(JPH::ShapeSettings& settings, std::string& error) {
     const JPH::ShapeSettings::ShapeResult result = settings.Create();
     if (result.HasError()) {
@@ -68,10 +71,18 @@ JPH::RefConst<JPH::Shape> makeConvex(const PhysicsShape& shape, float density, s
             return create(settings, error);
         }
         case PhysicsShapeType::Capsule: {
-            // A capsule without a cylinder part is a sphere; Jolt makes that substitution itself.
             if (!positive(shape.radius) || !std::isfinite(shape.halfHeight) || shape.halfHeight < 0) {
                 error = "a capsule needs a positive, finite radius and a finite half height of zero or more";
                 return nullptr;
+            }
+            // Jolt's capsule with a cylinder of a few centimetres is unreliable: lying on a 0.84 thick floor it
+            // sinks into it (with a radius of 1.4 and a half height of 0.01, 35 of 40 random drops did; 0.05
+            // never did). The levels have such bags and rocks (half heights 0.005 to 0.037), which are spheres
+            // to within that.
+            if (shape.halfHeight < kMinCapsuleHalfHeight) {
+                JPH::SphereShapeSettings settings(shape.radius, material);
+                settings.mDensity = density;
+                return create(settings, error);
             }
             JPH::CapsuleShapeSettings settings(shape.halfHeight, shape.radius, material);
             settings.mDensity = density;

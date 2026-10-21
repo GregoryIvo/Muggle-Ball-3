@@ -318,7 +318,7 @@ void testDrawsFollowActors() {
     // At the start every draw stands where world = local * the body's pose says.
     bool agree = true;
     for (const SceneDraw& draw : scene.draws) {
-        const Mat4 expected = draw.local * physics.actorPose(draw.actor);
+        const Mat4 expected = placedOnActor(draw.local, physics.actorPose(draw.actor));
         for (int i = 0; i < 4; ++i) {
             for (int j = 0; j < 4; ++j) {
                 agree = agree && near(draw.item.world.m[i][j], expected.m[i][j], 1e-5f);
@@ -334,9 +334,15 @@ void testDrawsFollowActors() {
     const Vec3 fell = physics.actorPose(1).translationPart();
     check(fell.y < 1.0f, "follow: the brick fell");
     // Its draw, moved with it, puts the model's point (0, 0, 0) where the node and the body say.
-    const Vec3 drawn = transformPoint({0, 0, 0}, scene.draws[0].local * physics.actorPose(1));
+    const Vec3 drawn = transformPoint({0, 0, 0}, placedOnActor(scene.draws[0].local, physics.actorPose(1)));
     check(near(drawn, fell + Vec3{0, 0.5f, 0}, 1e-4f), "follow: a moving actor takes its draws with it");
     check(physics.plan().actors.size() == 5, "follow: the plan has an entry for each flattened actor");
+
+    // A point in the node's frame goes through the node's transform first, and then the actor's pose.
+    const Mat4 node = Mat4::translation({1, 0, 0});
+    const Mat4 pose = Mat4::rotationY(radians(90)) * Mat4::translation({5, 2, 0});
+    check(near(transformPoint({0, 0, 0}, placedOnActor(node, pose)), transformPoint(transformPoint({0, 0, 0}, node), pose)),
+          "follow: placedOnActor applies the node's transform, then the actor's pose");
 }
 
 void testTextureRules() {
@@ -531,6 +537,19 @@ void testLights() {
     const DirectionalLight own = levelLight(withLight, materials);
     check(near(own.diffuse.r, 0.5f) && near(own.ambient.r, 0.25f) && near(own.direction, {0, -1, 0}),
           "light: the level's light object wins");
+}
+
+// The shape wireframes in world space, at the poses the level saved.
+std::vector<DebugLine> shapeLines(const Level& level) {
+    const std::vector<ActorRef> actors = flattenActors(level);
+    std::vector<DebugLine> lines;
+    for (const ActorShapeLines& entry : actorShapeLines(level)) {
+        const Mat4 world = rigidTransform(actors[entry.actor].actor->pose);
+        for (const DebugLine& line : entry.lines) {
+            lines.push_back({transformPoint(line.a, world), transformPoint(line.b, world), line.color});
+        }
+    }
+    return lines;
 }
 
 void testShapeLines() {

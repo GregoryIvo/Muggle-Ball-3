@@ -477,18 +477,6 @@ std::vector<ActorShapeLines> actorShapeLines(const Level& level) {
     return out;
 }
 
-std::vector<DebugLine> shapeLines(const Level& level) {
-    const std::vector<ActorRef> actors = flattenActors(level);
-    std::vector<DebugLine> lines;
-    for (const ActorShapeLines& entry : actorShapeLines(level)) {
-        const Mat4 world = rigidTransform(actors[entry.actor].actor->pose);
-        for (const DebugLine& line : entry.lines) {
-            lines.push_back({transformPoint(line.a, world), transformPoint(line.b, world), line.color});
-        }
-    }
-    return lines;
-}
-
 std::vector<DebugLine> sphereLines(float radius, Color color) {
     std::vector<DebugLine> lines;
     LineWriter{lines, Mat4::identity(), color}.sphere(radius);

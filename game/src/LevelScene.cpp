@@ -82,7 +82,7 @@ LevelScene::LevelScene(ModelCache& cache, const MaterialLibrary& materials, cons
         }
     }
     levelLines_ = shapeLines_.size();
-    ballLines_ = sphereLines(kBallRadius, {1.0f, 0.9f, 0.1f, 1});
+    ballLines_ = sphereLines(kBallRadius * 1.03f, {1.0f, 0.9f, 0.1f, 1});  // a little outside the ball model, which would hide it
     light_ = levelLight(level, materials);
 }
 
@@ -96,7 +96,7 @@ void LevelScene::update(double seconds) {
 
 void LevelScene::follow(const PhysicsScene& physics) {
     for (const Follower& follower : followers_) {
-        items_[follower.item].world = follower.local * physics.actorPose(follower.actor);
+        items_[follower.item].world = placedOnActor(follower.local, physics.actorPose(follower.actor));
     }
     items_.resize(levelItems_);
     for (const PhysicsScene::Ball& ball : physics.balls()) {

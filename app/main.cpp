@@ -124,12 +124,13 @@ public:
                 return std::chrono::duration<double, std::milli>(to - from).count();
             };
             const mb::PhysicsScene::Counts& counts = physics->counts();
-            mb::logInfo("{}: {} draw items, {} shape lines; physics: {} dynamic, {} kinematic and {} static bodies "
-                        "({} actors without one), {} joints ({} on cloth left out); load {:.0f} ms, "
-                        "physics build {:.0f} ms, scene {:.0f} ms",
+            mb::logInfo("{}: {} draw items, {} shape lines; physics: {} dynamic ({} awake: machines), {} kinematic and "
+                        "{} static bodies ({} of them welded to the world; {} actors without one), {} joints ({} on "
+                        "cloth left out); load {:.0f} ms, physics build {:.0f} ms, scene {:.0f} ms",
                         entry.name, next->items().size(), next->shapeLines().size(), counts.dynamicBodies,
-                        counts.kinematicBodies, counts.staticBodies, counts.withoutBody, counts.joints,
-                        counts.clothJoints, ms(start, loaded), ms(loaded, simulated), ms(simulated, built));
+                        physics->world().awakeBodyCount(), counts.kinematicBodies, counts.staticBodies,
+                        physics->plan().pinnedBodies, counts.withoutBody, counts.joints, counts.clothJoints,
+                        ms(start, loaded), ms(loaded, simulated), ms(simulated, built));
             logMissing(entry.name, next->report());
             logUnbuilt(entry.name, *physics);
             scene_ = std::move(next);
@@ -521,6 +522,10 @@ int main(int argc, char** argv) {
                 printUsage();
                 return 2;
             }
+        }
+        if (options.simulate > 0 && options.screenshot.empty()) {  // the window runs the physics all the time
+            printUsage();
+            return 2;
         }
         return options.screenshot.empty() ? runWindow(options) : runScreenshot(options);
     } catch (const std::exception& e) {

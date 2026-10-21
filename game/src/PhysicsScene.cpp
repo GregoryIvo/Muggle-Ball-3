@@ -18,11 +18,11 @@ constexpr float kBallMaxAngularVelocity = 60.0f;
 constexpr float kBallFloor = -30.0f;  // below this it has left the world
 constexpr double kBallMaxAge = 20.0;
 
-// How far below its lowest points a body may have the surface it rests on, and how often a body that has none is
-// woken again before it is let sleep anyway.
-constexpr float kSupportGap = 0.15f;
 constexpr float kLowBand = 0.3f;  // lowestPoints() gives the points this close to the lowest one
+// How often a body that fell asleep with nothing under it is woken again before it is let sleep anyway, and how many
+// steps pass between two looks at the sleeping bodies that rest on something.
 constexpr std::uint8_t kMaxRewakes = 3;
+constexpr std::uint64_t kLookEvery = 6;
 
 }  // namespace
 
@@ -74,8 +74,8 @@ PhysicsScene::PhysicsScene(const Level& level, const MaterialLibrary& materials,
     : plan_(planPhysics(level, materials, options)),
       world_(plan_.gravity, settings),
       breaking_(options.breaking),
-      fixedStep_(settings.fixedStep),
-      impactSpeed_(settings.bounceThreshold) {
+      fixedStep_(world_.settings().fixedStep),
+      impactSpeed_(world_.settings().bounceThreshold) {
     if (const GameMaterial* ball = materials.find("ballMaterial")) {
         ballMaterial_ = physicsMaterial(*ball);
     } else {
@@ -103,6 +103,7 @@ PhysicsScene::PhysicsScene(const Level& level, const MaterialLibrary& materials,
 
     wasAwake_.assign(plan_.actors.size(), 0);
     rewoken_.assign(plan_.actors.size(), 0);
+    restsOn_.assign(plan_.actors.size(), 0);
     for (ActorIndex i = 0; i < plan_.actors.size(); ++i) {
         const BodyDesc& body = plan_.actors[i].body;
         // Only a body that gravity pulls can be left asleep in the air (one that has none, or is held at its height,
@@ -111,6 +112,7 @@ PhysicsScene::PhysicsScene(const Level& level, const MaterialLibrary& materials,
             !body.lockTranslation[1]) {
             fallingActors_.push_back(i);
             wasAwake_[i] = world_.isAwake(bodies_[i]);
+            restsOn_[i] = supported(i);
         }
     }
 
@@ -171,16 +173,23 @@ bool PhysicsScene::supported(ActorIndex actor) const {
     return false;
 }
 
+bool PhysicsScene::held(ActorIndex actor) const {
+    return std::ranges::any_of(jointsOfActor_[actor], [this](std::size_t joint) { return jointIds_[joint] != 0; });
+}
+
 void PhysicsScene::wakeUnsupported() {
+    const bool look = ++steps_ % kLookEvery == 0;
     for (const ActorIndex actor : fallingActors_) {
-        const bool awake = world_.isAwake(bodies_[actor]);
-        if (wasAwake_[actor] && !awake && rewoken_[actor] < kMaxRewakes) {
-            const bool held = std::ranges::any_of(jointsOfActor_[actor], [this](std::size_t joint) {
-                return jointIds_[joint] != 0;
-            });
-            if (!held && !supported(actor)) {
+        if (!world_.isAwake(bodies_[actor])) {
+            if (wasAwake_[actor]) {  // it has fallen asleep since the last step
+                restsOn_[actor] = supported(actor);
+                if (!restsOn_[actor] && rewoken_[actor] < kMaxRewakes && !held(actor)) {
+                    world_.wake(bodies_[actor]);
+                    ++rewoken_[actor];
+                }
+            } else if (look && restsOn_[actor] && !held(actor) && !supported(actor)) {  // its support has gone
                 world_.wake(bodies_[actor]);
-                ++rewoken_[actor];
+                restsOn_[actor] = false;
             }
         }
         wasAwake_[actor] = world_.isAwake(bodies_[actor]);
@@ -189,7 +198,7 @@ void PhysicsScene::wakeUnsupported() {
 
 float PhysicsScene::massOf(std::uint64_t userData) const {
     constexpr float kImmovable = std::numeric_limits<float>::infinity();
-    if (userData == kNoActor) {
+    if (!isActor(userData)) {
         return kBallMass;
     }
     const ActorPlan& actor = plan_.actors[userData];
@@ -198,8 +207,19 @@ float PhysicsScene::massOf(std::uint64_t userData) const {
 
 void PhysicsScene::breakJoint(std::size_t planJoint) {
     world_.removeJoint(jointIds_[planJoint]);
+    jointBroke(planJoint);
+}
+
+void PhysicsScene::jointBroke(std::size_t planJoint) {
     jointIds_[planJoint] = 0;
     broken_.push_back(planJoint);
+    // Nothing else wakes the pieces it held: a sleeping one would hang where the joint left it.
+    const JointPlan& joint = plan_.joints[planJoint];
+    for (const ActorIndex actor : {joint.actorA, joint.actorB}) {
+        if (actor != kNoActor && bodies_[actor] != 0 && plan_.actors[actor].motion == MotionType::Dynamic) {
+            world_.wake(bodies_[actor]);
+        }
+    }
 }
 
 void PhysicsScene::breakByHit(const ContactEvent& contact) {
@@ -214,7 +234,7 @@ void PhysicsScene::breakByHit(const ContactEvent& contact) {
     const float effective = a == kImmovable ? b : (b == kImmovable ? a : a * b / (a + b));
     const float force = effective * contact.normalSpeed / fixedStep_;
     for (const std::uint64_t userData : {contact.userDataA, contact.userDataB}) {
-        if (userData == kNoActor) {
+        if (!isActor(userData)) {
             continue;
         }
         for (const std::size_t joint : jointsOfActor_[userData]) {
@@ -241,8 +261,7 @@ void PhysicsScene::step(float dt) {
         }
     }
     for (const JointId id : world_.takeBrokenJoints()) {  // only with JointBreaking::Load
-        jointIds_[planJointOfId_[id]] = 0;
-        broken_.push_back(planJointOfId_[id]);
+        jointBroke(planJointOfId_[id]);
     }
 
     for (Ball& ball : balls_) {

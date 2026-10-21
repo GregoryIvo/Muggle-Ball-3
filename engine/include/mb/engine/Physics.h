@@ -37,7 +37,9 @@ struct PhysicsShape {
     Mat4 localPose;            // rigid, relative to the body's frame
     Vec3 halfExtents{};        // Box
     float radius = 0;          // Sphere, Capsule
-    float halfHeight = 0;      // Capsule: half the cylinder length, along the shape's local +y
+    // Capsule: half the cylinder length, along the shape's local +y. Under 5 cm Jolt's capsule is unreliable (it
+    // sinks into a floor), so the shape is made a sphere of the same radius.
+    float halfHeight = 0;
     std::vector<Vec3> points;  // ConvexHull, in the shape's local space
     PhysicsMaterial material;
 };
@@ -97,7 +99,9 @@ struct JointDesc {
     float breakForce = std::numeric_limits<float>::infinity();
     float breakTorque = std::numeric_limits<float>::infinity();
 
-    // Hinge: rotation about the axis, measured from the normal. Ball: twist about the axis.
+    // Hinge: the angle of bodyA relative to bodyB about the axis, measured from the normals (zero when they agree);
+    // so a positive motor velocity turns A forwards and B backwards, as PhysX's does (the levels' windmills show it).
+    // Ball: twist about the axis.
     bool limitEnabled = false;
     JointLimit limitLow, limitHigh;
     // Ball: cone half-angle around the axis.
@@ -131,11 +135,18 @@ struct PhysicsSettings {
     float fixedStep = 1.0f / 60.0f;  // step() advances in steps of exactly this size
     int maxStepsPerCall = 8;         // the remainder carries over; beyond this, time is dropped
     int collisionSteps = 1;          // Jolt sub-steps per fixed step
+    // Jolt's solver iterations per sub-step. Its defaults (10 and 2) let a windmill's tower sink and topple within
+    // a minute (a 5000 roof on 1800 stones, kept awake by the sails that turn on it) and joined models fly apart;
+    // 100 hold it for minutes, at 0.15 ms a step in a level with a ball loose. One position iteration: 0 is not
+    // usable (bodies never fall asleep and some sink into the floor), more only slows down the overlaps that
+    // levels were saved with.
+    int velocitySteps = 100;
+    int positionSteps = 1;
     float bounceThreshold = 2.0f;    // PhysX's default: impacts slower than this (m/s) don't bounce
     int maxBodies = 32768;
     int maxBodyPairs = 65536;
     int maxContactConstraints = 32768;
-    int threads = -1;  // worker threads; -1 = hardware concurrency - 1, 0 = run on the caller
+    int threads = -1;  // worker threads; -1 = hardware concurrency - 1 but at most 3, 0 = run on the caller
 };
 
 class PhysicsWorld {
@@ -176,6 +187,9 @@ public:
     std::vector<JointId> takeBrokenJoints();
 
     std::optional<RayHit> raycast(Vec3 origin, Vec3 direction, float maxDistance) const;
+
+    // The settings in use: the ones given, with values that cannot work replaced.
+    const PhysicsSettings& settings() const;
 
     std::size_t bodyCount() const;
     std::size_t awakeBodyCount() const;

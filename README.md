@@ -11,8 +11,8 @@ levels from the original's fixed camera, with models, textures (animated ones
 included), sky and the level's own light, and wireframes of the physics shapes on
 request. Step 3 puts the levels in a physics world (Jolt, standing in for PhysX):
 every actor is a rigid body with its real shapes, mass, material and joints, the
-level stands as designed until something hits it, and a test ball can be shot in to
-knock things over. Not there yet: the real ball and bat, bricks that die and score,
+level stands as designed until something hits it (the windmills turn), and a test
+ball can be shot in to knock things over. Not there yet: the real ball and bat, bricks that die and score,
 sails (cloth), moving sharks and trains, cannons, shadows and reflections, model
 animation, sound and menus.
 
@@ -74,9 +74,9 @@ to regenerate them; that is the only thing that needs `glslangValidator` and
    ball, P pauses the physics, L reloads the level (with fresh physics), F1 shows
    the physics shapes (where the bodies are now), left-drag orbits, right-drag
    pans, the wheel zooms, R returns to the game camera, Esc quits. `--screenshot`
-   renders one frame without a window; `--simulate <seconds>` runs the physics that
-   long first, and `--ball [x,degrees]` shoots a test ball at t = 0 (also in the
-   window): from `(x, 1.2, -15)`, that many degrees off straight ahead, or without
+   renders one frame without a window; `--simulate <seconds>` (only with
+   `--screenshot`) runs the physics that long first, and `--ball [x,degrees]` shoots a
+   test ball at t = 0 (also in the window): from `(x, 1.2, -15)`, that many degrees off straight ahead, or without
    the argument at the middle of the movable bodies. `--camera ex,ey,ez,tx,ty,tz,fov`
    overrides the camera and `--size` sets the window or image size.
    `MB3_GPU_DEBUG=1` turns on the GPU back end's validation layer. A level JSON

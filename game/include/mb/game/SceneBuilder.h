@@ -53,6 +53,12 @@ struct SceneDraw {
     int animTimeMs = 0;
 };
 
+// Where a primitive stands when its actor is at `actorPose`: its transform in the actor's frame (SceneDraw::local),
+// then the actor's pose.
+inline Mat4 placedOnActor(const Mat4& local, const Mat4& actorPose) {
+    return local * actorPose;
+}
+
 // What did not resolve while describing a scene. Entries are names as the level or
 // model wrote them.
 struct SceneReport {
@@ -113,9 +119,6 @@ struct ActorShapeLines {
     std::vector<DebugLine> lines;
 };
 std::vector<ActorShapeLines> actorShapeLines(const Level& level);
-
-// The same in world space at the poses the level saved.
-std::vector<DebugLine> shapeLines(const Level& level);
 
 // A sphere of the given radius at the origin.
 std::vector<DebugLine> sphereLines(float radius, Color color);

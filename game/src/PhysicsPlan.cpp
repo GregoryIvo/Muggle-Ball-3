@@ -5,10 +5,13 @@
 #include "mb/engine/Log.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <limits>
+#include <numeric>
 #include <optional>
 #include <unordered_map>
+#include <vector>
 
 namespace mb {
 
@@ -68,7 +71,7 @@ MotionType motionOf(const Actor& actor, const GameObject* owner) {
     return MotionType::Dynamic;
 }
 
-void planBody(const ActorRef& ref, const MaterialLibrary& materials, const PhysicsOptions& options,
+void planBody(const ActorRef& ref, const MaterialLibrary& materials, const PhysicsOptions& options, bool hasPhysicsData,
               PhysicsPlan& plan) {
     const Actor& actor = *ref.actor;
     ActorPlan out;
@@ -95,7 +98,7 @@ void planBody(const ActorRef& ref, const MaterialLibrary& materials, const Physi
             ++plan.unsupportedShapes;
         }
     }
-    out.simulated = !body.shapes.empty();
+    out.simulated = hasPhysicsData && !body.shapes.empty();
     if (!out.simulated) {
         plan.actors.push_back(std::move(out));
         return;
@@ -103,6 +106,9 @@ void planBody(const ActorRef& ref, const MaterialLibrary& materials, const Physi
 
     body.pose = out.pose;
     body.motion = out.motion;
+    // The test ball sends light pieces off at up to 50 units per second, which is more than the 0.54 thick floor per
+    // step: swept collision keeps them from going through it (a third of the bodies that did in 24 shots per level).
+    body.continuousCollision = out.motion == MotionType::Dynamic;
     body.density = actor.density;
     body.userData = ref.index;
     if (const std::optional<Body>& saved = actor.body) {
@@ -122,17 +128,13 @@ void planBody(const ActorRef& ref, const MaterialLibrary& materials, const Physi
         body.sleepLinearVelocity = saved->sleepLinearVelocity;
         body.sleepAngularVelocity = saved->sleepAngularVelocity;
         if (out.motion != MotionType::Static) {
-            switch (options.start) {
-                case StartState::Asleep:
-                    body.startAsleep = true;
-                    break;
-                case StartState::SavedVelocities:
-                    body.linearVelocity = saved->linearVelocity;
-                    body.angularVelocity = saved->angularVelocity;
-                    break;
-                case StartState::Still:
-                    break;
+            // The velocities are kept for bodies that wake later (see startMachinesRunning); the world drops them
+            // for one that starts asleep. A kinematic body moves by its targets only.
+            if (options.start != StartState::Still && out.motion == MotionType::Dynamic) {
+                body.linearVelocity = saved->linearVelocity;
+                body.angularVelocity = saved->angularVelocity;
             }
+            body.startAsleep = options.start == StartState::Asleep;
         }
     }
     plan.actors.push_back(std::move(out));
@@ -252,6 +254,69 @@ void planJoints(const Level& level, std::span<const ActorRef> actors, const Phys
     }
 }
 
+bool unbreakable(const JointDesc& desc) {
+    return std::isinf(desc.breakForce) && std::isinf(desc.breakTorque);
+}
+
+// A body welded to the world by a joint that never breaks stays where it is in the original (trees, fences, rocks
+// and cacti: 551 bodies). Built as a body and a joint, the weld has the file's anchor, the world origin, up to 22
+// units away; that lever turned a light fence post into a pendulum that a hit threw around at the speed limit
+// (500 units per second, taking neighbours with it). So the body is static, and the joint is not needed.
+void pinWeldedBodies(PhysicsPlan& plan) {
+    const auto welded = [](const JointPlan& joint) {
+        return joint.desc.type == JointType::Fixed && (joint.actorA == kNoActor) != (joint.actorB == kNoActor) &&
+               unbreakable(joint.desc);
+    };
+    const auto bodyOf = [](const JointPlan& joint) { return joint.actorA == kNoActor ? joint.actorB : joint.actorA; };
+    std::vector<bool> pinned(plan.actors.size(), false);
+    for (const JointPlan& joint : plan.joints) {
+        if (welded(joint) && plan.actors[bodyOf(joint)].motion == MotionType::Dynamic) {
+            ActorPlan& actor = plan.actors[bodyOf(joint)];
+            actor.motion = actor.body.motion = MotionType::Static;
+            pinned[bodyOf(joint)] = true;
+            ++plan.pinnedBodies;
+        }
+    }
+    std::erase_if(plan.joints, [&](const JointPlan& joint) { return welded(joint) && pinned[bodyOf(joint)]; });
+}
+
+// The levels were saved with their machines running: the windmills' roofs and sails, the Ferris wheel. Asleep, they
+// would stand still until something touched them. So every dynamic body joined (through joints, which pass the
+// motion on) to a motor starts awake with the velocity it was saved with.
+void startMachinesRunning(PhysicsPlan& plan) {
+    std::vector<ActorIndex> group(plan.actors.size());
+    std::iota(group.begin(), group.end(), ActorIndex{0});
+    const auto root = [&](ActorIndex actor) {
+        while (group[actor] != actor) {
+            actor = group[actor] = group[group[actor]];
+        }
+        return actor;
+    };
+    const auto moves = [&](ActorIndex actor) {
+        return actor != kNoActor && plan.actors[actor].motion == MotionType::Dynamic;
+    };
+    for (const JointPlan& joint : plan.joints) {
+        if (!joint.toCloth && moves(joint.actorA) && moves(joint.actorB)) {
+            group[root(joint.actorA)] = root(joint.actorB);
+        }
+    }
+    std::vector<bool> running(plan.actors.size(), false);
+    for (const JointPlan& joint : plan.joints) {
+        if (joint.desc.motorEnabled && !joint.toCloth) {
+            for (const ActorIndex end : {joint.actorA, joint.actorB}) {  // (the Ferris wheel turns on a kinematic frame)
+                if (moves(end)) {
+                    running[root(end)] = true;
+                }
+            }
+        }
+    }
+    for (ActorIndex i = 0; i < plan.actors.size(); ++i) {
+        if (moves(i) && running[root(i)]) {
+            plan.actors[i].body.startAsleep = false;
+        }
+    }
+}
+
 }  // namespace
 
 bool collides(const Shape& shape) {
@@ -272,12 +337,24 @@ PhysicsMaterial physicsMaterial(const GameMaterial& material) {
 PhysicsPlan planPhysics(const Level& level, const MaterialLibrary& materials, const PhysicsOptions& options) {
     PhysicsPlan plan;
     plan.gravity = level.gravity;
+    // Before version 3 the level files hold no masses or hulls: nothing could be simulated.
+    const bool hasPhysicsData = level.version >= kLevelJsonVersion;
+    if (!hasPhysicsData) {
+        logWarn("level JSON version {} has no physics data (this build reads version {}); the level is not simulated",
+                level.version, kLevelJsonVersion);
+    }
     const std::vector<ActorRef> actors = flattenActors(level);
     plan.actors.reserve(actors.size());
     for (const ActorRef& ref : actors) {
-        planBody(ref, materials, options, plan);
+        planBody(ref, materials, options, hasPhysicsData, plan);
     }
-    planJoints(level, actors, options, plan);
+    if (hasPhysicsData) {
+        planJoints(level, actors, options, plan);
+        pinWeldedBodies(plan);
+        if (options.start == StartState::Asleep) {
+            startMachinesRunning(plan);
+        }
+    }
     return plan;
 }
 

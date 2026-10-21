@@ -93,9 +93,13 @@ private:
     std::size_t top_ = 0;
 };
 
+// A step is a few tenths of a millisecond; with more than this many workers the time spent waking and waiting for
+// them is more than they save (9 workers took twice as long as 3 on the biggest level, and used 9 cores).
+constexpr int kMostAutomaticThreads = 3;
+
 std::unique_ptr<JPH::JobSystem> makeJobSystem(int threads) {
     if (threads < 0) {
-        threads = std::max(0, static_cast<int>(std::thread::hardware_concurrency()) - 1);
+        threads = std::clamp(static_cast<int>(std::thread::hardware_concurrency()) - 1, 0, kMostAutomaticThreads);
     }
     if (threads == 0) {
         return std::make_unique<JPH::JobSystemSingleThreaded>(JPH::cMaxPhysicsJobs);
@@ -110,6 +114,8 @@ PhysicsSettings sanitized(PhysicsSettings s) {
     }
     s.maxStepsPerCall = std::max(1, s.maxStepsPerCall);
     s.collisionSteps = std::max(1, s.collisionSteps);
+    s.velocitySteps = std::max(1, s.velocitySteps);
+    s.positionSteps = std::max(1, s.positionSteps);
     if (!(s.bounceThreshold >= 0)) {
         s.bounceThreshold = 0;
     }
@@ -246,6 +252,8 @@ PhysicsWorld::Impl::Impl(Vec3 gravity, const PhysicsSettings& requested)
                 static_cast<JPH::uint>(settings.maxContactConstraints), broadPhaseLayers, objectVsBroadPhase,
                 objectPairs);
     JPH::PhysicsSettings joltSettings = system.GetPhysicsSettings();
+    joltSettings.mNumVelocitySteps = static_cast<JPH::uint>(settings.velocitySteps);
+    joltSettings.mNumPositionSteps = static_cast<JPH::uint>(settings.positionSteps);
     joltSettings.mMinVelocityForRestitution = settings.bounceThreshold;
     joltSettings.mPenetrationSlop = kPenetrationSlop;
     joltSettings.mMaxPenetrationDistance = kMaxPenetrationRecovery;
@@ -707,6 +715,10 @@ std::optional<RayHit> PhysicsWorld::raycast(Vec3 origin, Vec3 direction, float m
     result.normal = fromJolt(lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, point));
     result.distance = hit.mFraction * maxDistance;
     return result;
+}
+
+const PhysicsSettings& PhysicsWorld::settings() const {
+    return impl_->settings;
 }
 
 std::size_t PhysicsWorld::bodyCount() const {

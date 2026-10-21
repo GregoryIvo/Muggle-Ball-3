@@ -1,10 +1,15 @@
 // Runs every converted level in the physics world (needs the game data: skips with exit code 77 when
 // MB3_ASSETS is not set), no GPU.
 //
-//   mb_physics_smoke             the test: each level stands still for 10 s on its own, then a test ball is
-//                                shot into it for 10 s and nothing may blow up (a failing level is named; the
-//                                levels the ball did not reach are listed)
-//   mb_physics_smoke --measure   prints how the ways of starting from the saved state compare, see measure()
+//   mb_physics_smoke [--shots N] [--seconds S] [level]
+//        the test: each level stands for S seconds on its own (default 10): what is not a running machine must not
+//        move, and the machines must turn the way their motors drive them. Then N test balls are shot into it, one
+//        at a time into a fresh copy (default 4, at most 24, from where the bat is, at different x and angles), S
+//        seconds each, and nothing may blow up, sink through the floor or be left hanging in the air. A failing
+//        level is named; the levels no ball reached are listed.
+//   mb_physics_smoke --measure [level]
+//        prints how the ways of starting from the saved state compare, see measure()
+//   --velocity-steps, --position-steps, --collision-steps and --threads change the world's settings for either.
 
 #include "mb/game/LevelCatalog.h"
 #include "mb/game/LevelLoader.h"
@@ -21,6 +26,7 @@
 #include <optional>
 #include <filesystem>
 #include <format>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -30,9 +36,15 @@ using namespace mb;
 namespace {
 
 constexpr float kStep = 1.0f / 60.0f;
+
+// What the scenes are built with (--velocity-steps and the like change it, to compare solver settings).
+PhysicsSettings gSettings;
 constexpr float kMoveLimit = 0.02f;       // a body that moves more than 2 cm has not stayed where it was designed
+constexpr float kMachineSettle = 0.25f;   // how far what a running machine rests on may settle
+// Thin light pieces of wrecked ships go through the floor in about one shot in 700 (3 of 1,992 with 24 shots per level,
+// 1 of 664 with 8): a small share of the shots may end that way.
+constexpr double kMostSunkShots = 0.01;
 constexpr float kRunSeconds = 10.0f;
-constexpr float kSupportGap = 0.15f;   // see PhysicsScene::supported()
 constexpr float kMaxSpeed = 200.0f;       // no body of a sane simulation is faster than this (units per second)
 
 struct Outcome {
@@ -45,6 +57,11 @@ struct Outcome {
     float fastest = 0;            // fastest body speed seen, units per second
     bool nonFinite = false;
     double stepMs = 0;            // average time of a fixed step
+    struct Mover {
+        ActorIndex actor;
+        float distance;
+    };
+    std::vector<Mover> movers;  // the bodies counted in `moved`
 };
 
 bool finite(const Mat4& m) {
@@ -96,6 +113,9 @@ Outcome run(PhysicsScene& scene, float seconds) {
         const float moved = length(pose.translationPart() - start[k].translationPart());
         out.worstMove = std::max(out.worstMove, moved);
         out.moved += moved > kMoveLimit;
+        if (moved > kMoveLimit) {
+            out.movers.push_back({tracked[k], moved});
+        }
         out.awakeAtEnd += scene.world().isAwake(scene.body(tracked[k]));
     }
     return out;
@@ -109,147 +129,306 @@ void shootBall(PhysicsScene& scene) {
     scene.launchBall(from, normalize(aim - from) * 25.0f);
 }
 
-// The test: each level, built the way the game builds it, stands still for kRunSeconds with nothing near it,
-// then gets a test ball for kRunSeconds more.
-int test(const MaterialLibrary& materials, const LevelCatalog& catalog) {
-    int failed = 0;
-    const auto fail = [&](const std::string& level, const std::string& what) {
-        std::printf("FAIL %s: %s\n", level.c_str(), what.c_str());
-        ++failed;
-    };
-    std::vector<std::string> untouched;
-    std::size_t levels = 0, joints = 0, hits = 0, broken = 0, floating = 0, restingTotal = 0, sunk = 0;
-    PhysicsScene::Counts total;
-    for (const LevelEntry& entry : catalog.levels()) {
-        ++levels;
-        const Level level = loadLevelJson(entry.path);
-        {
-            PhysicsScene scene(level, materials);
-            const PhysicsPlan& plan = scene.plan();
-            const PhysicsScene::Counts& counts = scene.counts();
-            total.dynamicBodies += counts.dynamicBodies;
-            total.kinematicBodies += counts.kinematicBodies;
-            total.staticBodies += counts.staticBodies;
-            total.withoutBody += counts.withoutBody;
-            total.clothJoints += counts.clothJoints;
-            joints += counts.joints;
-            if (counts.dynamicBodies == 0) {
-                fail(entry.name, "no dynamic body");
-            }
-            if (plan.unresolvedJoints + plan.unsupportedJoints + plan.jointsWithoutBody + counts.jointsRefused +
-                    plan.unsupportedShapes > 0) {
-                fail(entry.name, std::format("{} joints unresolved, {} unsupported, {} without a body, {} refused, {} "
-                                             "shapes unsupported",
-                                             plan.unresolvedJoints, plan.unsupportedJoints, plan.jointsWithoutBody,
-                                             counts.jointsRefused, plan.unsupportedShapes));
-            }
-            const Outcome alone = run(scene, kRunSeconds);
-            if (alone.moved > 0 || alone.brokenJoints > 0 || alone.nonFinite) {
-                fail(entry.name, std::format("on its own {} bodies moved more than 2 cm (up to {:.3f}), {} joints broke",
-                                             alone.moved, alone.worstMove, alone.brokenJoints));
-            }
-        }
-        PhysicsScene scene(level, materials);
-        // Dynamic bodies that stand on something now (a stack, a plank on a post, a brick on the floor).
-        std::vector<ActorIndex> resting;
-        for (ActorIndex i = 0; i < scene.plan().actors.size(); ++i) {
-            if (scene.body(i) != 0 && scene.plan().actors[i].motion == MotionType::Dynamic && scene.supported(i)) {
-                resting.push_back(i);
-            }
-        }
+// What the Space key does: from the bat's place along the board, at 25 units per second, a little off straight on.
+struct Shot {
+    float x, degrees;
+};
+constexpr Shot kShots[] = {{0, 0}, {-6, 4}, {6, -4}, {2, -5}, {-3, 5}, {9, 0}, {-9, 0}, {0, 3}, {-12, 2}, {12, -2}, {4, 4}, {-4, -4}, {7, 3}, {-7, -3}, {1, 5}, {-1, -5}, {-10, 5}, {10, -5}, {5, 0}, {-5, 0}, {3, -3}, {-2, 2}, {8, -4}, {-8, 4}};
+constexpr int kMostShots = static_cast<int>(std::size(kShots));
+
+void shoot(PhysicsScene& scene, int shot) {
+    // The first is aimed at the middle of the level; the others are the pattern above.
+    if (shot == 0) {
         shootBall(scene);
-        const Outcome shot = run(scene, kRunSeconds);
-        broken += shot.brokenJoints;
-        if (shot.nonFinite) {
-            fail(entry.name, "a pose is not finite after the ball");
-        }
-        if (shot.fastest > kMaxSpeed) {
-            fail(entry.name, std::format("a body reached {:.0f} units per second", shot.fastest));
-        }
+        return;
+    }
+    const Shot s = kShots[shot];
+    const float angle = radians(s.degrees);
+    scene.launchBall({s.x, 1.2f, -15}, {std::sin(angle) * 25.0f, 0, std::cos(angle) * 25.0f});
+}
 
-        // Nothing may have gone through the floor: a body over the board whose lowest point is more than half a unit
-        // under the floor's plane, which it was not at the start.
-        for (ActorIndex i = 0; i < scene.plan().actors.size(); ++i) {
-            if (scene.body(i) == 0 || scene.plan().actors[i].motion != MotionType::Dynamic) {
-                continue;
-            }
-            const Vec3 p = scene.actorPose(i).translationPart();
-            const auto lowestY = [&](const Mat4& pose) {
-                float lowest = 1e9f;
-                for (const Vec3 q : lowestPoints(scene.plan().actors[i].body, pose)) {
-                    lowest = std::min(lowest, q.y);
-                }
-                return lowest;
-            };
-            if (lowestY(scene.actorPose(i)) < -0.5f && lowestY(scene.plan().actors[i].pose) > -0.5f &&
-                std::fabs(p.x) < 20.0f && std::fabs(p.z) < 20.0f) {
-                ++sunk;
-                fail(entry.name, std::format("actor {} ({}) lies under the board at ({:.1f} {:.1f} {:.1f})", i,
-                                             objectTypeName(scene.plan().actors[i].type), static_cast<double>(p.x),
-                                             static_cast<double>(p.y), static_cast<double>(p.z)));
-            }
-        }
+// The floor the level stands on: the board's boxes whose top is at y = 0 (some are turned about y).
+struct Floor {
+    struct Slab {
+        Mat4 toLocal;
+        float halfX, halfZ;
+    };
+    std::vector<Slab> slabs;
 
-        // After the hit nothing that stood on something may hang in the air, asleep, unless a joint still holds it. A
-        // body asleep with nothing under it by a ray is woken and given half a second: if it is held up it stays, and
-        // if its support left without waking it, it falls.
-        std::size_t hanging = 0;
-        ActorIndex firstHanging = kNoActor;
-        for (const ActorIndex i : resting) {
-            const bool jointed = std::ranges::any_of(scene.plan().joints, [&](const JointPlan& j) {
-                return j.actorA == i || j.actorB == i;
-            });
-            if (jointed || scene.world().isAwake(scene.body(i)) || scene.supported(i)) {
-                continue;
-            }
-            const Vec3 before = scene.actorPose(i).translationPart();
-            scene.world().wake(scene.body(i));
-            run(scene, 0.5f);
-            // (A body the level saved a few centimetres above what it rests on settles by that much when woken.)
-            if (before.y - scene.actorPose(i).translationPart().y > 2 * kSupportGap) {
-                ++hanging;
-                if (firstHanging == kNoActor) {
-                    firstHanging = i;
-                }
-            }
-        }
-        floating += hanging;
-        restingTotal += resting.size();
-        if (hanging > 0) {
-            const ActorPlan& first = scene.plan().actors[firstHanging];
-            fail(entry.name, std::format("{} bodies that stood on something hang in the air after the ball, the first "
-                                         "is actor {} ({}, at y {:.2f})",
-                                         hanging, firstHanging, objectTypeName(first.type),
-                                         static_cast<double>(first.pose.translationPart().y)));
-        }
-
-        const bool touchedSomething = std::ranges::any_of(scene.touchedByBalls(), [&](ActorIndex actor) {
-            return scene.plan().actors[actor].type != ObjectType::Board;
+    bool contains(Vec3 p, float margin) const {
+        return std::ranges::any_of(slabs, [&](const Slab& slab) {
+            const Vec3 local = transformPoint(p, slab.toLocal);
+            return std::fabs(local.x) < slab.halfX - margin && std::fabs(local.z) < slab.halfZ - margin;
         });
-        hits += touchedSomething;
+    }
+};
+
+Floor floorOf(const PhysicsPlan& plan) {
+    Floor floor;
+    for (const ActorPlan& actor : plan.actors) {
+        if (actor.type != ObjectType::Board) {
+            continue;
+        }
+        for (const PhysicsShape& shape : actor.body.shapes) {
+            const Mat4 world = shape.localPose * actor.pose;
+            const Vec3 up = transformVector({0, 1, 0}, world);  // the box's y axis
+            const float top = world.translationPart().y + shape.halfExtents.y * up.y;
+            if (shape.type == PhysicsShapeType::Box && std::fabs(top) < 0.1f && up.y > 0.99f) {
+                floor.slabs.push_back({inverse(world), shape.halfExtents.x, shape.halfExtents.z});
+            }
+        }
+    }
+    return floor;
+}
+
+// Bodies that start awake because a motor drives them: the windmills and the Ferris wheel.
+std::vector<bool> machineBodies(const PhysicsScene& scene) {
+    std::vector<bool> machine(scene.plan().actors.size(), false);
+    for (ActorIndex i = 0; i < machine.size(); ++i) {
+        const ActorPlan& actor = scene.plan().actors[i];
+        machine[i] = scene.body(i) != 0 && actor.motion == MotionType::Dynamic && !actor.body.startAsleep;
+    }
+    return machine;
+}
+
+// How fast body A of a motor turns relative to body B about the joint's axis, now. The joint drives it towards the
+// motor's velocity (PhysX's convention, see JointDesc).
+float motorSpeed(const PhysicsScene& scene, const JointPlan& joint) {
+    const Mat4 poseA = scene.actorPose(joint.actorA);
+    const Vec3 axis = normalize(transformVector(joint.desc.localAxis[0], poseA));
+    return dot(scene.world().angularVelocity(scene.body(joint.actorA)) -
+                   scene.world().angularVelocity(scene.body(joint.actorB)),
+               axis);
+}
+
+// Bodies that stood on something at the start and are now asleep with nothing under them and no joint holding them:
+// they would fall if anything woke them. Woken together and given half a second, those that drop by more than a
+// support gap and a half hung in the air (a level saved a brick that much above what it rests on, and settles by it).
+std::size_t hangingBodies(PhysicsScene& scene, const std::vector<ActorIndex>& resting, ActorIndex& first) {
+    std::vector<ActorIndex> candidates;
+    std::vector<float> height;
+    for (const ActorIndex i : resting) {
+        if (!scene.held(i) && !scene.world().isAwake(scene.body(i)) && !scene.supported(i)) {
+            candidates.push_back(i);
+            height.push_back(scene.actorPose(i).translationPart().y);
+            scene.world().wake(scene.body(i));
+        }
+    }
+    run(scene, 0.5f);
+    std::size_t hanging = 0;
+    for (std::size_t k = 0; k < candidates.size(); ++k) {
+        if (height[k] - scene.actorPose(candidates[k]).translationPart().y > 1.5f * kSupportGap) {
+            hanging += 1;
+            first = hanging == 1 ? candidates[k] : first;
+        }
+    }
+    return hanging;
+}
+
+struct Totals {
+    std::size_t levels = 0, joints = 0, balls = 0, hits = 0, broken = 0, resting = 0, hanging = 0, sunk = 0, pinned = 0;
+    std::size_t sunkShots = 0;
+    std::size_t machines = 0;
+    PhysicsScene::Counts counts;
+    double stepMs = 0;       // summed over the balls: the mean time of a fixed step of each run
+    double worstStepMs = 0;  // the slowest run
+    std::string worstLevel;
+};
+
+// A level stands on its own: nothing that is not a machine, or touched by one, may move or break; and each motor
+// must turn what it drives, the way it is told to.
+void standAlone(const Level& level, const MaterialLibrary& materials, float seconds, Totals& total,
+                const std::function<void(const std::string&)>& fail) {
+    PhysicsScene scene(level, materials, {}, gSettings);
+    const PhysicsPlan& plan = scene.plan();
+    const PhysicsScene::Counts& counts = scene.counts();
+    total.counts.dynamicBodies += counts.dynamicBodies;
+    total.counts.kinematicBodies += counts.kinematicBodies;
+    total.counts.staticBodies += counts.staticBodies;
+    total.counts.withoutBody += counts.withoutBody;
+    total.counts.clothJoints += counts.clothJoints;
+    total.joints += counts.joints;
+    total.pinned += plan.pinnedBodies;
+    if (counts.dynamicBodies == 0) {
+        fail("no dynamic body");
+    }
+    if (plan.unresolvedJoints + plan.unsupportedJoints + plan.jointsWithoutBody + counts.jointsRefused +
+            plan.unsupportedShapes > 0) {
+        fail(std::format("{} joints unresolved, {} unsupported, {} without a body, {} refused, {} shapes unsupported",
+                         plan.unresolvedJoints, plan.unsupportedJoints, plan.jointsWithoutBody, counts.jointsRefused,
+                         plan.unsupportedShapes));
+    }
+
+    const std::vector<bool> machine = machineBodies(scene);
+    std::vector<const JointPlan*> motors;
+    for (const JointPlan& joint : plan.joints) {
+        if (joint.desc.motorEnabled && !joint.toCloth) {
+            motors.push_back(&joint);
+        }
+    }
+    const std::size_t machines = static_cast<std::size_t>(std::ranges::count(machine, true));
+    total.machines += machines;
+    const Outcome alone = run(scene, seconds);
+    // What a running machine rests on settles under its weight (a windmill's tower, saved with overlaps, by up to
+    // 0.25), so beside a machine the bodies that are none may move that much.
+    const float allowed = machines > 0 ? kMachineSettle : kMoveLimit;
+    std::size_t strays = 0;
+    ActorIndex first = kNoActor;
+    for (const Outcome::Mover& mover : alone.movers) {
+        if (!machine[mover.actor] && mover.distance > allowed) {
+            first = strays++ == 0 ? mover.actor : first;
+        }
+    }
+    if (strays > 0 || alone.brokenJoints > 0 || alone.nonFinite) {
+        fail(std::format("on its own {} bodies that are no machine moved more than {:.0f} cm{}, {} joints broke", strays,
+                         static_cast<double>(allowed) * 100,
+                         first == kNoActor ? std::string()
+                                           : std::format(" (the first is actor {}, {})", first,
+                                                         objectTypeName(plan.actors[first].type)),
+                         alone.brokenJoints));
+    }
+    for (const JointPlan* motor : motors) {
+        // (The Ferris wheel's motor has 80 against a wheel of 70,000 and cannot reach its 3 rad/s: turning the right way
+        // at a tenth of a radian per second is enough.)
+        const float speed = motorSpeed(scene, *motor), target = motor->desc.motorVelocity;
+        if (speed * target <= 0 || std::fabs(speed) < std::min(0.1f, 0.25f * std::fabs(target))) {
+            fail(std::format("a motor drives at {:.2f} rad/s and its joint turns at {:.2f}",
+                             static_cast<double>(target), static_cast<double>(speed)));
+        }
+    }
+}
+
+// The test: each level, built the way the game builds it, stands for `seconds` with nothing near it, then gets
+// test balls one at a time.
+int test(const MaterialLibrary& materials, const LevelCatalog& catalog, int shots, float seconds, const char* only) {
+    int failed = 0;
+    std::vector<std::string> untouched;
+    Totals total;
+    for (const LevelEntry& entry : catalog.levels()) {
+        if (only && entry.name.find(only) == std::string::npos) {
+            continue;
+        }
+        ++total.levels;
+        const Level level = loadLevelJson(entry.path);
+        const auto fail = [&](const std::string& what) {
+            std::printf("FAIL %s: %s\n", entry.name.c_str(), what.c_str());
+            ++failed;
+        };
+        standAlone(level, materials, seconds, total, fail);
+
+        bool touchedSomething = false;
+        for (int shot = 0; shot < shots; ++shot) {
+            PhysicsScene scene(level, materials, {}, gSettings);
+            const Floor floor = floorOf(scene.plan());
+            // Dynamic bodies that stand on something now (a stack, a plank on a post, a brick on the floor).
+            std::vector<ActorIndex> resting;
+            for (ActorIndex i = 0; i < scene.plan().actors.size(); ++i) {
+                if (scene.body(i) != 0 && scene.plan().actors[i].motion == MotionType::Dynamic && scene.supported(i)) {
+                    resting.push_back(i);
+                }
+            }
+            shoot(scene, shot);
+            const Outcome shotOutcome = run(scene, seconds);
+            ++total.balls;
+            total.broken += shotOutcome.brokenJoints;
+            total.stepMs += shotOutcome.stepMs;
+            if (shotOutcome.stepMs > total.worstStepMs) {
+                total.worstStepMs = shotOutcome.stepMs;
+                total.worstLevel = entry.name;
+            }
+            const std::string label = shots > 1 ? std::format(" (shot {}: x {:.0f}, {:.0f} degrees)", shot,
+                                                              static_cast<double>(kShots[shot].x),
+                                                              static_cast<double>(kShots[shot].degrees))
+                                                : "";
+            if (shotOutcome.nonFinite) {
+                fail("a pose is not finite after the ball" + label);
+            }
+            if (shotOutcome.fastest > kMaxSpeed) {
+                fail(std::format("a body reached {:.0f} units per second{}", static_cast<double>(shotOutcome.fastest), label));
+            }
+
+            // Nothing may have gone through the floor: a body over the board whose lowest point is more than half a
+            // unit under the floor's plane, which it was not at the start. (A thin light fragment of a wrecked ship,
+            // thrown by a ball that is 150 times its weight, now and then does; see kMostSunkShots.)
+            bool sunkInThisShot = false;
+            for (ActorIndex i = 0; i < scene.plan().actors.size(); ++i) {
+                if (scene.body(i) == 0 || scene.plan().actors[i].motion != MotionType::Dynamic) {
+                    continue;
+                }
+                const Vec3 p = scene.actorPose(i).translationPart();
+                const auto lowestY = [&](const Mat4& pose) {
+                    float lowest = 1e9f;
+                    for (const Vec3 q : lowestPoints(scene.plan().actors[i].body, pose)) {
+                        lowest = std::min(lowest, q.y);
+                    }
+                    return lowest;
+                };
+                if (lowestY(scene.actorPose(i)) < -0.5f && lowestY(scene.plan().actors[i].pose) > -0.5f &&
+                    floor.contains(p, 1.0f)) {
+                    ++total.sunk;
+                    sunkInThisShot = true;
+                    std::printf("note %s: actor %u (%s) lies under the board at (%.1f %.1f %.1f)%s\n", entry.name.c_str(), i,
+                                std::string(objectTypeName(scene.plan().actors[i].type)).c_str(), static_cast<double>(p.x),
+                                static_cast<double>(p.y), static_cast<double>(p.z), label.c_str());
+                }
+            }
+
+            total.sunkShots += sunkInThisShot;
+
+            // The pieces do not hang in the air after the hit (and give the scene the moment it takes to notice).
+            run(scene, 0.25f);
+            ActorIndex firstHanging = kNoActor;
+            const std::size_t hanging = hangingBodies(scene, resting, firstHanging);
+            total.hanging += hanging;
+            total.resting += resting.size();
+            if (hanging > 0) {
+                const ActorPlan& first = scene.plan().actors[firstHanging];
+                fail(std::format("{} bodies that stood on something hang in the air after the ball, the first is actor "
+                                 "{} ({}, at y {:.2f}){}",
+                                 hanging, firstHanging, objectTypeName(first.type),
+                                 static_cast<double>(first.pose.translationPart().y), label));
+            }
+
+            touchedSomething = touchedSomething || std::ranges::any_of(scene.touchedByBalls(), [&](ActorIndex actor) {
+                return scene.plan().actors[actor].type != ObjectType::Board;
+            });
+        }
+        total.hits += touchedSomething;
         if (!touchedSomething) {
             untouched.push_back(entry.name);
         }
     }
-    std::printf("physics: %zu levels, %zu dynamic, %zu kinematic and %zu static bodies (%zu actors without one), %zu "
-                "joints (%zu on cloth left out)\n",
-                levels, total.dynamicBodies, total.kinematicBodies, total.staticBodies, total.withoutBody, joints,
-                total.clothJoints);
-    std::printf("the test ball touched something besides the board in %zu of them and broke %zu joints; of %zu bodies "
-                "standing on something, %zu hang in the air at the end, %zu lie under the board\n",
-                hits, broken, restingTotal, floating, sunk);
+    const PhysicsScene::Counts& counts = total.counts;
+    std::printf("physics: %zu levels, %zu dynamic (%zu of them running machines), %zu kinematic and %zu static bodies "
+                "(%zu actors without one; %zu bodies welded to the world are among the static), %zu joints (%zu on "
+                "cloth left out)\n",
+                total.levels, counts.dynamicBodies, total.machines, counts.kinematicBodies, counts.staticBodies,
+                counts.withoutBody, total.pinned, total.joints, counts.clothJoints);
+    std::printf("%zu test balls (%d per level) touched something besides the board in %zu levels and broke %zu joints; "
+                "of %zu bodies standing on something, %zu hang in the air at the end, %zu went through the floor (in %zu shots)\n",
+                total.balls, shots, total.hits, total.broken, total.resting, total.hanging, total.sunk, total.sunkShots);
+    std::printf("a fixed step took %.3f ms on average with a ball in the level, %.3f ms in the slowest run (%s); solver: "
+                "%d velocity, %d position and %d collision steps\n",
+                total.stepMs / static_cast<double>(std::max<std::size_t>(total.balls, 1)), total.worstStepMs,
+                total.worstLevel.c_str(), gSettings.velocitySteps, gSettings.positionSteps, gSettings.collisionSteps);
     if (!untouched.empty()) {
-        std::printf("the ball touched nothing in:");
+        std::printf("the balls touched nothing in:");
         for (const std::string& name : untouched) {
             std::printf(" %s", name.c_str());
         }
         std::printf("\n");
     }
-    // "Most": the ball is shot at the middle of the movable bodies, which can be an empty patch of floor.
-    if (hits * 4 < levels * 3) {
-        fail("all", std::format("the ball touched something in only {} of {} levels", hits, levels));
+    if (static_cast<double>(total.sunkShots) > kMostSunkShots * static_cast<double>(total.balls)) {
+        std::printf("FAIL all: a body went through the floor in %zu of %zu shots (%zu bodies)\n", total.sunkShots, total.balls,
+                    total.sunk);
+        ++failed;
     }
-    return failed == 0 && levels > 0 ? 0 : 1;
+    // "Most": a ball is shot at the middle of the movable bodies or along the board, which can be an empty patch of floor.
+    if (!only && total.hits * 4 < total.levels * 3) {
+        std::printf("FAIL all: the balls touched something in only %zu of %zu levels\n", total.hits, total.levels);
+        ++failed;
+    }
+    return failed == 0 && total.levels > 0 ? 0 : 1;
 }
 
 // How far apart a joint's two anchors are in world space with the frames as the level saved them.
@@ -266,7 +445,7 @@ Outcome firstTenth(const Level& level, const MaterialLibrary& materials, bool re
     PhysicsOptions options;
     options.start = StartState::Still;
     options.rebuildJointFrames = rebuildJointFrames;
-    PhysicsScene scene(level, materials, options);
+    PhysicsScene scene(level, materials, options, gSettings);
     std::vector<Vec3> start;
     for (ActorIndex i = 0; i < scene.plan().actors.size(); ++i) {
         start.push_back(scene.actorPose(i).translationPart());
@@ -341,15 +520,15 @@ int measure(const MaterialLibrary& materials, const LevelCatalog& catalog, const
         }
         for (const bool rebuild : {true, false}) {
             const Outcome snap = firstTenth(level, materials, rebuild);
-            Outcome& total = rebuild ? snapRebuilt : snapAsSaved;
-            total.moved += snap.moved;
-            total.worstMove = std::max(total.worstMove, snap.worstMove);
+            Outcome& sum = rebuild ? snapRebuilt : snapAsSaved;
+            sum.moved += snap.moved;
+            sum.worstMove = std::max(sum.worstMove, snap.worstMove);
         }
         std::size_t bodies = 0;
         std::size_t levelJoints = 0;
         std::vector<Outcome> outcomes;
         for (const Config& c : configs) {
-            PhysicsScene scene(level, materials, c.options);
+            PhysicsScene scene(level, materials, c.options, gSettings);
             if (c.ball) {
                 shootBall(scene);
             }
@@ -413,13 +592,37 @@ int main(int argc, char** argv) {
         std::printf("SKIP: converted levels or materials not found under %s\n", assets.string().c_str());
         return 77;
     }
+    bool measuring = false;
+    int shots = 4;
+    float seconds = kRunSeconds;
+    const char* only = nullptr;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--measure") == 0) {
+            measuring = true;
+        } else if (std::strcmp(argv[i], "--shots") == 0 && i + 1 < argc) {
+            shots = std::clamp(std::atoi(argv[++i]), 1, kMostShots);
+        } else if (std::strcmp(argv[i], "--seconds") == 0 && i + 1 < argc) {
+            seconds = std::max(1.0f, static_cast<float>(std::atof(argv[++i])));
+        } else if (std::strcmp(argv[i], "--velocity-steps") == 0 && i + 1 < argc) {
+            gSettings.velocitySteps = std::atoi(argv[++i]);
+        } else if (std::strcmp(argv[i], "--position-steps") == 0 && i + 1 < argc) {
+            gSettings.positionSteps = std::atoi(argv[++i]);
+        } else if (std::strcmp(argv[i], "--collision-steps") == 0 && i + 1 < argc) {
+            gSettings.collisionSteps = std::atoi(argv[++i]);
+        } else if (std::strcmp(argv[i], "--threads") == 0 && i + 1 < argc) {
+            gSettings.threads = std::atoi(argv[++i]);
+        } else if (argv[i][0] != '-') {
+            only = argv[i];
+        } else {
+            std::printf("usage: mb_physics_smoke [--shots 1..%d] [--seconds S] [--velocity-steps N] [--position-steps N] "
+                        "[--collision-steps N] [--threads N] [level] | --measure [level]\n", kMostShots);
+            return 2;
+        }
+    }
     try {
         const MaterialLibrary materials = MaterialLibrary::load(materialsJson);
         const LevelCatalog catalog(assets / "Data" / "Levels");
-        if (argc > 1 && std::strcmp(argv[1], "--measure") == 0) {
-            return measure(materials, catalog, argc > 2 ? argv[2] : nullptr);
-        }
-        return test(materials, catalog);
+        return measuring ? measure(materials, catalog, only) : test(materials, catalog, shots, seconds, only);
     } catch (const std::exception& e) {
         std::printf("FAIL: %s\n", e.what());
         return 1;

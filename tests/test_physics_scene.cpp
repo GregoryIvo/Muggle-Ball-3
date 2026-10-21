@@ -61,7 +61,8 @@ const MaterialLibrary& materials() {
       {"name": "Ice", "physics": {"staticFriction": 0.05, "dynamicFriction": 0.04, "restitution": 0.1}},
       {"name": "clothmat", "physics": {"staticFriction": 0.9, "dynamicFriction": 0.8, "restitution": 0.2}},
       {"name": "BallMaterial", "physics": {"staticFriction": 0.5, "dynamicFriction": 0.5, "restitution": 0.999}},
-      {"name": "boardmaterial", "physics": {"staticFriction": 0.5, "dynamicFriction": 0.5, "restitution": 1.0}}
+      {"name": "boardmaterial", "physics": {"staticFriction": 0.5, "dynamicFriction": 0.5, "restitution": 1.0}},
+      {"name": "Dull", "physics": {"staticFriction": 0.6, "dynamicFriction": 0.5, "restitution": 0.0}}
     ]})");
     return library;
 }
@@ -106,9 +107,8 @@ Actor actor(ObjectType type, std::uint32_t id, Vec3 at, std::uint32_t flags, flo
 }
 
 // The board: static (kinematic and frozen on every axis), its floor's top at y = 0.
-Actor board(float half = 30) {
-    return actor(ObjectType::Board, 1, {0, 0, 0}, 0xFF, 1000, {box({half, 0.5f, half}, {0, -0.5f, 0}, 4)},
-                 "boardmaterial");
+Actor board(float half = 30, const std::string& material = "boardmaterial") {
+    return actor(ObjectType::Board, 1, {0, 0, 0}, 0xFF, 1000, {box({half, 0.5f, half}, {0, -0.5f, 0}, 4)}, material);
 }
 
 Actor brick(std::uint32_t id, Vec3 at, std::uint32_t flags = 0, float mass = 10, std::vector<Shape> shapes = {},
@@ -129,6 +129,12 @@ Joint fixedJoint(std::uint32_t a, std::uint32_t b, Vec3 anchorA = {}, Vec3 ancho
     j.localAxis[0] = j.localAxis[1] = {0, 1, 0};
     j.localNormal[0] = j.localNormal[1] = {1, 0, 0};
     j.maxForce = j.maxTorque = kFltMax;
+    return j;
+}
+
+// A joint that breaks at `force`, so that it is not taken for a weld that holds a body to the world for good.
+Joint breakable(Joint j, float force = 1e6f) {
+    j.maxForce = j.maxTorque = force;
     return j;
 }
 
@@ -247,6 +253,16 @@ void testMotionTypes() {
     check(axes.body.lockTranslation[0] && !axes.body.lockTranslation[1] && axes.body.lockTranslation[2],
           "locks: frozen position x and z");
 
+    // One frozen axis at a time: each flag locks its own axis and no other.
+    for (int axis = 0; axis < 6; ++axis) {
+        const BodyDesc& d = planFor(0x100u | (2u << axis)).body;
+        bool exact = true;
+        for (int i = 0; i < 3; ++i) {
+            exact = exact && d.lockTranslation[i] == (axis == i) && d.lockRotation[i] == (axis == 3 + i);
+        }
+        check(exact, "locks: each frozen bit locks its own axis (position x y z, then rotation x y z)");
+    }
+
     Actor bare;
     bare.shapes = {box({1, 1, 1})};
     check(planPhysics(levelOf({bare}), materials()).actors.at(0).motion == MotionType::Static,
@@ -280,6 +296,9 @@ void testBodyValues() {
           "body: damping, maximum spin and sleep thresholds are the saved ones");
     check(d.density == 2 && d.userData == 0 && near(d.pose.translationPart(), {1, 2, 3}) && near(plan.pose, d.pose),
           "body: density, the actor index as user data, the pose");
+    Actor kinematic = actor(ObjectType::Brick, 6, {}, 0x180, 7.5f, {box({0.5f, 0.5f, 0.5f})}, "Wood.jpg");
+    check(d.continuousCollision && !planPhysics(levelOf({kinematic}), materials()).actors.at(0).body.continuousCollision,
+          "body: a dynamic body has swept collision (light pieces thrown by the ball would go through the floor), a kinematic one not");
 }
 
 // The PhysX matrix R * diag(scale, 1, scale) of a rotation about y: its rows and columns are `scale` long on two
@@ -442,15 +461,15 @@ void testJointResolution() {
     // indices: board 0, brick 1, brick 2, cloth 3 (own), segments 4, 5, 6, brick (id 12) 7, brick 8
     const Level level = levelOf(
         {board(), brick(2, {0, 0.5f, 0}), brick(3, {3, 0.5f, 0}), cloth, brick(12, {6, 0.5f, 0}), brick(20, {9, 0.5f, 0})},
-        {fixedJoint(0, 2),      // world to object 2
-         fixedJoint(2, 3),      // object to object
-         fixedJoint(10, 20),    // the cloth's own actor (its id) to a brick
-         fixedJoint(11, 20),    // segment 1
-         fixedJoint(13, 20),    // segment 3
-         fixedJoint(12, 20),    // 12 is a brick as well as segment 2: the brick wins
-         fixedJoint(999, 20),   // nobody
-         fixedJoint(2, 0),      // the world as the second actor: not a thing the files do, but it resolves
-         fixedJoint(0, 0)});    // world to world
+        {breakable(fixedJoint(0, 2)),      // world to object 2
+         breakable(fixedJoint(2, 3)),      // object to object
+         breakable(fixedJoint(10, 20)),    // the cloth's own actor (its id) to a brick
+         breakable(fixedJoint(11, 20)),    // segment 1
+         breakable(fixedJoint(13, 20)),    // segment 3
+         breakable(fixedJoint(12, 20)),    // 12 is a brick as well as segment 2: the brick wins
+         breakable(fixedJoint(999, 20)),   // nobody
+         breakable(fixedJoint(2, 0)),      // the world as the second actor: not a thing the files do, but it resolves
+         breakable(fixedJoint(0, 0))});    // world to world
     const PhysicsPlan plan = planPhysics(level, materials());
     check(plan.joints.size() == 7, "joints: the seven that resolve are planned");
     check(plan.unresolvedJoints == 2, "joints: an unknown id, and the world on both ends, are counted as unresolved");
@@ -579,19 +598,22 @@ void testStartStates() {
     const auto bodyOf = [&](StartState start, std::size_t i) {
         return planPhysics(level, materials(), options(start)).actors.at(i).body;
     };
-    check(bodyOf(StartState::Asleep, 1).startAsleep && bodyOf(StartState::Asleep, 1).linearVelocity.x == 0 &&
-              bodyOf(StartState::Asleep, 2).startAsleep,
-          "start: asleep puts every moving body to sleep, with no velocity");
+    check(bodyOf(StartState::Asleep, 1).startAsleep && bodyOf(StartState::Asleep, 2).startAsleep,
+          "start: asleep puts every moving body to sleep");
     check(!bodyOf(StartState::Asleep, 0).startAsleep, "start: the static board has nothing to put to sleep");
     check(!bodyOf(StartState::SavedVelocities, 1).startAsleep && bodyOf(StartState::SavedVelocities, 1).linearVelocity.z == 3 &&
               bodyOf(StartState::SavedVelocities, 1).angularVelocity.y == 0.2f,
           "start: saved velocities keeps them, awake");
     check(!bodyOf(StartState::Still, 1).startAsleep && length(bodyOf(StartState::Still, 1).linearVelocity) == 0,
           "start: still is awake with none");
+    check(length(bodyOf(StartState::SavedVelocities, 2).linearVelocity) == 0 &&
+              length(bodyOf(StartState::Still, 2).linearVelocity) == 0,
+          "start: a kinematic body gets no velocity, it would drift");
 
     PhysicsScene scene(level, materials(), options(), singleThreaded());
-    check(!scene.world().isAwake(scene.body(1)) && scene.world().awakeBodyCount() == 0,
-          "start: a level of sleeping bodies has none awake");
+    check(!scene.world().isAwake(scene.body(1)) && scene.world().awakeBodyCount() == 0 &&
+              length(scene.world().linearVelocity(scene.body(1))) == 0,
+          "start: a level of sleeping bodies has none awake, and they hold no velocity");
     run(scene, 5);
     check(near(scene.actorPose(1).translationPart(), {0, 0.5f, 0}, 1e-6f) && scene.world().awakeBodyCount() == 0,
           "start: and nothing moves by itself");
@@ -599,9 +621,11 @@ void testStartStates() {
 
 void testBrickStandsAndFalls() {
     // Three bricks in a stack on the board, and one on a pedestal (a static box) near the edge.
-    Actor pedestal = actor(ObjectType::Wall, 9, {10, 0.5f, 10}, 0x17F, 100, {box({0.6f, 0.5f, 0.6f})}, "Wood.jpg");
-    const Level level = levelOf({board(100), brick(2, {0, 0.5f, 10}, 0, 300), brick(3, {0, 1.5f, 10}, 0, 300),
-                                 brick(4, {0, 2.5f, 10}, 0, 300), pedestal, brick(5, {10.45f, 1.5f, 10}, 0, 300)});
+    // (Dull: bricks that do not bounce, so that they come to rest in the time the test allows.)
+    const auto dull = [](std::uint32_t id, Vec3 at) { return brick(id, at, 0, 300, {}, "Dull"); };
+    Actor pedestal = actor(ObjectType::Wall, 9, {10, 0.5f, 10}, 0x17F, 100, {box({0.6f, 0.5f, 0.6f})}, "Dull");
+    const Level level = levelOf({board(100, "Dull"), dull(2, {0, 0.5f, 10}), dull(3, {0, 1.5f, 10}),
+                                 dull(4, {0, 2.5f, 10}), pedestal, dull(5, {10.45f, 1.5f, 10})});
     PhysicsScene scene(level, materials(), options(), singleThreaded());
     run(scene, 3);
     check(near(scene.actorPose(2).translationPart(), {0, 1.5f, 10}, 1e-5f) &&
@@ -609,8 +633,8 @@ void testBrickStandsAndFalls() {
           "stack: a stack of sleeping bricks stands, to the bit, with nothing near");
 
     // The ball takes the bottom brick away; the two on it must come down.
-    scene.launchBall({0, 0.6f, 0}, {0, 0, 8});
-    run(scene, 6);
+    scene.launchBall({0, 0.6f, 0}, {0, 0, 10});
+    run(scene, 8);
     const Vec3 bottom = scene.actorPose(1).translationPart();
     check(bottom.z > 12, "stack: the bottom brick is knocked well out of the stack");
     for (const ActorIndex brickIndex : {ActorIndex{2}, ActorIndex{3}}) {
@@ -625,8 +649,8 @@ void testBrickStandsAndFalls() {
     // The brick on the pedestal wakes when the ball hits it and falls to the board.
     PhysicsScene ledge(level, materials(), options(), singleThreaded());
     check(!ledge.world().isAwake(ledge.body(5)), "ledge: the brick on the pedestal sleeps");
-    ledge.launchBall({10.4f, 1.5f, 8.5f}, {0, 0, 12});  // close, so that it has not dropped far when it arrives
-    run(ledge, 4);
+    ledge.launchBall({10.4f, 1.5f, 8.5f}, {0, 0, 4});  // close, so that it has not dropped far when it arrives
+    run(ledge, 5);
     check(ledge.actorPose(5).translationPart().y < 1.0f && ledge.actorPose(5).translationPart().z > 10.8f &&
               ledge.touchedByBalls().contains(5),
           "ledge: a sleeping brick that is hit wakes, is pushed off, and ends on the board");
@@ -685,8 +709,8 @@ void testImpactBreaking() {
                                 {weld(2, 500), weld(3, 5e5f), weld(4, kFltMax)});
     PhysicsScene scene(level, materials(), options(), singleThreaded());
     run(scene, 2);
-    check(scene.brokenJoints().empty() && scene.counts().joints == 3,
-          "impact: joints weaker than the weight of what they hold do not break by themselves");
+    check(scene.brokenJoints().empty() && scene.counts().joints == 2 && scene.plan().pinnedBodies == 1,
+          "impact: joints weaker than the weight of what they hold do not break by themselves (the third is a weld)");
     for (const float x : {8.0f, 12.0f, 16.0f}) {
         scene.launchBall({x, 0.6f, 0}, {0, 0, 25});
     }
@@ -719,6 +743,149 @@ void testImpactBreaking() {
     check(byImpact.brokenJoints().empty(), "impact: the same joint does not break when nothing hits it");
 }
 
+void testPinnedBodies() {
+    // ids: board 1; bricks 2 (welded to the world for good), 3 (by a joint that breaks at 500), 4 (twice for good),
+    // 5 and 6 (welded to each other for good), 7 (kinematic, welded to the world for good).
+    const Level level = levelOf({board(), brick(2, {0, 0.5f, 10}), brick(3, {4, 0.5f, 10}), brick(4, {8, 0.5f, 10}),
+                                 brick(5, {12, 0.5f, 10}), brick(6, {13, 0.5f, 10}), brick(7, {16, 0.5f, 10}, 0x180)},
+                                {fixedJoint(0, 2), breakable(fixedJoint(0, 3), 500), fixedJoint(0, 4), fixedJoint(4, 0),
+                                 fixedJoint(5, 6, {0.5f, 0, 0}, {-0.5f, 0, 0}), fixedJoint(0, 7)});
+    const PhysicsPlan plan = planPhysics(level, materials());
+    check(plan.actors[1].motion == MotionType::Static && plan.actors[3].motion == MotionType::Static &&
+              plan.actors[1].body.motion == MotionType::Static && plan.pinnedBodies == 2,
+          "pinned: a body welded to the world by a joint that never breaks is static");
+    check(plan.actors[2].motion == MotionType::Dynamic && plan.actors[4].motion == MotionType::Dynamic &&
+              plan.actors[5].motion == MotionType::Dynamic && plan.actors[6].motion == MotionType::Kinematic,
+          "pinned: a joint that can break, a weld between two bodies and a kinematic body are left alone");
+    check(plan.joints.size() == 3 && plan.joints[0].actorB == 2 && plan.joints[1].actorA == 4 &&
+              plan.joints[2].actorA == kNoActor && plan.joints[2].actorB == 6,
+          "pinned: and the welds of the static ones (both of brick 4's) are dropped");
+
+    // The fence post that a ball of 500 hits at 25 units per second stays where it is, and the breakable one goes.
+    PhysicsScene scene(level, materials(), options(), singleThreaded());
+    for (const float x : {0.0f, 4.0f}) {
+        scene.launchBall({x, 0.6f, 0}, {0, 0, 25});
+    }
+    run(scene, 3);
+    check(near(scene.actorPose(1).translationPart(), {0, 0.5f, 10}, 1e-6f) && scene.touchedByBalls().contains(1),
+          "pinned: a welded body hit by a ball does not move");
+    check(scene.actorPose(2).translationPart().z > 12 && scene.brokenJoints().size() == 1,
+          "pinned: and one on a joint that breaks does");
+}
+
+void testMachinesRun() {
+    // A hub (heavy, with no gravity, so that it stays) and a sail on a hinge with a motor that turns at 2 rad/s; a brick
+    // welded to the sail; a loose brick; and a wheel on a kinematic frame with a motor of its own.
+    Joint motor;
+    motor.type = NxJointType::Revolute;
+    motor.actorA = 2;
+    motor.actorB = 3;
+    motor.localAnchor[0] = {0, 0, 1};
+    motor.localAnchor[1] = {0, 0, -1};
+    motor.localAxis[0] = motor.localAxis[1] = {0, 0, 1};
+    motor.localNormal[0] = motor.localNormal[1] = {1, 0, 0};
+    motor.maxForce = motor.maxTorque = 1e6f;
+    motor.typeFlags = 2;
+    motor.motorVelTarget = 2;
+    motor.motorMaxForce = 1e4f;
+    Joint wheelMotor = motor;
+    wheelMotor.actorA = 6;  // the frame
+    wheelMotor.actorB = 7;  // the wheel
+    wheelMotor.motorVelTarget = 1;
+
+    Actor hub = brick(2, {0, 5, 10}, 0x101, 1e5f);
+    Actor sail = brick(3, {0, 5, 12}, 0x101, 5);
+    sail.body->angularVelocity = {0, 0, -2};  // as the level was saved: already turning
+    Actor weldedToSail = brick(4, {1.5f, 5, 12}, 0x101, 1);
+    Actor loose = brick(5, {-8, 0.5f, 10});
+    Actor frame = brick(6, {10, 5, 10}, 0x181, 1000);
+    Actor wheel = brick(7, {10, 5, 12}, 0x101, 50);
+    const Level level = levelOf({board(), hub, sail, weldedToSail, loose, frame, wheel},
+                                {motor, breakable(fixedJoint(3, 4, {0.75f, 0, 0}, {-0.75f, 0, 0})), wheelMotor});
+    PhysicsScene scene(level, materials(), options(), singleThreaded());
+    const PhysicsPlan& plan = scene.plan();
+    check(!plan.actors[1].body.startAsleep && !plan.actors[2].body.startAsleep && !plan.actors[3].body.startAsleep &&
+              plan.actors[4].body.startAsleep && !plan.actors[6].body.startAsleep,
+          "machines: the bodies joined to a motor start awake (the hub, the sail, what is welded to it, the wheel), a loose one asleep");
+    check(scene.world().isAwake(scene.body(1)) && scene.world().isAwake(scene.body(3)) &&
+              !scene.world().isAwake(scene.body(4)),
+          "machines: and so they are in the world");
+    check(near(scene.world().angularVelocity(scene.body(2)).z, -2, 1e-4f),
+          "machines: with the velocity they were saved with");
+
+    run(scene, 2);
+    // PhysX's motor turns body A forwards and body B backwards: the sail, B of the joint, spins at -2 about the axis.
+    check(near(scene.world().angularVelocity(scene.body(2)).z, -2, 0.1f) &&
+              near(scene.world().angularVelocity(scene.body(1)).z, 0, 0.05f),
+          "machines: the motor keeps the sail turning the way it drives body B (-2 rad/s about the axis, the hub still)");
+    check(near(scene.world().angularVelocity(scene.body(3)).z, -2, 0.1f), "machines: so does what is welded to it");
+    check(near(scene.world().angularVelocity(scene.body(6)).z, -1, 0.1f) && scene.world().isAwake(scene.body(6)),
+          "machines: a wheel on a kinematic frame turns at its motor's speed");
+    check(!scene.world().isAwake(scene.body(4)) && near(scene.actorPose(4).translationPart(), {-8, 0.5f, 10}, 1e-6f),
+          "machines: and a loose brick next to them sleeps on");
+}
+
+void testHoveringBrickFalls() {
+    // A brick 5 cm above what holds it, as the levels have them: no contact joins them, so only a look under it finds
+    // out that the support has gone.
+    const auto dull = [](std::uint32_t id, Vec3 at) { return brick(id, at, 0, 100, {}, "Dull"); };
+    Actor pedestal = actor(ObjectType::Wall, 9, {0, 0.5f, 10}, 0x17F, 100, {box({0.6f, 0.5f, 0.6f})}, "Dull");
+    const Level onPedestal = levelOf({board(30, "Dull"), pedestal, dull(2, {0, 1.55f, 10})});
+    PhysicsScene alone(onPedestal, materials(), options(), singleThreaded());
+    run(alone, 3);
+    check(near(alone.actorPose(2).translationPart(), {0, 1.55f, 10}, 1e-6f) && !alone.world().isAwake(alone.body(2)),
+          "hover: left alone it stays where the level put it, asleep");
+    alone.world().removeBody(alone.body(1));
+    run(alone, 2);
+    check(alone.actorPose(2).translationPart().y < 0.6f && !alone.world().isAwake(alone.body(2)),
+          "hover: when what it hovers over is taken out of the world, it is woken, falls to the board and rests there");
+
+    // The same with a brick: the ball pushes the lower one away, and the upper one comes down behind it.
+    const Level stacked = levelOf({board(30, "Dull"), dull(2, {0, 0.5f, 10}), dull(3, {0, 1.55f, 10})});
+    PhysicsScene scene(stacked, materials(), options(), singleThreaded());
+    scene.launchBall({0, 0.4f, 0}, {0, 0, 12});
+    run(scene, 10);
+    check(scene.actorPose(1).translationPart().z > 11 && scene.actorPose(2).translationPart().y < 0.6f &&
+              !scene.world().isAwake(scene.body(2)),
+          "hover: a brick knocked away from under another one that hovers over it lets that one fall");
+}
+
+void testBreakingWakesPartners() {
+    // Two bricks welded together; the ball hits one, and the weld breaks in that very step. The other brick must be
+    // awake when it does, or it would stay asleep in the air wherever the weld left it.
+    const Level level = levelOf({board(), brick(2, {0, 0.5f, 10}), brick(3, {2, 0.5f, 10}, 0, 10)},
+                                {breakable(fixedJoint(2, 3, {1, 0, 0}, {-1, 0, 0}), 100)});
+    PhysicsScene scene(level, materials(), options(), singleThreaded());
+    scene.launchBall({0, 0.6f, 0}, {0, 0, 25});
+    for (int i = 0; i < 180 && scene.brokenJoints().empty(); ++i) {
+        scene.step(1.0f / 60);
+    }
+    check(scene.brokenJoints().size() == 1, "break: the weld breaks under the ball");
+    check(scene.world().isAwake(scene.body(1)) && scene.world().isAwake(scene.body(2)),
+          "break: and both bricks it held are awake in the step it breaks in");
+}
+
+void testKinematicBodiesAreImmovable() {
+    // A ball that hits a kinematic brick (a plank on a path, say) strikes with its own mass at its own speed; a weld
+    // between it and a dynamic brick that is weaker than that breaks, however light the kinematic brick is.
+    Actor plank = brick(2, {0, 0.5f, 10}, 0x180, 1);
+    const Level level = levelOf({board(), plank, brick(3, {4, 0.5f, 10})}, {breakable(fixedJoint(2, 3), 100000)});
+    PhysicsScene scene(level, materials(), options(), singleThreaded());
+    scene.launchBall({0, 0.6f, 0}, {0, 0, 25});
+    run(scene, 2);
+    check(scene.brokenJoints().size() == 1, "kinematic: a hit on a kinematic body counts it as immovable");
+}
+
+void testOldLevelsAreNotSimulated() {
+    Level level = levelOf({board(), brick(2, {0, 0.5f, 10})}, {fixedJoint(0, 2)});
+    level.version = 2;
+    PhysicsScene scene(level, materials(), options(), singleThreaded());
+    check(scene.counts().dynamicBodies == 0 && scene.counts().withoutBody == 2 && scene.counts().joints == 0 &&
+              scene.world().bodyCount() == 0,
+          "version: a level from before the physics data was decoded is not simulated, instead of refused body by body");
+    check(near(scene.actorPose(1).translationPart(), {0, 0.5f, 10}), "version: and its actors stay where they were saved");
+}
+
 void testBallAndBodies() {
     const Level level = levelOf({board(), brick(2, {0, 0.5f, 10})});
     PhysicsScene scene(level, materials(), options(), singleThreaded());
@@ -732,6 +899,13 @@ void testBallAndBodies() {
     run(scene, 1);
     check(scene.touchedByBalls().contains(1), "ball: it touched the brick");
     check(!scene.touchedByBalls().contains(kNoActor), "ball: and never counts itself");
+
+    // Swept collision: a ball that moves 2.5 units in a step does not go through a wall 2 cm thick.
+    Actor wall = actor(ObjectType::Wall, 5, {0, 2, 10}, 0x17F, 100, {box({5, 2, 0.01f})}, "Wood.jpg");
+    PhysicsScene fast(levelOf({board(), wall}), materials(), options(), singleThreaded());
+    fast.launchBall({0, 1.0f, 0}, {0, 0, 150});
+    run(fast, 0.5f);
+    check(fast.world().pose(fast.balls()[0].body).translationPart().z < 10, "ball: a fast one is stopped by a thin wall");
 
     // A ball that is old is taken out.
     PhysicsScene old(levelOf({board()}), materials(), options(), singleThreaded());
@@ -771,6 +945,12 @@ int main() {
     testFallsAsleepInTheAir();
     testJointedPiecesWakeTogether();
     testImpactBreaking();
+    testPinnedBodies();
+    testMachinesRun();
+    testHoveringBrickFalls();
+    testBreakingWakesPartners();
+    testKinematicBodiesAreImmovable();
+    testOldLevelsAreNotSimulated();
     testBallAndBodies();
     if (failures == 0) {
         std::puts("all physics scene tests passed");
