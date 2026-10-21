@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""Build the runtime asset folder from your own copy of Magic Ball 3.
+
+Usage:
+    python3 tools/convert_assets.py --game "/path/to/Magic Ball 3" \
+        --extracted /path/to/MB3OUT --out assets
+
+--game       the installed game folder (holds Textures.dat, Sounds.dat, Musics.dat)
+--extracted  the folder produced by tools/molebox-dump (holds Data/ from MagicBall3.dat)
+--out        destination; created if missing, never committed (see .gitignore)
+"""
+import argparse
+import json
+import pathlib
+import shutil
+import sys
+import zipfile
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import mb3level  # noqa: E402
+
+PLAIN_ARCHIVES = {"Textures.dat": "Textures", "Sounds.dat": "Sounds", "Musics.dat": "Musics"}
+
+
+def unpack_archives(game, out):
+    for name, sub in PLAIN_ARCHIVES.items():
+        src = game / name
+        if not src.exists():
+            sys.exit(f"missing {src}")
+        with zipfile.ZipFile(src) as z:
+            z.extractall(out / sub)
+        print(f"{name}: {len(z.namelist())} entries -> {sub}/")
+
+
+def copy_data(extracted, out):
+    src = extracted / "Data"
+    if not src.is_dir():
+        sys.exit(f"missing {src} (run tools/molebox-dump first)")
+    shutil.copytree(src, out / "Data", dirs_exist_ok=True)
+
+
+def convert_levels(out):
+    levels = sorted((out / "Data" / "Levels").glob("*.mb3"), key=lambda p: p.name.lower())
+    for path in levels:
+        level = mb3level.parse(path.read_bytes())
+        if level["trailingBytes"]:
+            sys.exit(f"{path.name}: {level['trailingBytes']} unparsed bytes")
+        path.with_suffix(".json").write_text(json.dumps(level))
+    print(f"levels: {len(levels)} converted to JSON")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--game", required=True, type=pathlib.Path)
+    ap.add_argument("--extracted", required=True, type=pathlib.Path)
+    ap.add_argument("--out", default=pathlib.Path("assets"), type=pathlib.Path)
+    args = ap.parse_args()
+
+    args.out.mkdir(parents=True, exist_ok=True)
+    unpack_archives(args.game, args.out)
+    copy_data(args.extracted, args.out)
+    convert_levels(args.out)
+    print(f"done: {args.out.resolve()}")
+
+
+if __name__ == "__main__":
+    main()
