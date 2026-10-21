@@ -987,7 +987,9 @@ struct Pendulum {
 
     // A 2 m bar hinged at its left end to a pivot at (0,5,0), swinging about z. angle0 is where it starts. The bar is
     // the joint's body A (the hinge angle is the bar's, as in PhysX), or its body B with barIsB.
-    explicit Pendulum(const JointDesc& hinge = {}, float angle0 = 0, bool gravity = true, bool canSleep = true,
+    // Not "const JointDesc& hinge = {}": GCC 13 cannot list-initialise JointDesc in a default argument.
+    Pendulum() : Pendulum(JointDesc()) {}
+    explicit Pendulum(const JointDesc& hinge, float angle0 = 0, bool gravity = true, bool canSleep = true,
                       bool barIsB = false)
         : world(kGravity, settingsFor()) {
         pivot = world.addBody(staticBody(at({0, 5, 0}), boxShape({0.2f, 0.2f, 0.2f})));
