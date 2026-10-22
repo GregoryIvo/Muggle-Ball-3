@@ -886,6 +886,55 @@ void testOldLevelsAreNotSimulated() {
     check(near(scene.actorPose(1).translationPart(), {0, 0.5f, 10}), "version: and its actors stay where they were saved");
 }
 
+void testRemoveActor() {
+    // A pillar (actor 1) with a crate asleep on it (2), and a crate (3) hung in the air from a block (4) by a joint.
+    Actor pillar = brick(1, {0, 0.5f, 10}, 0x180);
+    Actor stacked = brick(2, {0, 1.5f, 10}, 0x100, 10, {box({0.5f, 0.5f, 0.5f})});
+    Actor hanging = brick(12, {5, 3, 10}, 0x100, 10, {box({0.5f, 0.5f, 0.5f})});
+    Actor holder = brick(11, {5, 1, 10}, 0x180);
+    const Level level = levelOf({board(), pillar, stacked, hanging, holder}, {fixedJoint(11, 12, {0, 2, 0}, {0, 0, 0})});
+    PhysicsScene scene(level, materials(), options(), singleThreaded());
+    run(scene, 0.5f);
+    const std::size_t bodies = scene.world().bodyCount();
+    check(!scene.world().isAwake(scene.body(2)) && scene.held(3), "remove: the crate on the pillar sleeps, the hanging one is held");
+
+    scene.removeActor(1);
+    check(scene.body(1) == 0 && scene.world().bodyCount() == bodies - 1, "remove: the actor's body is out of the world");
+    scene.removeActor(1);
+    check(scene.world().bodyCount() == bodies - 1, "remove: and removing it again does nothing");
+    scene.step(1.0f / 60);
+    check(scene.world().isAwake(scene.body(2)), "remove: what rested on it is woken by the very next step");
+    // (Wood bounces on the board with a restitution of 1, so it is the lowest point that shows it fell.)
+    const auto lowest = [&](ActorIndex actor, float seconds) {
+        float low = 1e9f;
+        for (int i = 0, steps = static_cast<int>(seconds * 60); i < steps; ++i) {
+            scene.step(1.0f / 60);
+            low = std::min(low, scene.actorPose(actor).translationPart().y);
+        }
+        return low;
+    };
+    check(lowest(2, 1.5f) < 0.6f, "remove: and falls to the floor");
+
+    scene.removeActor(4);  // what holds the hanging crate
+    check(!scene.held(3) && scene.world().isAwake(scene.body(3)) && scene.brokenJoints().empty(),
+          "remove: a piece joined to the removed one is let go and woken, and the joint is not counted as broken");
+    check(lowest(3, 1.5f) < 0.6f, "remove: and that one falls to the floor");
+
+    // The contacts of a step are there to read.
+    PhysicsScene shooting(levelOf({board(), brick(2, {0, 0.5f, 6})}), materials(), options(), singleThreaded());
+    shooting.addGameBall({0, 0.6f, 0}, {0, 0, 15});
+    bool contactWithBrick = false;
+    for (int i = 0; i < 60 && !contactWithBrick; ++i) {
+        shooting.step(1.0f / 60);
+        for (const ContactEvent& contact : shooting.contacts()) {
+            contactWithBrick = contactWithBrick || ((contact.userDataA == kGameBallData && contact.userDataB == 1) ||
+                                                    (contact.userDataB == kGameBallData && contact.userDataA == 1));
+        }
+    }
+    check(contactWithBrick && shooting.balls().empty() && shooting.touchedByBalls().empty(),
+          "contacts: the game ball's contact with the brick is in contacts(), and it is no test ball");
+}
+
 void testBallAndBodies() {
     const Level level = levelOf({board(), brick(2, {0, 0.5f, 10})});
     PhysicsScene scene(level, materials(), options(), singleThreaded());
@@ -951,6 +1000,7 @@ int main() {
     testBreakingWakesPartners();
     testKinematicBodiesAreImmovable();
     testOldLevelsAreNotSimulated();
+    testRemoveActor();
     testBallAndBodies();
     if (failures == 0) {
         std::puts("all physics scene tests passed");

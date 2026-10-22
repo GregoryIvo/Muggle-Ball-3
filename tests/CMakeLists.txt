@@ -112,3 +112,14 @@ add_executable(mb_physics_smoke physics_smoke.cpp)
 target_link_libraries(mb_physics_smoke PRIVATE mb_game)
 add_test(NAME mb_physics_smoke COMMAND mb_physics_smoke)
 set_tests_properties(mb_physics_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# Plays all converted levels with the autopilot when MB3_ASSETS points at the data; exits 77 (skipped) otherwise.
+add_executable(mb_gameplay_smoke gameplay_smoke.cpp)
+target_link_libraries(mb_gameplay_smoke PRIVATE mb_game)
+add_test(NAME mb_gameplay_smoke COMMAND mb_gameplay_smoke)
+set_tests_properties(mb_gameplay_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# The rules of play on made-up levels: bat, ball, hits, explosions, hearts, the end of a level. CPU only.
+add_executable(mb_gameplay_tests test_gameplay.cpp)
+target_link_libraries(mb_gameplay_tests PRIVATE mb_game)
+add_test(NAME mb_gameplay_tests COMMAND mb_gameplay_tests)

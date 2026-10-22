@@ -17,16 +17,18 @@ the main menu, the original's menu screens work (stage and level selection,
 options, high scores, name entry, info and credits), a level opens with the
 in-game HUD, and Escape pauses it. Sound and music are in: the level viewer plays
 the music of each level's world, and the sound library is ready for gameplay to
-play hits (see [`docs/AUDIO.md`](docs/AUDIO.md)). Not there yet: the real ball and
-bat, bricks that die and score (so a level cannot be played yet), sails (cloth),
-moving sharks and trains, cannons, shadows and reflections, and model animation.
+play hits (see [`docs/AUDIO.md`](docs/AUDIO.md)). The rules of play are in as
+`GameSession` (the bat, the ball, bricks that die and score, hearts, the end of a
+level) and are tested without a window, but nothing draws or plays them yet, so a
+level cannot be played yet. Not there yet: prizes, sails (cloth), moving sharks and
+trains, cannons, shadows and reflections, and model animation.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
 | `engine/` | Platform-neutral runtime: window and input, GPU renderer and shaders, model and image loading, physics (`PhysicsWorld` over Jolt), audio (Ogg Vorbis decoding, mixer, device), logging, paths |
-| `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, level physics (`PhysicsScene`), camera, sound library, save data; the 2D UI (bitmap fonts, string table, menu forms, the menu screens and their flow, the HUD) |
+| `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, level physics (`PhysicsScene`), the rules of play (`GameSession`), camera, sound library, save data; the 2D UI (bitmap fonts, string table, menu forms, the menu screens and their flow, the HUD) |
 | `app/` | Executable entry point: the game's front end, the level viewer (with physics and music) and the menu form viewer |
 | `platform/macos/` | App bundle metadata (the only per-platform code so far) |
 | `scripts/` | `package_macos.sh`: universal build, ad-hoc signing, Developer ID signing and notarization |

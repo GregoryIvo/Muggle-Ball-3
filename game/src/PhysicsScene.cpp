@@ -17,6 +17,7 @@ constexpr float kBallMass = 500.0f;
 constexpr float kBallMaxAngularVelocity = 60.0f;
 constexpr float kBallFloor = -30.0f;  // below this it has left the world
 constexpr double kBallMaxAge = 20.0;
+constexpr float kBallVolume = 4.0f * kPi / 3.0f * kBallRadius * kBallRadius * kBallRadius;
 
 constexpr float kLowBand = 0.3f;  // lowestPoints() gives the points this close to the lowest one
 // How often a body that fell asleep with nothing under it is woken again before it is let sleep anyway, and how many
@@ -78,6 +79,7 @@ PhysicsScene::PhysicsScene(const Level& level, const MaterialLibrary& materials,
       impactSpeed_(world_.settings().bounceThreshold) {
     if (const GameMaterial* ball = materials.find("ballMaterial")) {
         ballMaterial_ = physicsMaterial(*ball);
+        ballDensity_ = ball->density > 0 ? ball->density : 1.0f;
     } else {
         logWarn("the game material ballMaterial is missing; the test ball uses the default one");
     }
@@ -178,7 +180,8 @@ bool PhysicsScene::held(ActorIndex actor) const {
 }
 
 void PhysicsScene::wakeUnsupported() {
-    const bool look = ++steps_ % kLookEvery == 0;
+    const bool look = ++steps_ % kLookEvery == 0 || lookNow_;
+    lookNow_ = false;
     for (const ActorIndex actor : fallingActors_) {
         if (!world_.isAwake(bodies_[actor])) {
             if (wasAwake_[actor]) {  // it has fallen asleep since the last step
@@ -198,6 +201,12 @@ void PhysicsScene::wakeUnsupported() {
 
 float PhysicsScene::massOf(std::uint64_t userData) const {
     constexpr float kImmovable = std::numeric_limits<float>::infinity();
+    if (userData == kBatData) {
+        return kImmovable;
+    }
+    if (userData == kGameBallData) {
+        return kBallVolume * ballDensity_;
+    }
     if (!isActor(userData)) {
         return kBallMass;
     }
@@ -211,8 +220,12 @@ void PhysicsScene::breakJoint(std::size_t planJoint) {
 }
 
 void PhysicsScene::jointBroke(std::size_t planJoint) {
-    jointIds_[planJoint] = 0;
+    releaseJoint(planJoint);
     broken_.push_back(planJoint);
+}
+
+void PhysicsScene::releaseJoint(std::size_t planJoint) {
+    jointIds_[planJoint] = 0;
     // Nothing else wakes the pieces it held: a sleeping one would hang where the joint left it.
     const JointPlan& joint = plan_.joints[planJoint];
     for (const ActorIndex actor : {joint.actorA, joint.actorB}) {
@@ -249,11 +262,11 @@ void PhysicsScene::step(float dt) {
     world_.step(dt);
     wakeUnsupported();
 
-    for (const ContactEvent& contact : world_.takeContacts()) {
-        // Only the ball has no actor: every body of the level carries its ActorIndex.
-        if (contact.userDataA == kNoActor && contact.userDataB != kNoActor) {
+    contacts_ = world_.takeContacts();
+    for (const ContactEvent& contact : contacts_) {
+        if (contact.userDataA == kTestBallData && isActor(contact.userDataB)) {
             touched_.insert(static_cast<ActorIndex>(contact.userDataB));
-        } else if (contact.userDataB == kNoActor && contact.userDataA != kNoActor) {
+        } else if (contact.userDataB == kTestBallData && isActor(contact.userDataA)) {
             touched_.insert(static_cast<ActorIndex>(contact.userDataA));
         }
         if (breaking_ == JointBreaking::Impact) {
@@ -274,6 +287,21 @@ void PhysicsScene::step(float dt) {
         }
         return gone;
     });
+}
+
+void PhysicsScene::removeActor(ActorIndex actor) {
+    if (bodies_[actor] == 0) {
+        return;
+    }
+    world_.removeBody(bodies_[actor]);  // its joints go with it
+    bodies_[actor] = 0;
+    std::erase(fallingActors_, actor);
+    for (const std::size_t joint : jointsOfActor_[actor]) {
+        if (jointIds_[joint] != 0) {
+            releaseJoint(joint);
+        }
+    }
+    lookNow_ = true;
 }
 
 Vec3 PhysicsScene::centreOfMovables() const {
@@ -307,6 +335,42 @@ BodyId PhysicsScene::launchBall(Vec3 position, Vec3 velocity) {
         balls_.push_back({body, 0});
     }
     return body;
+}
+
+BodyId PhysicsScene::addGameBall(Vec3 position, Vec3 velocity) {
+    PhysicsShape sphere;
+    sphere.type = PhysicsShapeType::Sphere;
+    sphere.radius = kBallRadius;
+    sphere.material = ballMaterial_;
+
+    BodyDesc desc;
+    desc.pose = Mat4::translation(position);
+    desc.shapes = {sphere};
+    desc.density = ballDensity_;
+    desc.linearVelocity = velocity;
+    desc.gravity = false;
+    // In its plane it can only turn about the vertical: friction at a wall spins it, and the spin turns the next
+    // bounce.
+    desc.lockTranslation[1] = true;
+    desc.lockRotation[0] = desc.lockRotation[2] = true;
+    desc.sleepLinearVelocity = 0;  // never falls asleep
+    desc.continuousCollision = true;
+    desc.userData = kGameBallData;
+    return world_.addBody(desc);
+}
+
+BodyId PhysicsScene::addBat(Vec3 position, float radius) {
+    PhysicsShape sphere;
+    sphere.type = PhysicsShapeType::Sphere;
+    sphere.radius = radius;
+
+    BodyDesc desc;
+    desc.pose = Mat4::translation(position);
+    desc.motion = MotionType::Kinematic;
+    desc.shapes = {sphere};
+    desc.density = 1;
+    desc.userData = kBatData;
+    return world_.addBody(desc);
 }
 
 }  // namespace mb
