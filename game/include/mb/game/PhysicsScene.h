@@ -225,14 +225,14 @@ public:
     };
     std::span<const Ball> balls() const { return balls_; }
 
-    // The ball of the game: a sphere of kBallRadius with the game material "ballMaterial" and continuous collision
+    // The ball of the game: a sphere of `radius` (kBallRadius, or what a prize makes it) with the game material "ballMaterial" and continuous collision
     // detection, kept on the horizontal plane through `position` (no gravity, no vertical motion, and it turns only
     // about the vertical, up to PhysX's default cap of 7 rad/s). Its friction is the material's, 0.5: the original's
     // walls turn the ball by 11 to 18 degrees on most bounces, in both directions, which spin and friction explain
     // (docs/GAMEPLAY.md, "Corrections"). Its mass is its volume times the material's density, as PhysX gave it; the
     // rules keep its speed. Not one of balls(): nothing ages or removes it, and it carries kGameBallData. Returns its
     // body (0 if the world refused).
-    BodyId addGameBall(Vec3 position, Vec3 velocity);
+    BodyId addGameBall(Vec3 position, Vec3 velocity, float radius = kBallRadius);
     // A kinematic sphere that moves only where setKinematicTarget() puts it, and pushes what it meets: the bat. It
     // has no friction, so that it turns no ball (the combined friction is the lesser). It carries kBatData. Returns
     // its body (0 if the world refused).

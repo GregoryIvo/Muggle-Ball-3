@@ -5,8 +5,14 @@
 #include "mb/game/LevelLoader.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
+#include <cmath>
+#include <cstdlib>
 #include <exception>
+#include <random>
+#include <string>
+#include <type_traits>
 #include <utility>
 
 namespace mb_app {
@@ -20,6 +26,8 @@ constexpr double kFadeInSeconds = 0.6;
 constexpr double kCompleteHoldSeconds = 0.1;
 constexpr double kGameOverHoldSeconds = 0.45;
 constexpr double kFadeOutSeconds = 0.8;
+// A prize the harness drops starts at the far end of the board.
+constexpr float kCueDropZ = 18.0f;
 
 using Clock = std::chrono::steady_clock;
 
@@ -28,6 +36,40 @@ double millisecondsSince(Clock::time_point start) {
 }
 
 }  // namespace
+
+bool parsePrizeCue(std::string_view text, bool catchNow, PrizeCue& cue) {
+    const std::size_t at = text.find('@'), comma = text.find(',');
+    const std::optional<mb::PrizeKind> kind = mb::prizeByStem(text.substr(0, std::min(at, comma)));
+    // strtod, not std::from_chars: Apple clang 15's library has no floating-point from_chars.
+    const auto number = [](std::string_view field, auto& value) {
+        const std::string text(field);
+        char* end = nullptr;
+        const double parsed = std::strtod(text.c_str(), &end);
+        if (text.empty() || std::isspace(static_cast<unsigned char>(text.front())) || end != text.c_str() + text.size()) {
+            return false;
+        }
+        value = static_cast<std::remove_reference_t<decltype(value)>>(parsed);
+        return true;
+    };
+    PrizeCue parsed;
+    if (!kind || (at != std::string_view::npos && comma < at)) {
+        return false;
+    }
+    parsed.kind = *kind;
+    parsed.catchNow = catchNow;
+    if (at != std::string_view::npos && (!number(text.substr(at + 1, comma - at - 1), parsed.seconds) || !(parsed.seconds >= 0))) {
+        return false;
+    }
+    if (comma != std::string_view::npos) {
+        float x = 0;
+        if (!number(text.substr(comma + 1), x) || !std::isfinite(x)) {
+            return false;
+        }
+        parsed.x = x;
+    }
+    cue = parsed;
+    return true;
+}
 
 PlaySession::PlaySession(mb::Renderer& renderer, Assets& assets, const mb::SaveData& save, mb::GameAudio* audio,
                          const PlayOptions& options)
@@ -56,6 +98,9 @@ bool PlaySession::start(std::string_view levelName, const mb::GameHud& hud, cons
         mb::SessionOptions rules;
         rules.hearts = hud.lives;
         rules.score = hud.score;
+        rules.campaignLevel = hud.level;
+        // What drops differs from play to play; an autoplay (the screenshots, the scripted checks) repeats.
+        rules.prizeSeed = options_.autoplay ? static_cast<std::uint64_t>(hud.level) : std::random_device{}();
         auto session = std::make_unique<mb::GameSession>(level, assets_.materials, rules);
         progress(0.6f);
         auto scene = std::make_unique<mb::PlayScene>(models_, assets_.materials, assets_.textures, level, *session,
@@ -72,7 +117,20 @@ bool PlaySession::start(std::string_view levelName, const mb::GameHud& hud, cons
     age_ = clock_ = 0;
     ending_ = mb::LevelOutcome::Playing;
     player_ = {};
+    caption_ = {};
+    cues_ = options_.prizes;
     return true;
+}
+
+void PlaySession::giveCues() {
+    const mb::BatView& bat = session_->bat();
+    std::erase_if(cues_, [&](const PrizeCue& cue) {
+        if (session_->time() < cue.seconds || (cue.catchNow && bat.phase != mb::BatPhase::Present)) {
+            return false;
+        }
+        session_->dropPrize(cue.kind, cue.catchNow ? bat.position : mb::Vec3{cue.x.value_or(bat.position.x), 0, kCueDropZ});
+        return true;
+    });
 }
 
 mb::LevelOutcome PlaySession::update(const mb::InputEvents& input, double seconds, mb::GameHud& hud) {
@@ -81,6 +139,7 @@ mb::LevelOutcome PlaySession::update(const mb::InputEvents& input, double second
     renderer_.drawableSize(width, height);
     age_ += seconds;
     clock_ += seconds;
+    giveCues();
     session_->update(seconds, options_.autoplay ? mb::Autopilot{}.decide(*session_) : player_.read(input, width, height, camera_));
 
     const std::vector<mb::GameEvent> events = session_->takeEvents();
@@ -106,6 +165,10 @@ mb::LevelOutcome PlaySession::update(const mb::InputEvents& input, double second
 
     hud.lives = session_->hearts();
     hud.score = static_cast<int>(session_->score());
+    caption_.update(events, seconds);
+    hud.powerUps = mb::powerUpsOf(session_->activeEffects());
+    hud.caption = std::string(caption_.key());
+    hud.captionAlpha = caption_.alpha();
     updateMs_ += millisecondsSince(began);
     return ending_ != mb::LevelOutcome::Playing && age_ >= endAt_ + kFadeOutSeconds ? ending_ : mb::LevelOutcome::Playing;
 }

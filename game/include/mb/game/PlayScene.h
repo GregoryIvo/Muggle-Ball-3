@@ -4,6 +4,7 @@
 #include "mb/game/Gameplay.h"
 #include "mb/game/LevelScene.h"
 #include "mb/game/ModelCache.h"
+#include "mb/game/PrizeScene.h"
 
 #include <cstdint>
 #include <span>
@@ -31,8 +32,8 @@ Vec3 ballPosition(const BallView& ball, const BatView& bat, float lead);
 
 // A GameSession on screen: the level as the rules have it (what exploded or fell is gone, what was hit shows its
 // damage, a person or an animal that was destroyed shrinks away), the bat, the balls and the flashes where bricks
-// explode, as a list of draws. It reads the session and the events it reported; it draws nothing itself and knows no
-// window.
+// explode, as a list of draws; the prizes and their effects are PrizeScene's. It reads the session and the events it
+// reported; it draws nothing itself and knows no window.
 //
 //     PlayScene scene(cache, materials, textures, level, session, settings.bat);
 //     // every frame, after session.update():
@@ -51,7 +52,8 @@ public:
     void update(const GameSession& session, std::span<const GameEvent> events, double seconds, double lead = 0);
 
     std::span<const DrawItem> items() const { return items_; }
-    const DirectionalLight& light() const { return level_.light(); }
+    // The level's light, dimmed while the Night prize is on.
+    DirectionalLight light() const { return nightLight(level_.light(), night_); }
     const SceneReport& report() const { return level_.report(); }
 
 private:
@@ -59,10 +61,14 @@ private:
         Vec3 at{};
         Mat4 turn;  // how the ball is turned, by the distance it rolled
         bool placed = false;
+        float size = 1;  // against the plain ball, and the model it has, as of the last frame
+        BallLook look = BallLook::Plain;
     };
     struct Vanishing {
         Vec3 at{}, velocity{};
         Mat4 turn;
+        float size = 1;
+        BallLook look = BallLook::Plain;
         double age = 0;
     };
     struct Explosion {
@@ -71,7 +77,7 @@ private:
         std::uint32_t seed = 0;
     };
 
-    void addBall(Vec3 at, const Mat4& turn, float scale);
+    void addBall(Vec3 at, const Mat4& turn, float scale, BallLook look);
     void addExplosion(const Explosion& explosion);
     void addBillboard(Vec3 at, float size, Color tint, TextureHandle texture, BlendMode blend);
 
@@ -80,6 +86,8 @@ private:
     MeshHandle quad_ = 0;
     TextureHandle flashTexture_ = 0, sparkTexture_ = 0;
     Mat4 facing_;  // turns a quad to face the game's camera
+    PrizeScene prizes_;
+    float night_ = 0;  // how dark it is, 0 to 1, as of the last update
     double time_ = 0;
     std::unordered_map<int, Roll> rolls_;  // by BallView::id
     std::vector<Vanishing> vanishing_;

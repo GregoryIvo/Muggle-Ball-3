@@ -102,9 +102,10 @@ to regenerate them; that is the only thing that needs `glslangValidator` and
    $MuggleBall3 --level piratos-ostrovok --autoplay   # straight into a level, played by the autopilot, then on to the next
    $MuggleBall3 --level piratos-ostrovok         # the level viewer on a level, by name (any case) or by .json path
    $MuggleBall3 --screenshot out.png --level cowboys-napadenie [--size 1024x768] [--shapes]
-   $MuggleBall3 --level piratos-ostrovok --hud [--hud-state 3,1529,1,Cannon,Magnit]   # with the in-game HUD (also in screenshots)
+   $MuggleBall3 --level piratos-ostrovok --hud [--hud-state 3,1529,1,Cannon:6,Magnit:30]   # with the in-game HUD (also in screenshots)
    $MuggleBall3 --screenshot out.png --level piratos-ostrovok --simulate 3 --ball -5,0   # a test ball, 3 s of physics
    $MuggleBall3 --screenshot out.png --level cowboys-napadenie --autoplay --simulate 20   # 20 s played by the autopilot, no window
+   $MuggleBall3 --autoplay --level piratos-ostrovok --catch-prize magnit@2 --drop-prize bonus@3,-10   # a prize given at a time (GAMEPLAY.md 16.5)
    $MuggleBall3 --check assets/Data/Levels/piratos-po-krugy.json
    $MuggleBall3 --play-sound pirat_hit           # play a named sound (sounds.xml), wait, exit
    $MuggleBall3 --play-music Pirates --seconds 20  # one pass of Menu, Village, Pirates, Cowboys or Knights
@@ -141,7 +142,10 @@ to regenerate them; that is the only thing that needs `glslangValidator` and
    plays on nobody's behalf, so it reads and writes none of your saved options, progress and scores
    and leaves the mouse pointer alone;
    with `--screenshot` it plays `--simulate <seconds>` of the level without a window and the
-   picture is the game's own, HUD included (a flash needs a lucky time to be caught). In the window
+   picture is the game's own, HUD included (a flash needs a lucky time to be caught). `--catch-prize <stem>[@seconds]`
+   and `--drop-prize <stem>[@seconds[,x]]` (with `--autoplay`, repeatable) give the level a prize at that time of play,
+   caught at once or falling from the far end of the board, to look at the effects without waiting for the drops
+   (`<stem>` is a file of `Data/Objects/Prizes`: `bonus`, `magnit`, `tripple`...). In the window
    the log reports the frame time every few seconds. `MB3_GPU_DEBUG=1` turns on the GPU back end's validation
    layer. `--form` shows a menu form over the `background` form
    (`--no-background` leaves it out), with sample high scores; in the window Left/Right

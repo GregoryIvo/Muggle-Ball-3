@@ -128,6 +128,7 @@ SessionOptions options(TargetRule rule = TargetRule::Never) {
     SessionOptions o;
     o.levelEnd = rule;
     o.physicsSettings.threads = 0;  // on the caller, so that a run repeats exactly
+    o.rules.prizes.drops = false;   // the rules of the bricks and the ball alone; the prizes have tests/test_prizes.cpp
     return o;
 }
 

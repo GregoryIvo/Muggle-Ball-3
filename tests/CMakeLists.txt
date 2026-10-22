@@ -146,6 +146,26 @@ add_executable(mb_gameplay_tests test_gameplay.cpp)
 target_link_libraries(mb_gameplay_tests PRIVATE mb_game)
 add_test(NAME mb_gameplay_tests COMMAND mb_gameplay_tests)
 
+# The prizes: what drops, how it falls and is caught, and what each of the 28 does, on made-up levels. CPU only.
+add_executable(mb_prize_tests test_prizes.cpp)
+target_link_libraries(mb_prize_tests PRIVATE mb_game)
+add_test(NAME mb_prize_tests COMMAND mb_prize_tests)
+
+# What the prizes put on screen, without a GPU or data: the caption and its fade, the icon stack and its numbers, the night's light, and
+# the words of --drop-prize, --catch-prize and --hud-state.
+add_executable(mb_prize_view_tests test_prize_view.cpp ${PROJECT_SOURCE_DIR}/app/PlaySession.cpp ${PROJECT_SOURCE_DIR}/app/PlayerInput.cpp
+               ${PROJECT_SOURCE_DIR}/app/GameAudio.cpp ${PROJECT_SOURCE_DIR}/app/FrontEnd.cpp)
+target_include_directories(mb_prize_view_tests PRIVATE ${PROJECT_SOURCE_DIR}/app)
+target_link_libraries(mb_prize_view_tests PRIVATE mb_game)
+add_test(NAME mb_prize_view_tests COMMAND mb_prize_view_tests)
+
+# The prize table against the real game data when MB3_ASSETS points at it (files, halos, materials, captions, icons, catch scores, the
+# mean chance of a drop over the 83 levels); exits 77 (skipped) otherwise.
+add_executable(mb_prize_smoke prize_smoke.cpp)
+target_link_libraries(mb_prize_smoke PRIVATE mb_game nlohmann_json::nlohmann_json)
+add_test(NAME mb_prize_smoke COMMAND mb_prize_smoke)
+set_tests_properties(mb_prize_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
 # A level of the real game data played by the game's PlaySession on the GPU without a window: the scene (bricks hidden and
 # damaged), the bat and the ball drawn, the fades, a level won by the autopilot. Exits 77 (skipped) without MB3_ASSETS or a GPU.
 add_executable(mb_play_smoke play_smoke.cpp ${PROJECT_SOURCE_DIR}/app/PlaySession.cpp ${PROJECT_SOURCE_DIR}/app/PlayerInput.cpp

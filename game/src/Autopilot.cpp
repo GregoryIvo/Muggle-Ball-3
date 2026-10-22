@@ -29,11 +29,13 @@ float foldIntoBoard(float x) {
 
 GameInput Autopilot::decide(const GameSession& session) const {
     GameInput input;
-    input.launch = session.phase() == SessionPhase::Ready;
+    // The click launches the ball held on the bat, and lets go of the balls the Magnet holds.
+    input.launch = session.phase() == SessionPhase::Ready ||
+                   std::ranges::any_of(session.balls(), [](const BallView& ball) { return ball.stuck; });
     input.batTargetX = session.bat().position.x;
 
     const GameplayRules& rules = session.rules();
-    const float line = rules.batZ + rules.batRadius + kBallRadius;  // where the ball meets the bat
+    const float line = rules.batZ + session.batRadius() + session.ballRadius();  // where the ball meets the bat
     const BallView* coming = nullptr;
     float soonest = 0;
     for (const BallView& ball : session.balls()) {

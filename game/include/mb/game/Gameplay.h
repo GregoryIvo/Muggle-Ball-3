@@ -6,7 +6,9 @@
 #include "mb/game/Level.h"
 #include "mb/game/MaterialLibrary.h"
 #include "mb/game/PhysicsScene.h"
+#include "mb/game/Prizes.h"
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -125,6 +127,9 @@ struct GameplayRules {
     // paid 143.75, gone 144.15; level 17's gorilla: paid 1943.6, gone about 1944.0; docs/GAMEPLAY.md, "Rules settled by the
     // second study", 8) [M].
     double shrinkTime = 0.35;
+
+    // ---- Prizes (sections 7, 14 and 15)
+    PrizeRules prizes;
 };
 
 // Which objects must be destroyed to finish a level. The second study of the footage and its fact-check settled it
@@ -170,6 +175,11 @@ struct SessionOptions {
     bool ignoreUnreachable = true;
     std::optional<int> hearts;  // carried over from the level before; GameplayRules::startHearts for the first
     std::int64_t score = 0;     // likewise
+    // The level's place in the campaign, counting from 1 (the HUD's "LEVEL : n"): the prizes with a red halo only drop from
+    // PrizeRules::badFromLevel on.
+    int campaignLevel = 1;
+    // Seeds the choices of the prizes (what drops, the Earthquake's kicks), so that a session played the same way repeats.
+    std::uint64_t prizeSeed = 0x4D42335052495A45;
     PhysicsOptions physics;
     PhysicsSettings physicsSettings;
 };
@@ -188,6 +198,17 @@ enum class EventType {
     ActorFell,       // actor, position (centre of mass), points (only with fallScores), material: it left the board
     BallLost,        // ball, position, velocity: behind the bat's line (or out of the world); it shrinks away
     BallFreed,       // ball, position: it was pinned and is put back in the world (see GameplayRules::jamTime)
+    // ---- Prizes (section 15). `prize` is set on all of them but BallStuck, Blast and BallRubbered.
+    PrizeDropped,    // prize, actor (the object it came from), position (where it starts), material (the prize's)
+    PrizeCaught,     // prize, position (the orb's), points (its score; 0 for the gift of a Surprise), material (the prize's: its
+                     // dead sound is the catch's sound, prizeInfo(prize).caption the key of the caption)
+    PrizeMissed,     // prize, position: it fizzles at the near edge
+    EffectStarted,   // prize: a timed effect, a weapon, the Explosive Ball, the Earthquake or the Wind began (a second catch: no)
+    EffectEnded,     // prize: it ran out, or the bat was lost, or Normal Ball cancelled it
+    StrikeGranted,   // prize (Thunderbolt or Meteor): the strikes are for whoever implements them (step 5, wave 3)
+    BallStuck,       // ball, position: the Magnet caught it (the sound "ballMagnited")
+    Blast,           // ball, position, speed (the radius): the Explosive Ball went off
+    BallRubbered,    // ball, position: the Yo-Yo's string turned the ball back (the sound "ballRubbered")
     LifeLost,        // hearts (left): the heart is spent, 2.1 s after the last ball was lost
     BatLeft,         // the bat starts to fly off (after the last ball was lost)
     BatEntered,      // the bat swoops in with the ball on it (at the start of a level, and as the heart is spent)
@@ -207,6 +228,7 @@ struct GameEvent {
     int energy = 0;
     int points = 0;
     int hearts = 0;
+    std::optional<PrizeKind> prize;
     // The brick's game material, for the sounds (hitSound, deadSound), the explosion (exploseType) and the retexture;
     // it points into the MaterialLibrary the session was made with. Null where there is none.
     const GameMaterial* material = nullptr;
@@ -249,6 +271,8 @@ struct BallView {
     Vec3 position{};
     Vec3 velocity{};  // zero while held; the rules' own (always ballSpeed along the path), not what the solver left
     bool held = false;  // on the bat, waiting for the click
+    bool stuck = false;  // on the bat, caught by the Magnet; the click lets it go (position is where it sticks)
+    float radius = kBallRadius;  // PrizeRules::bigBallRadius and smallBallRadius change it
 };
 
 // One actor of the level as the rules see it.
@@ -271,6 +295,7 @@ struct SessionStats {
     int bricksHit = 0, bricksDestroyed = 0, actorsFallen = 0;
     int targetsOutOfPlay = 0;  // targets of either rule the ball could not get at, found so far
     int targetsLetGo = 0;      // targets that were let go because the level stood still (GameplayRules::stallSeconds)
+    int prizesDropped = 0, prizesCaught = 0, prizesMissed = 0;
 };
 
 // What the player does in a frame.
@@ -373,11 +398,40 @@ public:
 
     // One hit on an actor from something other than a ball (a bullet, dynamite, the Thunderbolt prize): the same as a
     // ball's, with `ball` -1 in the event. False if nothing counted: the actor is not damageable or is gone, shrinking
-    // away or already out of energy.
-    bool hit(ActorIndex actor, Vec3 at);
+    // away or already out of energy. `dropsPrize` false: if this hit destroys it, it leaves no prize (the bullets of the
+    // Thunderbolt and the meteors carry `disablePrize` [D]).
+    bool hit(ActorIndex actor, Vec3 at, bool dropsPrize = true);
 
     // Ends the level at once (the prize "Next Level"). Nothing happens if it is over.
     void forceLevelComplete();
+
+    // ---- Prizes (docs/GAMEPLAY.md section 15; the code is in SessionPrizes.cpp)
+    // The session drops them from the objects it destroys (PrizeRules), moves them down the board, lets the bat catch them and
+    // runs what they do. The presentation draws fallingPrizes() and the icons of activeEffects(), reads the sizes and the night,
+    // and gets PrizeDropped, PrizeCaught, PrizeMissed, EffectStarted, EffectEnded, StrikeGranted, BallStuck and Blast as events.
+    std::span<const FallingPrize> fallingPrizes() const { return fallingPrizes_; }
+    // What is going on, oldest first: the timed effects with the seconds left (the HUD counts them down, rounded up), the
+    // weapons with their shots, the Explosive Ball with its blasts. Those with prizeInfo(kind).icon go on the HUD.
+    std::span<const ActiveEffect> activeEffects() const { return effects_; }
+    const ActiveEffect* effect(PrizeKind kind) const;
+    // The weapon a click would fire: the one caught last that has shots left. The weapons are filled in by wave 3; the session
+    // only grants them (gun 12 shots, cannon 6, bazooka 7, laser 5) and counts them down.
+    std::optional<WeaponState> weapon() const;
+    int shotsLeft(WeaponType type) const;
+    // Takes a shot from weapon(); false if there is none. The weapon's effect ends with its last shot.
+    bool useShot();
+    // What the prizes have done: the ball's radius and speed (the speed prizes multiply GameplayRules::ballSpeed), the bat's
+    // collision radius and its scale against GameplayRules::batRadius (draw the bat that much wider), the night, 0 (day) to 1.
+    float ballRadius() const { return ballRadius_; }
+    float ballSpeed() const { return rules_.ballSpeed * speedFactor_; }
+    float batRadius() const { return rules_.batRadius * batScale_; }
+    float batScale() const { return batScale_; }
+    float nightLevel() const;
+    // Starts a prize falling from `from` (its x and z), as if a destroyed object had left it; returns its id. For tests and the
+    // tools; the drops of the game come from the destroyed objects. A prize that falls on the bat is caught like any other.
+    int dropPrize(PrizeKind kind, Vec3 from);
+    // Does what catching the prize does, without the fall and the score.
+    void givePrize(PrizeKind kind);
 
 private:
     struct Ball {
@@ -389,6 +443,11 @@ private:
         Vec3 heading{0, 0, 1};  // unit, in the plane: where it goes, kept for the step in which it stands still
         Vec3 anchor{};          // where it was when jamDistance last was exceeded, and when
         double anchoredAt = 0;
+        float radius = kBallRadius;
+        bool stuck = false;     // the Magnet holds it: body 0 like a held ball's, at stuckOffset from the bat's centre
+        Vec3 stuckOffset{};
+        double stuckAt = 0;
+        float phase = 0;        // of the Drunken Ball's wobble
     };
     struct Brick {
         const GameMaterial* material = nullptr;
@@ -402,6 +461,7 @@ private:
         int maxEnergy = 0;
         double explodeAt = 0;
         double removeAt = 0;  // when it has finished shrinking
+        bool noPrize = false;  // the hit that destroyed it carried disablePrize
         std::uint8_t targetFor = 0;  // bit per TargetRule
     };
     // What comes next after the last ball is lost.
@@ -447,6 +507,20 @@ private:
     std::vector<GameEvent> events_;
     bool eventsDropped_ = false;
 
+    // ---- Prizes (SessionPrizes.cpp)
+    std::array<const GameMaterial*, kPrizeKindCount> prizeMaterials_{};  // by PrizeKind
+    PrizeRandom dropRandom_, effectRandom_;  // apart, so that the Earthquake's kicks leave the drops as they were
+    int campaignLevel_;
+    std::vector<FallingPrize> fallingPrizes_;
+    std::vector<ActiveEffect> effects_;
+    int nextPrize_ = 0;
+    float speedFactor_ = 1;
+    float batScale_ = 1;
+    float ballRadius_ = kBallRadius;
+    float windDirection_ = 0;
+    double nextQuake_ = 0;
+    double ballsVanishAt_ = -1;  // after the Skull: when every ball goes
+
     void tick();
     void moveBat();
     void enterBat();
@@ -456,7 +530,7 @@ private:
     Ball* ballOf(BodyId body);
     void processContacts();
     void hitBat(Ball& ball);
-    bool hitBrick(ActorIndex actor, Vec3 at, float speed, int ball);
+    bool hitBrick(ActorIndex actor, Vec3 at, float speed, int ball, bool dropsPrize = true);
     void keepBalls();
     void loseBall(std::size_t index, Vec3 position, Vec3 velocity);
     bool freeBall(Ball& ball, Vec3 at);
@@ -473,6 +547,29 @@ private:
     void complete();
     void emit(GameEvent event);
     void refreshViews();
+
+    void initPrizes(const MaterialLibrary& materials);
+    void maybeDropPrize(Vec3 at, const GameMaterial& killed, bool allowed, ActorIndex source);
+    void spawnPrize(PrizeKind kind, Vec3 at, ActorIndex source);
+    void stepPrizes();
+    void catchPrize(const FallingPrize& prize);
+    void startEffect(PrizeKind kind);
+    void stopEffect(PrizeKind kind);
+    ActiveEffect* findEffect(PrizeKind kind);
+    void refreshBat();    // its radius changed
+    void refreshBalls();  // the radius of the balls changed
+    float batLimit() const;
+    void steerBall(Ball& ball, Vec3 at);
+    float heldDistance() const;
+    bool stickBall(Ball& ball, Vec3 at);
+    void releaseStuck(bool onlyIfHeldLong);
+    void ballHitBrick(Vec3 at);
+    void blast(Vec3 at);
+    void addMultiballs();
+    void killBat();
+    void loseEffects();
+    void shakeBodies();
+    void blowBodies();
 };
 
 }  // namespace mb
