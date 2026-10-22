@@ -36,6 +36,8 @@ public:
 
     bool start(std::string_view levelName, const mb::GameHud& hud, const Progress& progress) override;
     mb::LevelOutcome update(const mb::InputEvents& input, double seconds, mb::GameHud& hud) override;
+    bool ending() const override { return ending_ != mb::LevelOutcome::Playing; }
+    void resume() override { player_ = {}; }
     void render(mb::Renderer& renderer, std::span<const mb::Sprite> overlay) override;
 
     // The picture without a window, for screenshots: what to draw (after start()) and how to look at it.
@@ -64,7 +66,7 @@ private:
     double age_ = 0;    // seconds since the level began
     double clock_ = 0;  // the frames' time, which runs on beyond the session's steps
     mb::LevelOutcome ending_ = mb::LevelOutcome::Playing;  // how it is going to end, once it is
-    double endAt_ = 0;  // when the fade out starts
+    double endAt_ = 0;  // when the fade out starts, after the hold
     PlayerInput player_;
     double updateMs_ = 0;
 };

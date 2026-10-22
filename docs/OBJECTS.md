@@ -497,6 +497,18 @@ Build it as one predicate `isTarget(object)` so the rule is a one-line change.
 `metall` (group 12) and `dynamite`/`firework` are the next questions: whether the
 ball can break metal, and whether dynamite counts.
 
+**Footage answered it** (`GAMEPLAY.md`, "Rules settled by the second study"): H-type is
+refuted (a level did not end before its type 4 gorilla was destroyed) and H-dyn fits
+the natural ends: the required objects are the dynamic `brick`s of material type 0 and 4
+and the `tree`s. `metall` and `teleport*` objects stayed on the board at natural ends
+(and one `cannon`), so they are not required; metal is destructible (blasts, +50 each)
+but most of it survives a level. `dynamite`, `firework`, `generator*`, `spring`,
+`volcano`, `cloth` and `vibro` never decided an end that was seen; they are not required
+here (they are not bricks), and they can still be destroyed for their points. The game's
+`TargetRule::DynamicBricks` is this predicate, and the default. One caveat of the
+re-check: that kinematic bricks are *not* required rests on one ending (level 23) that
+fits either reading to a tenth of a second.
+
 ## 11. What the data cannot tell you (code-only), and checks for footage
 
 **Unknown** (the executable holds them): the ball's speed and its change per hit,

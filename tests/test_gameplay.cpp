@@ -216,6 +216,33 @@ void testPredicates() {
               !isTarget(TargetRule::Never, ObjectType::Brick, true, &shark),
           "targets: what cannot be damaged is no target, and nothing is one under Never");
 
+    // The rule of the footage, the default: dynamic bricks of material type 0 and 4, and trees. Nothing else is required, though
+    // all of it can be damaged.
+    const GameMaterial& tile = *materials().find("Tile.jpg");
+    check(SessionOptions{}.levelEnd == TargetRule::DynamicBricks && !GameplayRules{}.fallScores,
+          "required: the default is the rule the footage shows, and what falls scores nothing");
+    check(isTarget(TargetRule::DynamicBricks, ObjectType::Brick, true, &shark) &&
+              isTarget(TargetRule::DynamicBricks, ObjectType::Brick, true, &crate) &&
+              isTarget(TargetRule::DynamicBricks, ObjectType::Tree, true, &tree),
+          "required: a dynamic brick of type 0 or of type 4 and a dynamic tree");
+    check(!isTarget(TargetRule::DynamicBricks, ObjectType::Brick, false, &shark) &&
+              !isTarget(TargetRule::DynamicBricks, ObjectType::Brick, false, &tile) &&
+              !isTarget(TargetRule::DynamicBricks, ObjectType::Tree, false, &tree),
+          "required: not when kinematic or fixed, whatever the material (a shark, a ground tile, a tree)");
+    check(!isTarget(TargetRule::DynamicBricks, ObjectType::Brick, true, &tree),
+          "required: a brick must be of type 0 or 4");
+    bool others = true, damageable = true;
+    for (const ObjectType type :
+         {ObjectType::Metall, ObjectType::Cannon, ObjectType::TeleportSrc, ObjectType::TeleportDest, ObjectType::Dynamite,
+          ObjectType::Firework, ObjectType::GeneratorGood, ObjectType::GeneratorBad, ObjectType::Spring, ObjectType::Volcano,
+          ObjectType::Vibro, ObjectType::Flicker}) {
+        others = others && !isTarget(TargetRule::DynamicBricks, type, true, &shark);
+        damageable = damageable && canBeDamaged(type, &shark);
+    }
+    check(others && damageable,
+          "required: not metal, portals, cannons, dynamite, fireworks, generators, springs, volcanoes, vibros or flickers, "
+          "which a ball can still destroy");
+
     check(damageTextureIndex(tough, 3) == 2 && damageTextureIndex(tough, 2) == 1 && damageTextureIndex(tough, 1) == 0 &&
               damageTextureIndex(tough, 0) == 0 && damageTextureIndex(tough, 9) == 2,
           "texture: the index is energy - 1, held to the textures there are");
@@ -865,6 +892,51 @@ void testLevelEndRules() {
     check(forced.count(EventType::LevelComplete) == 1, "end: once");
 }
 
+// The default rule played out: a level ends with the three bricks and trees that are required gone, and every other kind of
+// object (kinematic bricks, metal, portals, a cannon, dynamite, ...) still on the board.
+void testRequiredSet() {
+    const auto thing = [](ObjectType type, Vec3 at, std::uint32_t flags, const char* material) {
+        return actor(type, at, flags, 50, {box({1, 1, 1})}, material);
+    };
+    Game g(levelOf({board(),
+                    thing(ObjectType::Brick, {-16, 1, 12}, kDynamic, "Shark.jpg"),        // 1: required
+                    thing(ObjectType::Brick, {-12, 1, 12}, kDynamic, "Crate.jpg"),        // 2: required (type 4)
+                    thing(ObjectType::Tree, {-8, 1, 12}, kDynamic, "Tree"),               // 3: required
+                    thing(ObjectType::Brick, {-4, 1, 12}, kKinematic, "Shark.jpg"),       // 4: a shark
+                    thing(ObjectType::Brick, {0, 1, 12}, kKinematic, "Tile.jpg"),         // 5: a floor tile
+                    thing(ObjectType::Metall, {4, 1, 12}, kDynamic, "Metall.jpg"),        // 6
+                    thing(ObjectType::Cannon, {8, 1, 12}, kDynamic, "Shark.jpg"),         // 7
+                    thing(ObjectType::TeleportSrc, {12, 1, 12}, kDynamic, "Shark.jpg"),   // 8
+                    thing(ObjectType::TeleportDest, {16, 1, 12}, kDynamic, "Shark.jpg"),  // 9
+                    thing(ObjectType::Dynamite, {-16, 1, 16}, kDynamic, "Shark.jpg"),     // 10
+                    thing(ObjectType::Firework, {-12, 1, 16}, kDynamic, "Shark.jpg"),     // 11
+                    thing(ObjectType::GeneratorGood, {-8, 1, 16}, kDynamic, "Shark.jpg"), // 12
+                    thing(ObjectType::Volcano, {-4, 1, 16}, kDynamic, "Shark.jpg"),       // 13
+                    thing(ObjectType::Vibro, {0, 1, 16}, kDynamic, "Shark.jpg")}),        // 14
+           options(TargetRule::DynamicBricks));
+    check(g.session.targetsLeft(TargetRule::DynamicBricks) == 3, "required: three targets of the fourteen objects");
+    for (ActorIndex i = 1; i <= 14; ++i) {
+        check(g.session.actor(i).target == (i <= 3), "required: actor " + std::to_string(i) + " is a target only if it is one of the first three");
+    }
+    g.session.hit(1, {});
+    g.session.hit(2, {});
+    g.session.hit(3, {});
+    g.session.hit(3, {});
+    g.run(0.6);
+    check(g.count(EventType::LevelComplete) == 1 && g.session.phase() == SessionPhase::Complete,
+          "required: the level is complete when the brick, the crate and the tree are gone");
+    bool standing = true;
+    for (ActorIndex i = 4; i <= 14; ++i) {
+        standing = standing && !g.session.actor(i).removed && g.session.actor(i).damageable;
+    }
+    check(standing, "required: and the other eleven are standing, and can still be destroyed");
+    const std::int64_t before = g.session.score();
+    g.session.hit(6, {});  // the metal: 50 points for the destruction, which nothing waited for
+    g.run(0.5);
+    check(g.session.actor(6).removed && g.session.score() == before + 50 && g.count(EventType::LevelComplete) == 1,
+          "required: destroying one of them still scores");
+}
+
 // A target the ball cannot get at does not count, so that a level cannot be one that never ends.
 void testUnreachableTargets() {
     const auto steel = [](Vec3 at, Vec3 half) { return brick(at, "Steel.jpg", kStatic, half); };
@@ -988,6 +1060,32 @@ void testStalledLevel() {
         check(g.session.targetsLeft(TargetRule::BrickType) == 0 && g.session.actor(1).outOfPlay,
               "reach: a bird that hangs in the air above the ball is no target");
     }
+}
+
+// A loose target that the stall rule let go of is out of play for good: the look at the loose ones, which finds it beyond the
+// board later, must not take it out of the counts a second time.
+void testLetGoTargetIsCountedOnce() {
+    // A shark high above the board, thrown out over the side wall at 3.5 units/s: in play for two seconds, beyond the wall at
+    // three and a half. The level stands still from the launch, and after half a second it is let go.
+    Actor flung = brick({14, 12, 10}, "Shark.jpg");
+    flung.body->linearVelocity = {3.5f, 14, 0};
+    SessionOptions thrown = options(TargetRule::DynamicBricks);
+    thrown.physics.start = StartState::SavedVelocities;
+    thrown.rules.stallSeconds = 0.5;
+    Game g(levelOf({board(), flung}), thrown);
+    check(g.session.targetsLeft(TargetRule::DynamicBricks) == 1 && g.session.stats().targetsOutOfPlay == 0,
+          "let go: a shark high over the board is a target in play");
+    g.ready();
+    g.step({.launch = true});
+    check(g.runUntil([&] { return g.session.stats().targetsLetGo == 1; }, 2) && g.session.phase() == SessionPhase::Complete &&
+              g.session.targetsLeft(TargetRule::DynamicBricks) == 0,
+          "let go: after half a second of play the stalled level lets it go, and is complete");
+    check(g.where(1).x < 22.0f, "let go: while it is still over the board");
+    g.run(4);
+    check(g.where(1).x > 22.5f, "let go: and later it is beyond the wall");
+    check(g.session.targetsLeft(TargetRule::DynamicBricks) == 0 && g.session.targetsLeft(TargetRule::BrickType) == 0 &&
+              g.session.stats().targetsOutOfPlay == 0 && g.session.stats().targetsLetGo == 1,
+          "let go: and was counted out once, not again when the look found it out of play");
 }
 
 // The ground of the ball's plane: the board's inside, around what stands in it.
@@ -1138,8 +1236,8 @@ void testFallenActors() {
     const GameEvent* fell = g.find(EventType::ActorFell);
     check(fell->actor == 2 && fell->position.y < -4.9f && fell->material == materials().find("Shark.jpg"),
           "fallen: the event says which, where and of what");
-    check(fell->points == 91 && g.session.score() == 20 + 91 && g.count(EventType::BrickDestroyed) == 1,
-          "fallen: it scores its 91 without an explosion (the 20 are the pillar's)");
+    check(fell->points == 0 && g.session.score() == 20 && g.count(EventType::BrickDestroyed) == 1,
+          "fallen: it scores nothing, and there is no explosion for it (the 20 are the pillar's)");
     check(g.session.scene().body(2) == 0 && g.session.actor(2).removed && g.session.stats().actorsFallen == 1,
           "fallen: and is out of the world");
     check(g.session.targetsLeft(TargetRule::BrickType) == 1 && g.count(EventType::LevelComplete) == 0,
@@ -1150,25 +1248,32 @@ void testFallenActors() {
     g.run(0.5);
     check(g.count(EventType::LevelComplete) == 1, "fallen: and the level ends when the others are destroyed");
 
-    // With the points off, it is just gone.
-    SessionOptions unscored = options();
-    unscored.rules.fallScores = false;
-    Game plain(level("Shark.jpg"), unscored);
-    plain.session.hit(1, {});
-    plain.runUntil([&] { return plain.count(EventType::ActorFell) == 1; }, 4);
-    check(plain.find(EventType::ActorFell)->points == 0 && plain.session.score() == 20, "fallen: with fallScores off, no points");
+    // With fallScores on, the other reading, it scores its brickScore.
+    SessionOptions scored = options();
+    scored.rules.fallScores = true;
+    Game paid(level("Shark.jpg"), scored);
+    paid.session.hit(1, {});
+    paid.runUntil([&] { return paid.count(EventType::ActorFell) == 1; }, 4);
+    check(paid.find(EventType::ActorFell)->points == 91 && paid.session.score() == 20 + 91 && paid.count(EventType::BrickDestroyed) == 1,
+          "fallen: with fallScores on, it scores its 91, still without an explosion");
 
     // A brick that has taken its last hit does not explode once it has fallen: here the board's edge is set at y = 2.4, so
-    // that it leaves long before its half second is up. It scores once, as a fallen piece.
+    // that it leaves long before its half second is up. It is taken out as a fallen piece, once, with no points.
     SessionOptions low = options();
     low.rules.fallLimitY = 2.4f;
     Game dying(level("Slow.jpg"), low);
     dying.session.hit(2, {});
     dying.session.hit(1, {});
     dying.run(1);
-    check(dying.count(EventType::ActorFell) == 1 && dying.count(EventType::BrickDestroyed) == 1 && dying.session.score() == 20 + 77 &&
+    check(dying.count(EventType::ActorFell) == 1 && dying.count(EventType::BrickDestroyed) == 1 && dying.session.score() == 20 &&
               !dying.session.actor(2).exploding,
-          "fallen: out of the world first, and scored once");
+          "fallen: out of the world first, without points or an explosion");
+    low.rules.fallScores = true;
+    Game dyingPaid(level("Slow.jpg"), low);
+    dyingPaid.session.hit(2, {});
+    dyingPaid.session.hit(1, {});
+    dyingPaid.run(1);
+    check(dyingPaid.count(EventType::BrickDestroyed) == 1 && dyingPaid.session.score() == 20 + 77, "fallen: and with fallScores on, scored once");
 }
 
 void testPinnedBall() {
@@ -1373,8 +1478,10 @@ int main() {
     testRollingIsNoHit();
     testCompoundBrickHitOnce();
     testLevelEndRules();
+    testRequiredSet();
     testUnreachableTargets();
     testStalledLevel();
+    testLetGoTargetIsCountedOnce();
     testBallReach();
     testHitOnOthers();
     testRemovedBrickLetsGoOfWhatItHeld();

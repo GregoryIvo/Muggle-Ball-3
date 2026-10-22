@@ -122,7 +122,9 @@ enters a score (high scores); `GameFlow` writes `progress` when a level ends, wo
 `settings.bat` for the bat's colour whenever a level starts; the front end keeps `settings` in step with the window while the
 player resizes it or goes fullscreen (not while Options is up, which holds choices not applied yet), and
 `runGame`, like the level viewer's `runWindow`, saves the window state when the window closes. The form viewer
-(`--form`) gives the menus a `SaveData` with no folder instead, so it never touches the real files.
+(`--form`) gives the menus a `SaveData` with no folder instead, so it never touches the real files, and so does `--autoplay`
+(`openSave` in `app/main.cpp`): the autopilot plays on nobody's behalf, so it runs on the defaults, kept in memory, and what it
+finishes or scores is gone when it quits.
 
 ```cpp
 mb::SaveData save(mb::userDataDir());     // once, at start-up

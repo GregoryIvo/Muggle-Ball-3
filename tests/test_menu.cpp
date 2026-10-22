@@ -880,10 +880,11 @@ void testFlow() {
     check(flow.mode() == GameFlow::Mode::Playing, "flow: once the loading form has been up for its show time, the level plays");
 
     // Pause.
-    step(esc);
-    check(flow.mode() == GameFlow::Mode::Paused, "flow: Escape pauses");
-    step(anyKey);
-    check(flow.mode() == GameFlow::Mode::Playing, "flow: any other key resumes");
+    s = step(esc);
+    check(flow.mode() == GameFlow::Mode::Paused && !s.resumed, "flow: Escape pauses");
+    s = step(anyKey);
+    check(flow.mode() == GameFlow::Mode::Playing && s.resumed, "flow: any other key resumes, and the step says so, for the frame is not the level's");
+    check(!step().resumed && !step(anyKey).resumed, "flow: the frames after it, and a key while playing, are the level's");
     step(esc);
     step(esc);
     check(flow.mode() == GameFlow::Mode::Menu && h.menu.formName() == "mainmenu", "flow: Escape again goes back to the main menu");
@@ -908,11 +909,31 @@ void testFlow() {
     released.pointer = {{{500, 400}, false}};
     step(released);
     check(flow.mode() == GameFlow::Mode::Paused, "flow: letting it go does not either");
-    step(held);
-    check(flow.mode() == GameFlow::Mode::Playing, "flow: pressing the button again does");
+    s = step(held);
+    check(flow.mode() == GameFlow::Mode::Playing && s.resumed, "flow: pressing the button again does, and the step says so");
     step(esc);
     step(esc);
     check(flow.mode() == GameFlow::Mode::Menu, "flow: back in the menus");
+
+    // A level that is over and fading out is not paused: leaving from the pause would lose how it ended.
+    clickNamed("SelectStage");
+    clickNamed("StagePiratos");
+    clickNamed("0");
+    step();
+    flow.loaded(true);
+    step();
+    step({}, 0.5);
+    check(flow.mode() == GameFlow::Mode::Playing, "flow: a third level plays");
+    flow.setLevelEnding(true);
+    step(esc);
+    check(flow.mode() == GameFlow::Mode::Playing, "flow: Escape does not pause a level that is ending");
+    flow.setLevelEnding(false);
+    step(esc);
+    check(flow.mode() == GameFlow::Mode::Paused, "flow: and does when it is not");
+    step(anyKey);
+    step(esc);
+    step(esc);
+    check(flow.mode() == GameFlow::Mode::Menu, "flow: back in the menus again");
 
     // A level that cannot be built sends the player back to its stage.
     clickNamed("SelectStage");
@@ -953,6 +974,14 @@ void testFlowLevelEnd() {
     flow.hud().lives = 1;
     flow.hud().score = 500;
     flow.hud().powerUps = {"Gun"};
+    // The level is won and fades out; the player presses Escape (twice) meanwhile. Nothing is paused or left, and the win is
+    // delivered, once.
+    UiInput esc;
+    esc.keys = {UiKey::Escape};
+    flow.setLevelEnding(true);
+    flow.update(esc, 0.016, h.layout, h.sizes);
+    flow.update(esc, 0.016, h.layout, h.sizes);
+    check(flow.mode() == GameFlow::Mode::Playing && !h.wrote("progress.json"), "end: Escape during the fade pauses nothing and leaves nothing");
     GameFlow::Step next = flow.levelEnded(LevelOutcome::Complete);
     check(next.loadLevel && *next.loadLevel == 2 && flow.level() == 2 && flow.mode() == GameFlow::Mode::Playing,
           "end: a level that is won leads straight to the next of the campaign, with no Loading form");
@@ -994,6 +1023,9 @@ void testFlowLevelEnd() {
     start(g, lost, 2);
     lost.hud().lives = 0;
     lost.hud().score = 4200;
+    lost.setLevelEnding(true);
+    lost.update(esc, 0.016, g.layout, g.sizes);
+    check(lost.mode() == GameFlow::Mode::Playing, "end: nor is a lost game paused as it fades out");
     next = lost.levelEnded(LevelOutcome::GameOver);
     check(!next.loadLevel && lost.mode() == GameFlow::Mode::Menu && g.menu.formName() == "entername" && g.widget("Score").text == "4200",
           "end: a lost game with a score for the table goes to the name entry");

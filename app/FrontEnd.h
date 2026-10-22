@@ -36,6 +36,12 @@ public:
     // Changes to `hud` (lives, points, bonuses) show at once. Returns how the level ended once it is over (its own
     // fade out included), else Playing; the front end then moves on and does not call update() again for this level.
     virtual mb::LevelOutcome update(const mb::InputEvents& input, double seconds, mb::GameHud& hud) = 0;
+    // Whether the level is over, won or lost, and fading out: update() reports how once the fade is done. The front end
+    // does not pause a level that is ending, so that its outcome is not held back, or lost by leaving from the pause.
+    virtual bool ending() const = 0;
+    // The pause is over and the level goes on. The input of the frame that ended it (a click, Space) was the player's way
+    // back, not a move in the level: update() has not been given it, and a button that is down now is no click.
+    virtual void resume() = 0;
     // Draws the scene into the window with the 2D overlay (the HUD, the pause screen) on top.
     virtual void render(mb::Renderer& renderer, std::span<const mb::Sprite> overlay) = 0;
 };
@@ -64,13 +70,17 @@ struct FrontEndOptions {
     // A level's name (a campaign's, any case): the game opens on it as if it had been chosen in the menus. Empty opens
     // the main menu; a name the campaign does not have is logged and ignored.
     std::string startLevel;
+    // Whether the system cursor is hidden and kept in the window while a level plays, because the pointer is the bat. Off
+    // where nobody plays with it (--autoplay), so that the pointer stays the player's.
+    bool hideCursor = true;
 };
 
 // The game as the player meets it: the main menu on the window, from which levels are started, played with the
 // HUD, paused and left; a level that is won leads to the next, one that is lost to the high scores. The menus show and
-// change `save` (options, bat, progress, high scores) and write it. The system cursor is hidden while a level plays. Open
-// the window with its video settings: from then on the settings follow the window as the player resizes it or goes
-// fullscreen, and Options moves the window to the choices made there. Returns when the player quits or closes the window.
+// change `save` (options, bat, progress, high scores) and write it. The system cursor is hidden while a level plays
+// (FrontEndOptions::hideCursor). Open the window with its video settings: from then on the settings follow the window as
+// the player resizes it or goes fullscreen, and Options moves the window to the choices made there. Returns when the
+// player quits or closes the window.
 int runFrontEnd(mb::Window& window, mb::Renderer& renderer, LevelSession& session, mb::SaveData& save,
                 const FrontEndOptions& options);
 

@@ -13,10 +13,10 @@ namespace mb_app {
 
 namespace {
 
-// From the footage of V1 (144.4-145.5): the picture holds for a moment after the last brick, goes dark, and the next
-// level comes up out of the dark.
+// From the footage of V1 (docs/GAMEPLAY.md): the picture holds for 0.45 s after the last required object has died
+// (0.41 to 0.54 s in the natural ends measured), goes dark, and the next level comes up out of the dark.
 constexpr double kFadeInSeconds = 0.6;
-constexpr double kEndDelaySeconds = 0.3;
+constexpr double kEndDelaySeconds = 0.45;
 constexpr double kFadeOutSeconds = 0.8;
 
 using Clock = std::chrono::steady_clock;

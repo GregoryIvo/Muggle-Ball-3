@@ -66,6 +66,11 @@ float progress(const BatView& bat) {
     return bat.phaseDuration > 0 ? static_cast<float>(std::clamp(bat.phaseTime / bat.phaseDuration, 0.0, 1.0)) : 1.0f;
 }
 
+// How far the bat is carried on past the session's last step: it moves only while it stands.
+float batCarry(const BatView& bat, float lead) {
+    return bat.phase == BatPhase::Present ? bat.velocityX * lead : 0.0f;
+}
+
 // A number in [0, 1) from two others, for the sparks: the same explosion always throws the same ones.
 float hash01(std::uint32_t seed, std::uint32_t n) {
     std::uint32_t h = seed * 2654435761u ^ (n + 1) * 40503u;
@@ -83,7 +88,7 @@ BatPose batPose(const BatView& bat, float lead) {
     const float s = progress(bat);
     switch (bat.phase) {
         case BatPhase::Present:
-            pose.position.x += bat.velocityX * lead;
+            pose.position.x += batCarry(bat, lead);
             break;
         case BatPhase::Entering: {
             const float left = (1 - s) * (1 - s) * (1 - s);  // what is left of the flight: fast at first, then settling
@@ -122,6 +127,13 @@ float heldBallScale(const BatView& bat) {
         default:
             return 0;
     }
+}
+
+Vec3 ballPosition(const BallView& ball, const BatView& bat, float lead) {
+    if (ball.held) {
+        return ball.position + Vec3{batCarry(bat, lead), 0, 0};
+    }
+    return ball.position + ball.velocity * lead;
 }
 
 PlayScene::PlayScene(ModelCache& cache, const MaterialLibrary& materials, const TextureIndex& textures,
@@ -189,7 +201,7 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
         return std::ranges::none_of(session.balls(), [&](const BallView& ball) { return ball.id == entry.first; });
     });
     for (const BallView& ball : session.balls()) {
-        const Vec3 at = ball.position + ball.velocity * static_cast<float>(lead);
+        const Vec3 at = ballPosition(ball, session.bat(), static_cast<float>(lead));
         Roll& roll = rolls_[ball.id];
         float scale = 1;
         if (ball.held) {

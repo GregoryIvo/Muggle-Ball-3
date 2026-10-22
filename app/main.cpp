@@ -3,7 +3,9 @@
 //   MuggleBall3                              open the game: the main menu, from which levels are played, with sound;
 //                                            options, bat, progress and scores are kept between runs (MB3_USER_DATA
 //                                            picks the folder)
-//   MuggleBall3 --autoplay                   the game with the Autopilot playing the levels (watch it, or test the flow)
+//   MuggleBall3 --autoplay                   the game with the Autopilot playing the levels (watch it, or test the flow); it
+//                                            plays on nobody's behalf: it reads and writes none of the player's files
+//                                            (options, progress, scores) and leaves the system cursor alone
 //   MuggleBall3 --level <name> --autoplay    the game opened on this level, played by the Autopilot, then on to the next
 //   MuggleBall3 --level <name|path.json>     open the level viewer on this level (file stem or name, any case, or a path)
 //   MuggleBall3 --screenshot out.png [--size WxH] [--level ...] [--shapes] [--camera ex,ey,ez,tx,ty,tz,fov]
@@ -293,13 +295,20 @@ int runScreenshot(const Options& options) {
     return 0;
 }
 
+// The player's files: options, progress and scores, in the folder mb::userDataDir() names. --autoplay plays on nobody's
+// behalf, so it neither reads nor writes them: it runs on the defaults, kept in memory (a SaveData with no folder saves
+// nothing), and what it remembers is gone with the process.
+mb::SaveData openSave(const Options& options) {
+    return mb::SaveData(options.autoplay ? fs::path() : mb::userDataDir());
+}
+
 // --autoplay with --screenshot: the level played for --simulate seconds by the Autopilot, with no window, then drawn as it
 // is in the game, hearts, points and level number included.
 int runPlayScreenshot(const Options& options) {
     mb::Renderer renderer;
     mb::logInfo("GPU backend: {}", renderer.backendName());
     Assets assets;
-    const mb::SaveData save(mb::userDataDir());
+    const mb::SaveData save = openSave(options);
     const std::string name = assets.catalog.levels()[startLevel(assets, options)].name;
     mb_app::PlaySession session(renderer, assets, save, nullptr, {.autoplay = true});
     mb::GameHud hud;
@@ -385,8 +394,8 @@ private:
 // The game: the main menu on a window, levels played from it, with sound, and what the player keeps saved.
 int runGame(const Options& options) {
     Assets assets;
-    mb::SaveData save(mb::userDataDir());
-    mb::logInfo("Save data: {}", save.directory().string());
+    mb::SaveData save = openSave(options);
+    mb::logInfo("Save data: {}", options.autoplay ? "none (--autoplay)" : save.directory().string());
     int windowWidth = 0, windowHeight = 0;
     windowSize(options, save, windowWidth, windowHeight);
     mb::Window window("Muggle Ball 3", windowWidth, windowHeight, save.settings.fullscreen);
@@ -399,6 +408,7 @@ int runGame(const Options& options) {
     mb_app::FrontEndOptions frontEnd;
     frontEnd.language = options.form.language;
     frontEnd.startLevel = options.level;
+    frontEnd.hideCursor = !options.autoplay;  // nobody plays with the pointer
     mb_app::connectAudio(frontEnd, audio);
     FrameStats stats("update");
     frontEnd.events.frame = [&, audioFrame = std::move(frontEnd.events.frame)] {

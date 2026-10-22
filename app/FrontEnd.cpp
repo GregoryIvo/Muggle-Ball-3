@@ -46,6 +46,7 @@ public:
           session_(session),
           save_(save),
           events_(options.events),
+          hideCursor_(options.hideCursor),
           assets_(renderer, mb::assetRoot(), options.language),
           campaign_(mb::Campaign::load(assets_.root() / "Data" / "xml" / "levels.json")),
           menu_([this](std::string_view name) { return assets_.loadForm(name); }, campaign_, save, hooksFor(window, options.hooks)),
@@ -85,6 +86,7 @@ public:
             followWindow();
             int width = 0, height = 0;
             renderer_.drawableSize(width, height);
+            flow_.setLevelEnding(flow_.mode() == mb::GameFlow::Mode::Playing && session_.ending());
             const mb::GameFlow::Step step =
                 flow_.update(toUiInput(input), seconds, mb::UiLayout::fit(width, height), assets_.imageSizes());
             if (step.quit) {
@@ -100,7 +102,9 @@ public:
                 window_.setTextInput(wantsText);
                 textInput = wantsText;
             }
-            if (flow_.mode() == mb::GameFlow::Mode::Playing) {
+            if (step.resumed) {
+                session_.resume();  // the level does not see the frame in which the pause ended
+            } else if (flow_.mode() == mb::GameFlow::Mode::Playing) {
                 const mb::LevelOutcome outcome = session_.update(input, seconds, flow_.hud());
                 if (const mb::GameFlow::Step next = flow_.levelEnded(outcome); next.loadLevel) {
                     loadLevel(*next.loadLevel);  // straight on: the fade out was the loading screen
@@ -171,7 +175,7 @@ private:
         if (now == Mode::Menu && events_.menuShown) {
             events_.menuShown();
         }
-        window_.setCursorHidden(now == Mode::Playing);  // the pointer is the bat while a level plays
+        window_.setCursorHidden(hideCursor_ && now == Mode::Playing);  // the pointer is the bat while a level plays
     }
 
     void loadLevel(int index) {
@@ -223,6 +227,7 @@ private:
     LevelSession& session_;
     mb::SaveData& save_;
     FrontEndEvents events_;
+    bool hideCursor_;
     mb::UiAssets assets_;
     mb::Campaign campaign_;
     mb::Menu menu_;

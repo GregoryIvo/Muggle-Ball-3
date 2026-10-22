@@ -134,7 +134,9 @@ bool isTarget(TargetRule rule, ObjectType type, bool dynamic, const GameMaterial
         return false;
     }
     switch (rule) {
-        case TargetRule::DynamicBricks: return dynamic && (type == ObjectType::Brick || type == ObjectType::Tree);
+        case TargetRule::DynamicBricks:
+            return dynamic && (type == ObjectType::Tree ||
+                               (type == ObjectType::Brick && (material->brickType == 0 || material->brickType == 4)));
         case TargetRule::BrickType: return type == ObjectType::Brick && material->brickType == 0;
         case TargetRule::Never: return false;
     }
@@ -784,7 +786,7 @@ void GameSession::releaseTargets(bool onlyLoose) {
     };
     if (onlyLoose) {
         std::erase_if(loose_, [&](ActorIndex actor) {
-            if (bricks_[actor].removed) {
+            if (bricks_[actor].removed || bricks_[actor].outOfPlay) {  // gone, or let go of by letGoOfStalled()
                 return true;
             }
             if (inPlay(actor)) {

@@ -136,7 +136,9 @@ to regenerate them; that is the only thing that needs `glslangValidator` and
    `--camera ex,ey,ez,tx,ty,tz,fov` overrides the camera and `--size` sets the
    window or image size. `--autoplay` is the game, not the viewer: the autopilot (a player that needs
    no hands: it launches at once and keeps the bat where the ball will meet it) plays the levels,
-   with `--level <name>` from that level on and without it from the ones you pick in the menus;
+   with `--level <name>` from that level on and without it from the ones you pick in the menus; it
+   plays on nobody's behalf, so it reads and writes none of your saved options, progress and scores
+   and leaves the mouse pointer alone;
    with `--screenshot` it plays `--simulate <seconds>` of the level without a window and the
    picture is the game's own, HUD included (a flash needs a lucky time to be caught). In the window
    the log reports the frame time every few seconds. `MB3_GPU_DEBUG=1` turns on the GPU back end's validation

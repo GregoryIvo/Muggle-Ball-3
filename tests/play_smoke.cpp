@@ -1,8 +1,8 @@
 // Plays levels of the real game data in $MB3_ASSETS on the GPU without a window: the game's PlaySession (the rules, the
 // scene, the autopilot) and the pieces under it. Checks that a level builds and is drawn (the bat, the ball, the bricks), that
 // a brick that is destroyed leaves the picture and one that is damaged shows its damage texture, that the picture fades in,
-// and that a level the autopilot wins is reported as won once its fade out is over. Skips (exit code 77) without the data
-// or a GPU.
+// that a level the autopilot wins holds for 0.45 s and is reported as won once its fade out is over, and that the click that
+// ends a pause does not launch the ball. Skips (exit code 77) without the data or a GPU.
 
 #include "PlaySession.h"
 #include "mb/engine/Image.h"
@@ -18,6 +18,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -140,30 +141,75 @@ void testPlaying(mb::Renderer& renderer, mb_app::Assets& assets) {
     check(colours(picture()) > 500, "play: and the picture is still a level");
 }
 
+// The autopilot wins a level. It loses balls like any player and how long it takes depends on every bounce, which differ with
+// the compiler's flags (a build with -O1 and the address sanitizer plays another game than the Release one), so the level
+// is the quickest of the real ones, and the game cannot end for want of hearts or of time: what is checked is what the
+// session does around the win.
 void testWinning(mb::Renderer& renderer, mb_app::Assets& assets) {
     const mb::SaveData save{fs::path()};
     mb_app::PlaySession session(renderer, assets, save, nullptr, {.autoplay = true});
     mb::GameHud hud;
-    hud.lives = 2;
+    hud.lives = 99;
     hud.score = 1000;  // brought from the level before
     check(session.start("piratos-postroika", hud, [](float) {}), "win: a level starts");
+    check(!session.ending(), "win: and is not ending");
 
     mb::InputEvents nobody;
     mb::LevelOutcome outcome = mb::LevelOutcome::Playing;
-    double seconds = 0, completeAt = -1;
-    while (outcome == mb::LevelOutcome::Playing && seconds < 400) {
+    double seconds = 0, completeAt = -1, darkAt = -1;
+    while (outcome == mb::LevelOutcome::Playing && seconds < 1500) {
         outcome = session.update(nobody, kFrame, hud);
         seconds += kFrame;
         if (completeAt < 0 && session.rules()->phase() == mb::SessionPhase::Complete) {
             completeAt = seconds;
+            check(session.ending(), "win: the session is ending as soon as the last target is gone");
+        } else if (completeAt >= 0 && darkAt < 0 && session.darkness() > 0) {
+            darkAt = seconds;
         }
     }
     check(outcome == mb::LevelOutcome::Complete, "win: the autopilot wins the level");
-    check(completeAt > 0 && seconds - completeAt > 1.0 && seconds - completeAt < 1.6,
-          "win: and it is reported a second or so after the last brick (a moment's hold, then the fade out)");
+    check(completeAt > 0 && darkAt - completeAt > 0.4 && darkAt - completeAt < 0.5,
+          "win: the picture holds for 0.45 s after the last target is gone, and then goes dark");
+    check(completeAt > 0 && seconds - completeAt > 1.2 && seconds - completeAt < 1.35,
+          "win: and it is reported 1.25 s after the last target (the hold, then the fade out)");
     check(session.darkness() == 1, "win: the picture is dark by then");
-    check(hud.score > 1000 && hud.lives >= 0 && hud.lives <= 2, "win: the points were added to those brought in, and the hearts are the rules'");
+    check(hud.score > 1000 && hud.lives >= 0 && hud.lives <= 99, "win: the points were added to those brought in, and the hearts are the rules'");
     check(session.rules()->targetsLeft(session.rules()->levelEnd()) == 0, "win: no target is left");
+}
+
+// The click that ends a pause is not the level's: the front end does not give the session its frame, and tells it the pause is
+// over (resume()), so a button that is down then launches nothing, while a press after it does.
+void testResume(mb::Renderer& renderer, mb_app::Assets& assets) {
+    const mb::SaveData save{fs::path()};
+    mb::GameHud hud;
+    hud.lives = 2;
+    const auto launched = [&](bool afterPause) {
+        mb_app::PlaySession session(renderer, assets, save, nullptr, {});
+        session.start("piratos-ostrovok", hud, [](float) {});
+        mb::InputEvents nobody;
+        for (int i = 0; i < 60; ++i) {  // the bat is in and the ball waits for the click
+            session.update(nobody, kFrame, hud);
+        }
+        check(session.rules()->phase() == mb::SessionPhase::Ready, "resume: the ball waits on the bat");
+        if (afterPause) {
+            session.resume();
+        }
+        mb::InputEvents down;
+        down.leftButton = true;
+        down.pointer = {{500, 400, true}};
+        session.update(down, kFrame, hud);
+        session.update(down, kFrame, hud);
+        const bool launchedByHeldButton = !session.rules()->balls()[0].held;
+        mb::InputEvents up;
+        up.pointer = {{500, 400, false}};
+        session.update(up, kFrame, hud);
+        session.update(down, kFrame, hud);
+        return std::pair{launchedByHeldButton, !session.rules()->balls()[0].held};
+    };
+    const auto [heldBefore, pressBefore] = launched(false);
+    check(heldBefore && pressBefore, "resume: without a pause a button going down launches the ball");
+    const auto [heldAfter, pressAfter] = launched(true);
+    check(!heldAfter && pressAfter, "resume: a button that is down as the pause ends launches nothing, and the next press does");
 }
 
 }  // namespace
@@ -191,6 +237,7 @@ int main() {
         testScene(*renderer, assets);
         testPlaying(*renderer, assets);
         testWinning(*renderer, assets);
+        testResume(*renderer, assets);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "FAIL: exception: %s\n", e.what());
         return 1;

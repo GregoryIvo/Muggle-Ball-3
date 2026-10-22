@@ -79,7 +79,8 @@ void testLaunch() {
 void testButtonHeldAtTheStart() {
     const Camera camera;
     mb_app::PlayerInput player;
-    // The button that chose the level is still down when it begins: moving the mouse with it down is not a click.
+    // The button that chose the level, or the one that ended the pause (PlaySession::resume() starts the player's input over,
+    // as a new level does), is still down when play begins: moving the mouse with it down is not a click.
     InputEvents moving = at(500, 500, true);
     moving.pointer = {{500, 500, true}, {505, 500, true}};
     check(!player.read(moving, kWidth, kHeight, camera).launch, "held: a button already down at the start launches nothing");

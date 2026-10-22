@@ -6,9 +6,10 @@
 // level, that the saved volumes were set at the start and follow the slider, that the pause freezes the sound and the
 // way back to the menus unfreezes it, and that settings changed in Options are in the files afterwards. The stand-in
 // also ends its levels as told: a level won leads to the next of the campaign with the hearts and points carried and the
-// progress saved, a lost game to the name entry and the high scores, and the system cursor is hidden while a level plays.
-// Needs a window system and a GPU, and skips (exit code 77) without them or without the data. The window is on screen
-// for a few seconds.
+// progress saved, a lost game to the name entry and the high scores, and the system cursor is hidden while a level plays
+// (and left alone when the front end is told not to, as --autoplay does). The key that ends the pause is not the level's,
+// and a level that is over and fading out cannot be paused. Needs a window system and a GPU, and skips (exit code 77) without
+// them or without the data. The window is on screen for a few seconds.
 
 #include "FrontEnd.h"
 #include "FrontEndAudio.h"
@@ -64,26 +65,33 @@ public:
         ++starts;
         return true;
     }
-    mb::LevelOutcome update(const mb::InputEvents&, double, mb::GameHud& hud) override {
+    mb::LevelOutcome update(const mb::InputEvents& input, double, mb::GameHud& hud) override {
         hud.score += 10;
         hud.lives = 1;
         ++updates;
+        spaceSeen = spaceSeen || std::ranges::find(input.keysPressed, static_cast<std::uint32_t>(SDLK_SPACE)) != input.keysPressed.end();
         cursorHiddenWhilePlaying = cursorHiddenWhilePlaying && !SDL_CursorVisible();
+        cursorHiddenEver = cursorHiddenEver || !SDL_CursorVisible();
         {
             std::lock_guard lock(mutex);
             lastHud = hud;
         }
-        return static_cast<mb::LevelOutcome>(ending.exchange(static_cast<int>(mb::LevelOutcome::Playing)));
+        return static_cast<mb::LevelOutcome>(outcome.exchange(static_cast<int>(mb::LevelOutcome::Playing)));
     }
+    bool ending() const override { return fading; }
+    void resume() override { ++resumes; }
     void render(mb::Renderer& renderer, std::span<const mb::Sprite> overlay) override {
         overlaySprites = overlay.size();
         ++renders;
         renderer.renderToWindow({}, {}, {}, overlay);
     }
 
-    std::atomic<int> starts{0}, updates{0}, renders{0};
-    std::atomic<int> ending{static_cast<int>(mb::LevelOutcome::Playing)};  // what the next update() reports
+    std::atomic<int> starts{0}, updates{0}, renders{0}, resumes{0};
+    std::atomic<int> outcome{static_cast<int>(mb::LevelOutcome::Playing)};  // what the next update() reports
+    std::atomic<bool> fading{false};                                       // the level is over and fading out
+    std::atomic<bool> spaceSeen{false};  // update() was given a frame with Space in it
     std::atomic<bool> cursorHiddenWhilePlaying{true};
+    std::atomic<bool> cursorHiddenEver{false};
     std::atomic<std::size_t> overlaySprites{0};
     std::mutex mutex;
     std::vector<std::string> started;      // the levels built, in order
@@ -281,6 +289,7 @@ int main() {
 
         std::atomic<bool> finished{false};
         std::atomic<int> peakVoices{0}, updatesAtPause{-1}, updatesWhilePaused{-1}, updatesResumed{-1};
+        std::atomic<int> updatesDuringFade{-1}, updatesAfterFade{-1};
         std::atomic<bool> musicFollowedSlider{false}, settingsWritten{false}, cursorShownWhilePaused{false};
         std::atomic<bool> progressSaved{false}, scoreSaved{false};
         std::thread sampler([&] {  // a click's sound is a voice of the mixer for a moment
@@ -331,8 +340,18 @@ int main() {
             std::this_thread::sleep_for(300ms);
             updatesResumed = session.updates.load();
 
+            // The level is over and fading out: Escape does not pause it (the outcome would be held back, or lost by
+            // leaving from the pause), and the outcome that follows is delivered.
+            session.fading = true;
+            key(SDLK_ESCAPE);
+            std::this_thread::sleep_for(300ms);
+            updatesDuringFade = session.updates.load();
+            std::this_thread::sleep_for(300ms);
+            updatesAfterFade = session.updates.load();
+            session.fading = false;
+
             // The level is won: the next of the campaign is built at once, and the progress is saved.
-            session.ending = static_cast<int>(mb::LevelOutcome::Complete);
+            session.outcome = static_cast<int>(mb::LevelOutcome::Complete);
             check(waitFor([&] { return session.starts == 2; }), "a level that is won is followed by the next");
             progressSaved = waitFor(
                 [&] { return mb::readTextFile(userData.path / "progress.json").value_or("").find(first) != std::string::npos; }, 3000ms);
@@ -340,7 +359,7 @@ int main() {
             check(waitFor([&] { return session.updates > updatesAtNext + 5; }), "and it plays");
 
             // The game is lost: the name entry, then the table with the new line.
-            session.ending = static_cast<int>(mb::LevelOutcome::GameOver);
+            session.outcome = static_cast<int>(mb::LevelOutcome::GameOver);
             std::this_thread::sleep_for(500ms);
             typeText("Gregory");
             std::this_thread::sleep_for(100ms);
@@ -382,7 +401,30 @@ int main() {
               "the system cursor is hidden while a level plays and back for the pause and the menus");
         check(updatesAtPause >= 0 && updatesWhilePaused == updatesAtPause, "the level stops updating while paused");
         check(updatesResumed > updatesWhilePaused, "any key resumes it");
+        check(session.resumes == 1 && !session.spaceSeen, "the level was told the pause was over, and never saw the Space that ended it");
+        check(updatesAfterFade > updatesDuringFade && updatesDuringFade >= updatesResumed,
+              "Escape while the level fades out pauses nothing: it goes on updating");
         check(session.renders > 10 && session.overlaySprites > 12, "the level was drawn with the HUD (a heart and two lines of text) over it");
+
+        // Told not to hide the cursor (as --autoplay does), the front end leaves the pointer alone while a level plays.
+        {
+            FakeSession watched;
+            mb_app::FrontEndOptions plain;
+            plain.lockLevels = false;
+            plain.hideCursor = false;
+            plain.startLevel = first;
+            std::thread closer([&] {
+                waitFor([&] { return watched.updates > 20; });
+                SDL_Event quit{};
+                quit.type = SDL_EVENT_QUIT;
+                push(quit);
+            });
+            mb_app::runFrontEnd(*window, *renderer, watched, save, plain);
+            closer.join();
+            check(watched.starts == 1 && watched.updates > 20, "a game opened on a level by name plays it");
+            check(!watched.cursorHiddenEver && SDL_CursorVisible() && !SDL_GetWindowMouseGrab(window->handle()),
+                  "and with the front end told not to, the cursor stays visible and the mouse free");
+        }
 
         // Sound.
         check(hoverSounds > 0 && downSounds > 0, "the menu sounds were asked for through the hook");

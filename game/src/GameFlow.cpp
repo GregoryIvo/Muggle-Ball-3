@@ -40,7 +40,7 @@ GameFlow::Step GameFlow::update(const UiInput& input, double seconds, const UiLa
             for (const UiInput::Pointer& sample : input.pointer) {
                 pointerDown_ = sample.down;
             }
-            if (has(input.keys, UiKey::Escape)) {
+            if (has(input.keys, UiKey::Escape) && !levelEnding_) {
                 mode_ = Mode::Paused;
             }
             break;
@@ -56,6 +56,7 @@ GameFlow::Step GameFlow::update(const UiInput& input, double seconds, const UiLa
                 menu_.open("MainMenu");
             } else if (resume) {
                 mode_ = Mode::Playing;
+                step.resumed = true;
             }
             break;
         }
@@ -65,6 +66,7 @@ GameFlow::Step GameFlow::update(const UiInput& input, double seconds, const UiLa
 
 void GameFlow::startGame(int level) {
     level_ = level;
+    levelEnding_ = false;
     hud_ = GameHud{};
     hud_.lives = GameplayRules{}.startHearts;
     hud_.level = level + 1;
@@ -95,6 +97,7 @@ GameFlow::Step GameFlow::levelEnded(LevelOutcome outcome) {
     if (mode_ != Mode::Playing || outcome == LevelOutcome::Playing) {
         return step;
     }
+    levelEnding_ = false;
     const std::string* name = campaign_.levelName(level_);
     const std::string level = name ? *name : std::string();
     const int score = hud_.score;

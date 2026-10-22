@@ -25,6 +25,9 @@ struct BatPose {
 BatPose batPose(const BatView& bat, float lead = 0);
 // How much of the ball held on the bat is shown, 0 to 1: it appears as the bat lands.
 float heldBallScale(const BatView& bat);
+// Where a ball is drawn, `lead` seconds past the session's last step: one in flight carries on with its velocity, one held
+// on the bat goes with the bat (the lead batPose() gives it), so that it does not shimmer against the bat as it moves.
+Vec3 ballPosition(const BallView& ball, const BatView& bat, float lead);
 
 // A GameSession on screen: the level as the rules have it (what exploded or fell is gone, what was hit shows its
 // damage), the bat, the balls and the flashes where bricks explode, as a list of draws. It reads the session and the

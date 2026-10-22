@@ -375,6 +375,22 @@ void testPlaySounds() {
         check(audio.sounds.empty(), "these events make no sound");
     }
 
+    // A name a material uses that sounds.xml does not have (wood_hit, wood_dead, cannon_hit, cannon_dead and mikrofon_hit in the
+    // real data, docs/AUDIO.md) is silent, and warned about once however often it comes up.
+    GameMaterial barrel;
+    barrel.hitSound = "wood_hit";
+    barrel.deadSound = "wood_dead";
+    {
+        WarningCapture warnings;
+        for (int i = 0; i < 3; ++i) {
+            play(EventType::BrickHit, 0, &barrel);
+            check(audio.sounds.empty(), "a hit with a sound the game does not know is silent");
+            play(EventType::BrickDestroyed, 0, &barrel, 4);
+            check(audio.sounds.empty(), "so is the destruction");
+        }
+        check(warnings.count == 2, "and each of the two names is warned about once, not every time");
+    }
+
     play(EventType::BoardHit, -20);
     check(audio.sounds.size() == 1 && audio.sounds[0].params.pan == -1, "a sound on the left wall is all left");
     play(EventType::BoardHit, 40);

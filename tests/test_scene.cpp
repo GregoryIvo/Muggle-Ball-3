@@ -769,6 +769,30 @@ void testBatPose() {
     check(!batPose(bat).visible, "bat: absent");
 }
 
+// A ball is carried on past the session's last step: a ball in flight with its velocity, a held one with the bat.
+void testBallPosition() {
+    BatView bat;
+    bat.position = {5, 0.6f, -21};
+    bat.phase = BatPhase::Present;
+    bat.velocityX = 10;
+    BallView flying;
+    flying.position = {1, 0.6f, 2};
+    flying.velocity = {3, 0, 12};
+    check(near(ballPosition(flying, bat, 0.01f), {1.03f, 0.6f, 2.12f}) && near(ballPosition(flying, bat, 0), flying.position),
+          "ball: in flight it goes on with its velocity");
+
+    BallView held;
+    held.held = true;
+    held.position = {bat.position.x - 0.75f, 0.6f, -17.3f};
+    check(near(ballPosition(held, bat, 0.01f), {held.position.x + 0.1f, 0.6f, -17.3f}),
+          "ball: held, it is carried on with the bat, 0.1 further at 10 units/s and 0.01 s");
+    check(near(ballPosition(held, bat, 0.01f).x - held.position.x, batPose(bat, 0.01f).position.x - batPose(bat, 0).position.x),
+          "ball: by exactly the lead the bat has, so that it does not move against it");
+    bat.phase = BatPhase::Entering;
+    bat.phaseDuration = 0.7;
+    check(near(ballPosition(held, bat, 0.01f), held.position), "ball: and as the bat comes in, which is not carried on, it stays");
+}
+
 void testRotationAxis() {
     // As rotationX, rotationY and rotationZ turn: a quarter turn about z takes x to y.
     check(near(transformPoint({1, 0, 0}, Mat4::rotationAxis({0, 0, 1}, kPi / 2)), {0, 1, 0}) &&
@@ -812,6 +836,7 @@ int main() {
     testCatalog();
     testCamera();
     testBatPose();
+    testBallPosition();
     testRotationAxis();
     if (failures == 0) {
         std::puts("all scene tests passed");
