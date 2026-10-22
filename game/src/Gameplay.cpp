@@ -11,9 +11,6 @@ namespace mb {
 
 namespace {
 
-constexpr std::uint32_t kAllFrozen = Body::kFrozenPosX | Body::kFrozenPosY | Body::kFrozenPosZ | Body::kFrozenRotX |
-                                     Body::kFrozenRotY | Body::kFrozenRotZ;
-
 // Bodies are looked at for having left the board this often (in steps): a body falls for a while before it is a
 // concern, and the look costs one pose per dynamic body.
 constexpr std::uint64_t kFallCheckEvery = 6;
@@ -24,6 +21,9 @@ constexpr float kBatLeaveSlack = 0.3f;
 constexpr float kFreedSlant = 0.3f;
 
 constexpr int kRuleCount = 2;  // the TargetRules that name targets
+// The exploseType of the materials that have no splinters to break into: people, animals and the rest of the objects that
+// shrink away (shrinksAway()).
+constexpr int kShrinkExploseType = 5;
 // How often (in steps) the targets that are loose bodies are looked at again for being out of the ball's reach.
 constexpr std::uint64_t kReachCheckEvery = 30;
 
@@ -129,14 +129,16 @@ bool canBeDamaged(ObjectType type, const GameMaterial* material) {
     }
 }
 
-bool isTarget(TargetRule rule, ObjectType type, bool dynamic, const GameMaterial* material) {
+bool shrinksAway(const GameMaterial* material) {
+    return material != nullptr && material->exploseType == kShrinkExploseType;
+}
+
+bool isTarget(TargetRule rule, ObjectType type, const GameMaterial* material) {
     if (!canBeDamaged(type, material)) {
         return false;
     }
     switch (rule) {
-        case TargetRule::DynamicBricks:
-            return dynamic && (type == ObjectType::Tree ||
-                               (type == ObjectType::Brick && (material->brickType == 0 || material->brickType == 4)));
+        case TargetRule::Bricks: return type == ObjectType::Brick || type == ObjectType::Tree;
         case TargetRule::BrickType: return type == ObjectType::Brick && material->brickType == 0;
         case TargetRule::Never: return false;
     }
@@ -209,14 +211,12 @@ GameSession::GameSession(const Level& level, const MaterialLibrary& materials, c
         Brick& brick = bricks_[ref.index];
         brick.type = ref.owner->type;
         brick.material = ref.owner->material.empty() ? nullptr : materials.find(ref.owner->material);
-        const std::optional<Body>& body = ref.actor->body;
-        brick.dynamic = body && !body->kinematic() && (body->flags & kAllFrozen) != kAllFrozen;
         brick.damageable = canBeDamaged(brick.type, brick.material);
         if (brick.damageable) {
             brick.energy = brick.maxEnergy = brick.material->brickEnergy;
         }
         for (int rule = 0; rule < kRuleCount; ++rule) {
-            if (mb::isTarget(static_cast<TargetRule>(rule), brick.type, brick.dynamic, brick.material)) {
+            if (mb::isTarget(static_cast<TargetRule>(rule), brick.type, brick.material)) {
                 brick.targetFor |= 1u << rule;
                 ++targetsLeft_[rule];
             }
@@ -283,6 +283,9 @@ ActorStatus GameSession::actor(ActorIndex actor) const {
     const Brick& brick = bricks_[actor];
     status.damageable = brick.damageable && !brick.removed;
     status.exploding = brick.exploding;
+    if (brick.shrinking) {
+        status.shrink = static_cast<float>(std::clamp(1.0 - (brick.removeAt - time_) / rules_.shrinkTime, 0.0, 1.0));
+    }
     status.removed = brick.removed;
     status.energy = brick.energy;
     status.maxEnergy = brick.maxEnergy;
@@ -339,6 +342,7 @@ void GameSession::tick() {
     processContacts();
     keepBalls();
     explodeDue();
+    removeShrunk();
     if (ticks_ % kFallCheckEvery == 0) {
         removeFallen();
     }
@@ -534,7 +538,7 @@ bool GameSession::hit(ActorIndex actor, Vec3 at) {
 
 bool GameSession::hitBrick(ActorIndex actor, Vec3 at, float speed, int ball) {
     Brick& brick = bricks_[actor];
-    if (!brick.damageable || brick.removed || brick.exploding) {
+    if (!brick.damageable || brick.removed || brick.exploding || brick.shrinking) {
         return false;
     }
     --brick.energy;
@@ -700,7 +704,7 @@ void GameSession::explodeDue() {
             continue;
         }
         exploding_.erase(exploding_.begin() + static_cast<std::ptrdiff_t>(i));
-        const Brick& brick = bricks_[actor];
+        Brick& brick = bricks_[actor];
         stalled_ = 0;
         score_ += brick.material->brickScore;
         ++stats_.bricksDestroyed;
@@ -711,6 +715,25 @@ void GameSession::explodeDue() {
         event.points = brick.material->brickScore;
         event.material = brick.material;
         emit(event);
+        if (shrinksAway(brick.material)) {
+            brick.exploding = false;
+            brick.shrinking = true;
+            brick.removeAt = time_ + rules_.shrinkTime;
+            shrinking_.push_back(actor);
+        } else {
+            removeBrick(actor);
+        }
+    }
+}
+
+void GameSession::removeShrunk() {
+    for (std::size_t i = 0; i < shrinking_.size();) {
+        const ActorIndex actor = shrinking_[i];
+        if (bricks_[actor].removeAt > time_ + fixedStep_ * 1e-3) {
+            ++i;
+            continue;
+        }
+        shrinking_.erase(shrinking_.begin() + static_cast<std::ptrdiff_t>(i));
         removeBrick(actor);
     }
 }
@@ -719,7 +742,7 @@ void GameSession::removeFallen() {
     for (const ActorIndex actor : dynamicActors_) {
         Brick& brick = bricks_[actor];
         const BodyId body = scene_.body(actor);
-        if (body == 0) {
+        if (body == 0 || brick.shrinking) {  // (one that is shrinking is paid for and nearly gone)
             continue;
         }
         const Vec3 at = scene_.world().pose(body).translationPart();
@@ -749,7 +772,7 @@ void GameSession::removeFallen() {
 void GameSession::removeBrick(ActorIndex actor) {
     Brick& brick = bricks_[actor];
     brick.removed = true;
-    brick.exploding = false;
+    brick.exploding = brick.shrinking = false;
     for (int rule = 0; rule < kRuleCount && !brick.outOfPlay; ++rule) {
         if ((brick.targetFor >> rule) & 1u) {
             --targetsLeft_[rule];

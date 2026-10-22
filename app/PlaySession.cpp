@@ -13,10 +13,12 @@ namespace mb_app {
 
 namespace {
 
-// From the footage of V1 (docs/GAMEPLAY.md): the picture holds for 0.45 s after the last required object has died
-// (0.41 to 0.54 s in the natural ends measured), goes dark, and the next level comes up out of the dark.
+// From the footage of V1 (docs/GAMEPLAY.md): the picture holds for 0.1 s after the last required object is gone (a person
+// or an animal has shrunk away by then), goes dark, and the next level comes up out of the dark. What the picture does
+// as the game is lost was not measured: it holds 0.45 s [?].
 constexpr double kFadeInSeconds = 0.6;
-constexpr double kEndDelaySeconds = 0.45;
+constexpr double kCompleteHoldSeconds = 0.1;
+constexpr double kGameOverHoldSeconds = 0.45;
 constexpr double kFadeOutSeconds = 0.8;
 
 using Clock = std::chrono::steady_clock;
@@ -88,10 +90,10 @@ mb::LevelOutcome PlaySession::update(const mb::InputEvents& input, double second
         }
         if (ending_ == mb::LevelOutcome::Playing && event.type == mb::EventType::LevelComplete) {
             ending_ = mb::LevelOutcome::Complete;
-            endAt_ = age_ + kEndDelaySeconds;
+            endAt_ = age_ + kCompleteHoldSeconds;
         } else if (ending_ == mb::LevelOutcome::Playing && event.type == mb::EventType::GameOver) {
             ending_ = mb::LevelOutcome::GameOver;
-            endAt_ = age_ + kEndDelaySeconds;
+            endAt_ = age_ + kGameOverHoldSeconds;
         }
     }
 

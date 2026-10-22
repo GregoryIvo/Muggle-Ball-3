@@ -121,6 +121,20 @@ void LevelScene::hide(ActorIndex actor) {
     }
 }
 
+void LevelScene::setScale(ActorIndex actor, float scale, Vec3 about) {
+    if (actor >= actorStart_.size() - 1) {
+        return;
+    }
+    const Mat4 shrink = Mat4::translation(-about) * Mat4::scaling({scale, scale, scale}) * Mat4::translation(about);
+    for (std::uint32_t i = actorStart_[actor]; i < actorStart_[actor + 1]; ++i) {
+        if (scale == 1) {
+            scaled_.erase(actorItems_[i]);
+        } else {
+            scaled_.insert_or_assign(actorItems_[i], shrink);
+        }
+    }
+}
+
 void LevelScene::setDamage(ActorIndex actor, int index) {
     if (actor >= actorStart_.size() - 1 || index < 0) {
         return;
@@ -141,6 +155,9 @@ void LevelScene::appendDrawn(std::vector<DrawItem>& out) const {
     for (std::size_t i = 0; i < items_.size(); ++i) {
         if (i >= levelItems_ || !hidden_[i]) {
             out.push_back(items_[i]);
+            if (const auto scaled = scaled_.empty() ? scaled_.end() : scaled_.find(i); scaled != scaled_.end()) {
+                out.back().world = out.back().world * scaled->second;
+            }
         }
     }
 }

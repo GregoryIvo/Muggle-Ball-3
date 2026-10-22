@@ -30,8 +30,9 @@ float heldBallScale(const BatView& bat);
 Vec3 ballPosition(const BallView& ball, const BatView& bat, float lead);
 
 // A GameSession on screen: the level as the rules have it (what exploded or fell is gone, what was hit shows its
-// damage), the bat, the balls and the flashes where bricks explode, as a list of draws. It reads the session and the
-// events it reported; it draws nothing itself and knows no window.
+// damage, a person or an animal that was destroyed shrinks away), the bat, the balls and the flashes where bricks
+// explode, as a list of draws. It reads the session and the events it reported; it draws nothing itself and knows no
+// window.
 //
 //     PlayScene scene(cache, materials, textures, level, session, settings.bat);
 //     // every frame, after session.update():
@@ -82,6 +83,7 @@ private:
     double time_ = 0;
     std::unordered_map<int, Roll> rolls_;  // by BallView::id
     std::vector<Vanishing> vanishing_;
+    std::vector<ActorIndex> shrinking_;  // paid for and shrinking, until the session has removed them
     std::vector<Explosion> explosions_;
     std::vector<DrawItem> items_;
 };

@@ -17,7 +17,8 @@ namespace mb {
 
 // A level ready to draw: the draw items, the physics shape wireframes and the light. Textures animate
 // (update()) and whatever the physics can move follows it (follow(), followShapes()); the rest stands
-// as the level saved it. A game also takes bricks out of the picture (hide()) and shows them damaged (setDamage()).
+// as the level saved it. A game also takes bricks out of the picture (hide()), shows them damaged (setDamage()) and
+// shrinking away (setScale()).
 class LevelScene {
 public:
     // `physics` says which actors can move; it is not kept.
@@ -35,6 +36,9 @@ public:
 
     // Takes an actor out of the picture for good: a brick that exploded, a piece that fell off the board.
     void hide(ActorIndex actor);
+    // Draws an actor at `scale` of its size about the world point `about`, like a person who is shrinking away. It goes on
+    // following the physics, so a moving actor needs the call again with where it has got to; 1 draws it whole.
+    void setScale(ActorIndex actor, float scale, Vec3 about);
     // Shows an actor in its damage state `index` (damageTextureIndex() in Gameplay.h): each of its draws that has damage
     // textures (SceneDraw::damageTextures) takes the one at that place. Other draws and states whose texture is
     // missing stay as they are.
@@ -80,6 +84,7 @@ private:
     // textures of the damage states of the draws that have some.
     std::vector<std::uint32_t> actorStart_, actorItems_;
     std::vector<bool> hidden_;  // by item
+    std::unordered_map<std::size_t, Mat4> scaled_;  // by item: what setScale() does to the draw after it is placed
     std::unordered_map<std::size_t, std::vector<TextureHandle>> damage_;  // by item
     std::vector<MovingLines> movingLines_;
     DirectionalLight light_;

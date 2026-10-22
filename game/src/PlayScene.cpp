@@ -160,8 +160,12 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
                 }
                 break;
             case EventType::BrickDestroyed:
-                level_.hide(event.actor);
-                explosions_.push_back({event.position, 0, event.actor * 977u + static_cast<std::uint32_t>(event.time * 1000)});
+                if (shrinksAway(event.material)) {  // no flash: the footage has none on a pirate
+                    shrinking_.push_back(event.actor);
+                } else {
+                    level_.hide(event.actor);
+                    explosions_.push_back({event.position, 0, event.actor * 977u + static_cast<std::uint32_t>(event.time * 1000)});
+                }
                 break;
             case EventType::ActorFell:
                 level_.hide(event.actor);
@@ -175,6 +179,15 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
                 break;
         }
     }
+    std::erase_if(shrinking_, [&](ActorIndex actor) {
+        const ActorStatus status = session.actor(actor);
+        if (status.removed) {
+            level_.hide(actor);
+        } else {
+            level_.setScale(actor, 1 - status.shrink, session.centreOf(actor));
+        }
+        return status.removed;
+    });
     for (Vanishing& ball : vanishing_) {
         ball.age += seconds;
     }
