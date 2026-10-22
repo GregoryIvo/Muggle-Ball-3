@@ -1016,6 +1016,7 @@ void testYoYo() {
     }
     check(frames > 400 && g.count(EventType::BallLost) == 0, "yoyo: the ball stayed in play for seven seconds");
     check(farthest <= 7.0f + 0.5f && farthest > 5.0f, "yoyo: and never farther from the bat than the string, " + num(farthest));
+    check(g.count(EventType::BallRubbered) > 0, "yoyo: each time the string turns the ball back it reports it (the sound ballRubbered)");
     g.run(0.6);
     check(g.session.effect(PrizeKind::YoYo) == nullptr && g.count(EventType::EffectEnded, PrizeKind::YoYo) == 1, "yoyo: it ends after 7.5 s");
 
@@ -1029,6 +1030,7 @@ void testYoYo() {
                                                           free.session.balls()[0].position.z - free.bat().z));
     }
     check(farthestFree > 15.0f, "yoyo: without it the ball goes where it likes, " + num(farthestFree));
+    check(free.count(EventType::BallRubbered) == 0, "yoyo: and nothing turns it back");
 }
 
 void testWall() {

@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <functional>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -326,7 +327,12 @@ void testPlaySounds() {
       {"name": "bat_dead", "samples": [{"file": "batdead.ogg"}]},
       {"name": "endlevel", "samples": [{"file": "end.ogg"}]},
       {"name": "box_hit", "samples": [{"file": "boxhit.ogg"}]},
-      {"name": "box_dead", "samples": [{"file": "boxdead.ogg"}]}]})";
+      {"name": "box_dead", "samples": [{"file": "boxdead.ogg"}]},
+      {"name": "night", "samples": [{"file": "night.ogg"}]},
+      {"name": "money", "samples": []},
+      {"name": "ballMagnited", "samples": [{"file": "magnited.ogg"}]},
+      {"name": "ballRubbered", "samples": [{"file": "rubbered.ogg"}]},
+      {"name": "explosion_ball", "samples": [{"file": "blast.ogg"}]}]})";
     RecordingAudio audio;
     SoundLibrary library(audio, SoundCatalog::parse(soundsJson, kMusicsJson, kSounds, kMusics), 3);
     PlaySounds sounds(library);
@@ -335,6 +341,7 @@ void testPlaySounds() {
     box.deadSound = "box_dead";
     GameMaterial silent;  // names no sounds
 
+    std::optional<PrizeKind> prize;
     const auto play = [&](EventType type, float x = 0, const GameMaterial* material = nullptr, int points = 0) {
         audio.sounds.clear();
         GameEvent event;
@@ -342,6 +349,7 @@ void testPlaySounds() {
         event.position = {x, 0.6f, 5};
         event.material = material;
         event.points = points;
+        event.prize = prize;
         sounds.play(event);
     };
     const auto heard = [&]() { return audio.sounds.size() == 1 ? audio.sounds[0].file.filename().string() : std::string("-"); };
@@ -374,6 +382,36 @@ void testPlaySounds() {
         play(quiet);
         check(audio.sounds.empty(), "these events make no sound");
     }
+
+    // The prizes: a catch makes the prize material's dead sound, and the effects their own.
+    GameMaterial nightPrize, moneyPrize;
+    nightPrize.deadSound = "night";
+    moneyPrize.deadSound = "money";  // a sound with no file, as the Bonus's and the Bazooka's
+    prize = PrizeKind::Night;
+    play(EventType::PrizeCaught, -10, &nightPrize, 280);
+    check(heard() == "night.ogg" && audio.sounds[0].params.pan == -0.5f, "a prize that is caught makes its material's dead sound, panned by where it was");
+    prize = PrizeKind::Bonus;
+    play(EventType::PrizeCaught, 0, &moneyPrize, 777);
+    check(audio.sounds.empty(), "a prize whose sound has no file is caught in silence");
+    prize = PrizeKind::NextLevel;
+    play(EventType::PrizeCaught, 0, &nightPrize, 120);
+    check(audio.sounds.empty(), "the star's sound is the level's, which LevelComplete plays");
+    prize = PrizeKind::Night;
+    play(EventType::PrizeCaught);
+    check(audio.sounds.empty(), "a catch that names no material is silent");
+    prize.reset();
+    play(EventType::BallStuck);
+    check(heard() == "magnited.ogg", "the Magnet catches a ball");
+    play(EventType::BallRubbered);
+    check(heard() == "rubbered.ogg", "the Yo-Yo's string turns the ball back");
+    play(EventType::Blast);
+    check(heard() == "blast.ogg", "the Explosive Ball goes off");
+    prize = PrizeKind::Magnet;
+    for (const EventType quiet : {EventType::PrizeDropped, EventType::PrizeMissed, EventType::EffectStarted, EventType::EffectEnded, EventType::StrikeGranted}) {
+        play(quiet, 0, &nightPrize);
+        check(audio.sounds.empty(), "a prize that appears, is missed or runs out makes no sound of its own");
+    }
+    prize.reset();
 
     // A name a material uses that sounds.xml does not have (wood_hit, wood_dead, cannon_hit, cannon_dead and mikrofon_hit in the
     // real data, docs/AUDIO.md) is silent, and warned about once however often it comes up.

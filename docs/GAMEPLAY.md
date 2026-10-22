@@ -650,3 +650,59 @@ When the **bat is lost** (the last ball, or the Skull) every effect of the bat a
 `mb_gameplay_smoke --seconds 900`, each level played as the n-th of the campaign, the prizes on, the autopilot as before (the bat under the ball, no aim, 99 hearts; it clicks to let go of the Magnet and catches prizes only when they fall on the bat by chance):
 
 **71 of 83** levels finished (60 without the prizes): 54 by destroying every target and 17 only because the stall rule let go of the last few (it was 46 and 14), 12 not finished (6 knights', 5 village's and 1 pirates' boards, 1 to 116 targets left; 11 were still destroying bricks in the last 40 s, the 12th, knight-nazad-k-mame, with one target left, stood still for 37 s: slow, not stuck, as before). 2,063 prizes dropped (25 a level, as 14.7 % of about 170 destroyed objects), 709 caught (a third: the bat is under the ball, not under the prize) and 1,339 missed. The Next Level star fell in 66 of the 83 levels, was caught in 25 and ended 25 of the 71 finished (a player who goes for it ends most, section 14.4); the other 46 ended as before. The look at what the ball can reach puts 194 targets out of play (it was 151): a quake or a wind that throws a piece out of reach takes it out of the count, which is the rule working as meant. Three balls were freed from a pin in as many levels. Nothing broke: the ball keeps its speed (the session's, which the speed prizes move) and its plane after every frame, in every level.
+
+## 16. Prizes on screen and in sound (step 5, stage 2)
+
+How the picture and the sound show section 15. The code is `game/PrizeScene.h` (the orbs, the halos, the flashes, the models of the balls, the Magnet's horseshoe, the Wall's rope, the Yo-Yo's string, the night's light), `game/PrizeHud.h` (the icons and their numbers, the caption) and `game/PlaySounds.cpp`, called from `PlayScene`, `PlaySession` and `drawHud` at a few places. `[M]` is measured from the footage (`reference/gameplay`), `[D]` read from the data, `[I]` a choice made where both are silent; every constant is named in `PrizeScene.cpp`, `Hud.cpp` and `PrizeHud.h` with its tag.
+
+### 16.1 The orbs
+
+| what | in the game |
+|---|---|
+| the model | the prize's mesh, `Data/Meshes/prizes/<stem>.glb` (`Prizes/<stem>.x` in the file `Data/Objects/Prizes/<stem>.json`), drawn with its own textures or its material's (`bonus` has none: its mesh's `Dollar.jpg`); the 28 meshes have their own sizes (a coin of 1.85, the Surprise's box and balloons 5.9 tall) and their origins in different places (the floor under a coin, the middle of the Magnet), so the middle of the model's box goes to the orb's centre (y 1.0) and no model goes through the floor [I]. It turns about the vertical at 2.5 rad/s, each prize a little out of step with the next [I] |
+| the halo | the two sprites of `Particles/Oreolblue.xml` (good) or `Oreolred.xml` (bad) [D]: the Oreol, a star that faces the camera and turns at 3.5 rad/s (`Oreols/02.png`, orange; red: `11.png`), drawn additively and behind the model, and the OreolShadow, a mark lying on the floor 0.1 up that turns the other way at 1.5 rad/s (`07.png` blue, red: `09.png`); both about 4 u across, about twice the orb as the frames of V1 134.4 look [I] |
+| caught | the halo swells and fades over 0.3 s where the orb was [I] |
+| missed | at z -21: a ring of light that spreads and 8 blue sparks that fly out, 0.25 s (the footage: a small blue sparkle ring of about 0.2 s) [M, F8] |
+| Explosive Ball | `Blast`: the orange star with the blue arrows (`Oreols/02.png` and `03.png`), the blast's diameter (2 x 2.5) in 0.75 s [M, F35] |
+
+### 16.2 The caption and the icons
+
+The caption is the prize's `languages.json` string (`PrizeInfo::caption`), green, in the bookworm font at 28 on the line of the points, centred, with a dark shadow: **strong for 1 s and gone at 2.2 s, fading in a straight line between** [M, section 6]. A catch replaces the caption on show and starts it over; the gift of a Surprise (a catch worth no points) does not: the footage shows "Surprise" and nothing else [M]. It is cleared with the powers when a level is won.
+
+The icons (`Hud.cpp`, `PrizeHud.h`): one for each effect in force that has one (`PrizeInfo::icon`: Big Ball, Weak Ball, Power Ball, Drunken Ball, Magnet, Wall, Night and the four weapons), oldest first down the right edge, with the number to its right in the same green: `ceil(timeLeft)` for the timed ones (so it reads 20, 19, ... and is 1 for the last second) and the shots left for a weapon [M, V2 61.6-69.6, 87-124]. The ring is the icon's own, green for a good prize and red for a bad one (`mb_prize_smoke` checks that each icon's ring has the colour of its prize's halo); nothing draws a ring. The number is drawn at font size 24, left-aligned 4 reference pixels right of the 48-pixel icon, and 34 pixels of room are kept for it at the edge (1024x768 units), which moves the icons left of where the placeholder HUD had them [I]. Instant prizes, the Explosive Ball, the Earthquake, the Wind and the Yo-Yo have no icon [M].
+
+### 16.3 What the effects look like
+
+| effect | picture |
+|---|---|
+| bat size | the bat's model is drawn `batScale()` times its size, all of it (the collision sphere is round); it was 24 % wider per catch in the footage (section 7) |
+| ball size | the ball and its shadow are drawn `radius / 0.6` times their size, and roll by the distance over their radius |
+| Power Ball, Explosive Ball | `ball-powerfull.x` (a spiked ball) and `ball-explosive.x` (a bomb with a fuse), each as wide as the plain ball's model (the first is 1.9 across, the second 1.3, the plain ball 1.3) [D, I]. The footage has the Power Ball dark and spiked (V2 125.9) and the Explosive Ball looking unchanged [M, weak]; the data has the model, so it is drawn |
+| Magnet | the `Magnit` frame of `bat.x`, a horseshoe red on the left and blue on the right, on the bat as long as the effect lasts (V1 1309.4); a ball it holds goes with the bat |
+| Wall | the rope, `wall.x` (the box of `Bats/wall.XML`: 41.4 x 3.2 x 0.7 at z -20), with its `Bonus-Stena` texture, rises out of the floor in 0.3 s and sinks in the last 0.3 s [I] |
+| Yo-Yo | a string from the top of the bat to each ball in flight, green at the bat to blue at the ball (the `rubber` particle's `colour1` and `colour2` [D]), 0.22 u wide [M, V2 125-131] |
+| Multiball, Drunken Ball | the extra balls and the wobbling path are the session's |
+| Night | the scene's light is dimmed to 0.38 of itself at full night (`nightLevel()`), and the sky, the halos and the flashes, which have no light, to 0.49 [M, section 14.3]; the HUD, drawn over it, is not dimmed |
+| Earthquake, Wind | the session throws the loose pieces about, and that is all there is to see; the camera does not shake [M] |
+| the weapons | **not drawn yet**: the barrels (`Pulemet-*`, `Pushka`, `Bazuka-*`, `lazer-*`) are frames of `bat.x` that the game moves: in its `Common` animation each grows from a tenth of its size to full size in 0.6 s, recoils and shrinks again, and the glTF files keep that animation in `extras.animations` (`ASSET_FORMATS.md`). The picture of a weapon comes with the firing, which needs it |
+
+### 16.4 Sounds
+
+| event | sound |
+|---|---|
+| `PrizeCaught` | the prize material's `dead` sound, panned by where it was caught [D]: `bigball`, `night`, `life`... (`money`, the Bonus's, and `bazuka` name sounds with no file in `sounds.xml`: those catches are silent, as in the original). The Next Level star's `endlevel` is the level's own, which `LevelComplete` plays in the same step. A Surprise plays its own and its gift's |
+| `BallStuck` | `ballMagnited` |
+| `BallRubbered` (new: the Yo-Yo's string turned the ball back) | `ballRubbered` |
+| `Blast` | `explosion_ball` |
+| `PrizeDropped`, `PrizeMissed`, `EffectStarted`, `EffectEnded`, `StrikeGranted` | none: the data names no sound for them |
+
+### 16.5 Looking at it without waiting for the drops
+
+`MuggleBall3 --autoplay [--level <name>] [--drop-prize stem[@seconds[,x]]] [--catch-prize stem[@seconds]]` (repeatable; with `--screenshot out.png --simulate <seconds>` the level is played that long and drawn): `--drop-prize` lets the prize fall from the far end of the board (z 18) at the bat's x, or at `x`, after `seconds` of play; `--catch-prize` puts it on the bat when the bat is there, and it is caught at once (score, caption, sound, effect). `stem` is the file name in `Data/Objects/Prizes` (`bonus life scull incbat decbat speedup slowdown bigball smallball powerfull commonball explosiveball drunken tripple magnit pingpong wall night gun cannon bazuka lazer flash meteor quake wind random endlevel`, any case). The autopilot repeats (its prize seed is the level's number), so the same command draws the same picture. `--hud-state lives,score,level[,icon[:number]...]` takes numbers too (`Cannon:6`).
+
+### 16.6 Still open
+
+- The weapons' barrels (above).
+- The halo's real size, the orbs' spin and the models' height above the floor are not measured.
+- The icons' own place in the original's HUD (the numbers sit right of the icon at the right edge in the footage; the icon's exact x is a guess).
+- Whether the Explosive Ball is the bomb in the original's footage (it looks like the plain ball in the one case seen).

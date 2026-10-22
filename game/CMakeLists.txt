@@ -16,6 +16,9 @@ add_library(mb_game
   src/Autopilot.cpp
   src/ModelCache.cpp
   src/LevelScene.cpp
+  src/Billboard.cpp
+  src/PrizeScene.cpp
+  src/PrizeHud.cpp
   src/PlayScene.cpp
   src/PlaySounds.cpp
   src/LevelCatalog.cpp

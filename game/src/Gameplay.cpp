@@ -49,6 +49,7 @@ std::string_view eventName(EventType type) {
         case EventType::StrikeGranted: return "StrikeGranted";
         case EventType::BallStuck: return "BallStuck";
         case EventType::Blast: return "Blast";
+        case EventType::BallRubbered: return "BallRubbered";
         case EventType::LifeLost: return "LifeLost";
         case EventType::BatLeft: return "BatLeft";
         case EventType::BatEntered: return "BatEntered";

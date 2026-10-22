@@ -9,18 +9,34 @@
 #include "mb/game/ModelCache.h"
 #include "mb/game/PlayScene.h"
 #include "mb/game/PlaySounds.h"
+#include "mb/game/PrizeHud.h"
 #include "mb/game/SaveData.h"
 
 #include <memory>
 #include <optional>
 #include <span>
+#include <string_view>
+#include <vector>
 
 namespace mb_app {
 
 inline constexpr mb::Color kClearColor{0.05f, 0.05f, 0.1f, 1.0f};  // only visible where a level has no sky
 
+// A prize the harness gives the level at a time of play, for looking at the effects without waiting for the drops (--drop-prize and
+// --catch-prize; docs/GAMEPLAY.md section 16).
+struct PrizeCue {
+    mb::PrizeKind kind = mb::PrizeKind::Bonus;
+    double seconds = 0;     // of play
+    bool catchNow = false;  // it appears on the bat and is caught at once; else it falls from the far end of the board
+    std::optional<float> x;  // where along the board it falls from; over the bat if not given
+};
+// "bazuka", "bazuka@12.5" or "bazuka@12.5,-8": a prize by the stem of its file in Data/Objects/Prizes (any case), the seconds of
+// play to wait after an @ and, after a comma, where along the board it falls from. False if the text is not that.
+bool parsePrizeCue(std::string_view text, bool catchNow, PrizeCue& cue);
+
 struct PlayOptions {
     bool autoplay = false;  // the Autopilot plays: it moves the bat and launches (--autoplay)
+    std::vector<PrizeCue> prizes;  // given to every level that is played
 };
 
 // The game's level, for the front end: builds the scene and the rules of a level, plays it and draws it. The cursor is
@@ -52,6 +68,8 @@ public:
     double takeUpdateMillis();
 
 private:
+    void giveCues();
+
     mb::Renderer& renderer_;
     Assets& assets_;
     const mb::SaveData& save_;
@@ -62,6 +80,8 @@ private:
     std::unique_ptr<mb::GameSession> session_;
     std::unique_ptr<mb::PlayScene> scene_;
     std::optional<mb::PlaySounds> sounds_;
+    mb::PrizeCaption caption_;
+    std::vector<PrizeCue> cues_;  // not yet given
 
     double age_ = 0;    // seconds since the level began
     double clock_ = 0;  // the frames' time, which runs on beyond the session's steps

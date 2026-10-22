@@ -49,6 +49,9 @@ public:
     std::span<const DrawItem> items() const { return items_; }
     // Appends what is to be shown: the draws of the actors that are not hidden, then the test balls'.
     void appendDrawn(std::vector<DrawItem>& out) const;
+    // Appends the draws of one actor as they stand, hidden or not, for a scene whose actors are props that the game places
+    // itself (the bat's frames, the prizes' models): each draw's world is the model's own, to be placed by the caller.
+    void appendActor(ActorIndex actor, std::vector<DrawItem>& out) const;
     // The draws of one ball at the origin (the game's ball.x), for a game that places its own balls.
     std::span<const DrawItem> ballItems() const { return ballItems_; }
     std::span<const DebugLine> shapeLines() const { return shapeLines_; }

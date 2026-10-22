@@ -443,6 +443,11 @@ void GameSession::steerBall(Ball& ball, Vec3 at) {
             const float away = dot(ball.heading, radial);
             if (away > 0) {
                 ball.heading = ball.heading - radial * (2 * away);
+                GameEvent event;
+                event.type = EventType::BallRubbered;
+                event.ball = ball.id;
+                event.position = at;
+                emit(event);
             }
         }
     }

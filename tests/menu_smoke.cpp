@@ -377,20 +377,29 @@ void checkDrawing(const fs::path& root, Game& game) {
     hud.lives = 5;
     hud.score = 768915;
     hud.level = 62;
-    hud.powerUps = {"Cannon", "Magnit"};
+    hud.powerUps = {{"Cannon", 6}, {"Magnit", 30}};
     const mb::UiAssets::Image* heart = assets.image("Icons/Heart.png");
+    const mb::UiAssets::Image* cannon = assets.image("Icons/Cannon.png");
+    const mb::UiAssets::Image* magnet = assets.image("Icons/Magnit.png");
     for (const auto [width, height] : {std::pair{1024, 768}, {800, 600}, {1600, 768}}) {
         std::vector<mb::Sprite> sprites;
         mb::drawHud(assets, hud, width, height, sprites);
         const float scale = static_cast<float>(height) / 768.0f;
         std::vector<const mb::Sprite*> hearts;
         float leftEnd = 0, rightStart = 1e9f, rightEnd = 0, textTop = 1e9f, textBottom = 0;
-        int icons = 0;
+        int icons = 0, digits = 0;
+        float iconLeft = 1e9f, iconRight = 0, digitsLeft = 1e9f, digitsRight = 0;
         for (const mb::Sprite& s : sprites) {
             if (heart && s.texture == heart->texture) {
                 hearts.push_back(&s);
-            } else if (s.x > static_cast<float>(width) - 80 * scale && s.y < 200 * scale) {
+            } else if ((cannon && s.texture == cannon->texture) || (magnet && s.texture == magnet->texture)) {
                 ++icons;
+                iconLeft = std::min(iconLeft, s.x);
+                iconRight = std::max(iconRight, s.x + s.width);
+            } else if (s.x > static_cast<float>(width) - 120 * scale && s.y < 200 * scale) {
+                ++digits;  // the glyphs of "6" and "30" (the text is drawn with one sprite for each, and one for each shadow, if any)
+                digitsLeft = std::min(digitsLeft, s.x);
+                digitsRight = std::max(digitsRight, s.x + s.width);
             } else if (s.y > static_cast<float>(height) - 60 * scale) {
                 const float half = static_cast<float>(width) / 2;
                 if (s.x < half) {
@@ -411,12 +420,48 @@ void checkDrawing(const fs::path& root, Game& game) {
                   "HUD " + size + ": the hearts are 40 px, at the top left, 44 px apart");
         }
         check(icons == 2, "HUD " + size + ": two bonus icons at the top right");
+        check(iconLeft > static_cast<float>(width) - 120 * scale && iconRight < static_cast<float>(width) - 40 * scale, "HUD " + size + ": the icons stand left of the right edge, with room for their numbers");
+        check(digits == 3 && digitsLeft >= iconRight && digitsRight <= static_cast<float>(width), "HUD " + size + ": the numbers 6 and 30 are drawn right of their icons, inside the target");
         check(leftEnd > 100 * scale && leftEnd < 260 * scale, "HUD " + size + ": the points text starts at the left and is about 220 px wide");
         check(std::fabs(rightEnd - (static_cast<float>(width) - 15 * scale)) < 3.0f && rightStart > static_cast<float>(width) - 200 * scale,
               "HUD " + size + ": the level text ends 15 px from the right edge of the target");
         check(std::fabs((textTop + textBottom) / 2 - (static_cast<float>(height) - 18 * scale)) < 2 * scale,
               "HUD " + size + ": the text's line is centred 18 px above the bottom edge");
     }
+    // The caption of a prize, green and centred on the line of the points, as strong as the HUD says.
+    for (const auto [width, height] : {std::pair{1024, 768}, {800, 600}, {1600, 768}}) {
+        mb::GameHud plain = hud, captioned = hud;
+        plain.powerUps.clear();
+        captioned.powerUps.clear();
+        captioned.caption = "Bonus";
+        captioned.captionAlpha = 0.5f;
+        std::vector<mb::Sprite> before, after;
+        mb::drawHud(assets, plain, width, height, before);
+        mb::drawHud(assets, captioned, width, height, after);
+        const std::string size = std::to_string(width) + "x" + std::to_string(height);
+        check(after.size() > before.size() + 8, "HUD " + size + ": a caption adds the glyphs of its text and of their shadow");
+        float left = 1e9f, right = 0, top = 1e9f, bottom = 0, greenest = 0, alpha = 0;
+        for (std::size_t i = before.size(); i < after.size(); ++i) {
+            const mb::Sprite& s = after[i];
+            if (s.tint.g > s.tint.r + 0.2f) {  // the text, not its shadow
+                left = std::min(left, s.x);
+                right = std::max(right, s.x + s.width);
+                top = std::min(top, s.y);
+                bottom = std::max(bottom, s.y + s.height);
+                greenest = std::max(greenest, s.tint.g - s.tint.b);
+                alpha = s.tint.a;
+            }
+        }
+        const float scale = static_cast<float>(height) / 768.0f;
+        check(std::fabs((left + right) / 2 - static_cast<float>(width) / 2) < 2.0f, "HUD " + size + ": the caption is centred");
+        check(std::fabs((top + bottom) / 2 - (static_cast<float>(height) - 18 * scale)) < 6 * scale, "HUD " + size + ": on the line of the points");
+        check(greenest > 0.3f && std::fabs(alpha - 0.5f) < 1e-4f, "HUD " + size + ": green, at the strength it was given");
+        captioned.captionAlpha = 0;
+        std::vector<mb::Sprite> faded;
+        mb::drawHud(assets, captioned, width, height, faded);
+        check(faded.size() == before.size(), "HUD " + size + ": a caption that has faded away is not drawn");
+    }
+
     std::vector<mb::Sprite> none;
     hud.lives = 0;
     hud.powerUps.clear();

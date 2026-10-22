@@ -151,6 +151,14 @@ add_executable(mb_prize_tests test_prizes.cpp)
 target_link_libraries(mb_prize_tests PRIVATE mb_game)
 add_test(NAME mb_prize_tests COMMAND mb_prize_tests)
 
+# What the prizes put on screen, without a GPU or data: the caption and its fade, the icon stack and its numbers, the night's light, and
+# the words of --drop-prize, --catch-prize and --hud-state.
+add_executable(mb_prize_view_tests test_prize_view.cpp ${PROJECT_SOURCE_DIR}/app/PlaySession.cpp ${PROJECT_SOURCE_DIR}/app/PlayerInput.cpp
+               ${PROJECT_SOURCE_DIR}/app/GameAudio.cpp ${PROJECT_SOURCE_DIR}/app/FrontEnd.cpp)
+target_include_directories(mb_prize_view_tests PRIVATE ${PROJECT_SOURCE_DIR}/app)
+target_link_libraries(mb_prize_view_tests PRIVATE mb_game)
+add_test(NAME mb_prize_view_tests COMMAND mb_prize_view_tests)
+
 # The prize table against the real game data when MB3_ASSETS points at it (files, halos, materials, captions, icons, catch scores, the
 # mean chance of a drop over the 83 levels); exits 77 (skipped) otherwise.
 add_executable(mb_prize_smoke prize_smoke.cpp)

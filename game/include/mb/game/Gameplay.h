@@ -198,7 +198,7 @@ enum class EventType {
     ActorFell,       // actor, position (centre of mass), points (only with fallScores), material: it left the board
     BallLost,        // ball, position, velocity: behind the bat's line (or out of the world); it shrinks away
     BallFreed,       // ball, position: it was pinned and is put back in the world (see GameplayRules::jamTime)
-    // ---- Prizes (section 15). `prize` is set on all of them but BallStuck and Blast.
+    // ---- Prizes (section 15). `prize` is set on all of them but BallStuck, Blast and BallRubbered.
     PrizeDropped,    // prize, actor (the object it came from), position (where it starts), material (the prize's)
     PrizeCaught,     // prize, position (the orb's), points (its score; 0 for the gift of a Surprise), material (the prize's: its
                      // dead sound is the catch's sound, prizeInfo(prize).caption the key of the caption)
@@ -208,6 +208,7 @@ enum class EventType {
     StrikeGranted,   // prize (Thunderbolt or Meteor): the strikes are for whoever implements them (step 5, wave 3)
     BallStuck,       // ball, position: the Magnet caught it (the sound "ballMagnited")
     Blast,           // ball, position, speed (the radius): the Explosive Ball went off
+    BallRubbered,    // ball, position: the Yo-Yo's string turned the ball back (the sound "ballRubbered")
     LifeLost,        // hearts (left): the heart is spent, 2.1 s after the last ball was lost
     BatLeft,         // the bat starts to fly off (after the last ball was lost)
     BatEntered,      // the bat swoops in with the ball on it (at the start of a level, and as the heart is spent)

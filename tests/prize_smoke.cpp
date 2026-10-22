@@ -3,11 +3,12 @@
 //   mb_prize_smoke
 //        - all 28 prizes have their file in Data/Objects/Prizes, and the table's red halo is the file's `oreol`;
 //        - each has its material in the group Prizes, a caption in languages.json, and (those with an icon) a PNG in
-//          Textures/Icons; a catch in a real level pays the material's brickScore, the Meteorite Rain's own 4 and not the 250 of
+//          Textures/Icons whose ring is red for a bad prize and green for a good one; a catch in a real level pays the material's brickScore, the Meteorite Rain's own 4 and not the 250 of
 //          the projectile of the same name included;
 //        - the mean chance that a destroyed object leaves a prize, over the destroyable objects of the 83 levels, is the 14.7 % of
 //          the footage (docs/GAMEPLAY.md section 15).
 
+#include "mb/engine/Image.h"
 #include "mb/game/Gameplay.h"
 #include "mb/game/LevelCatalog.h"
 #include "mb/game/LevelLoader.h"
@@ -25,6 +26,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <optional>
 #include <string>
 
 namespace fs = std::filesystem;
@@ -72,6 +74,19 @@ fs::path iconFile(const fs::path& icons, const std::string& stem) {
     return {};
 }
 
+// Whether the opaque pixels of an icon are mostly red rather than green: the colour of its ring.
+bool ringIsRed(const fs::path& icon) {
+    const std::optional<Image> image = loadImage(icon);
+    long red = 0, green = 0;
+    for (std::size_t i = 0; image && i + 3 < image->rgba.size(); i += 4) {
+        if (image->rgba[i + 3] > 200) {
+            red += image->rgba[i + 0] > image->rgba[i + 1] + 60;
+            green += image->rgba[i + 1] > image->rgba[i + 0] + 60;
+        }
+    }
+    return red > green;
+}
+
 void checkTable(const fs::path& assets, const MaterialLibrary& materials, const Level& level) {
     const StringTable strings = StringTable::load(assets / "Data" / "xml" / "languages.json");
     for (int i = 0; i < kPrizeKindCount; ++i) {
@@ -91,7 +106,10 @@ void checkTable(const fs::path& assets, const MaterialLibrary& materials, const 
         check(material != nullptr && material->brickScore > 0, stem + ": a material in the group Prizes");
         check(strings.find(info.caption) != nullptr, stem + ": the caption \"" + std::string(info.caption) + "\" is in languages.json");
         if (!info.icon.empty()) {
-            check(!iconFile(assets / "Textures" / "Icons", std::string(info.icon)).empty(), stem + ": the icon " + std::string(info.icon));
+            const fs::path icon = iconFile(assets / "Textures" / "Icons", std::string(info.icon));
+            check(!icon.empty(), stem + ": the icon " + std::string(info.icon));
+            // The ring the icon draws is red for a bad prize and green for a good one (docs/GAMEPLAY.md section 6 [M]).
+            check(!icon.empty() && ringIsRed(icon) == info.bad, stem + ": the icon's ring is " + (info.bad ? "red" : "green"));
         }
 
         // A catch in a real level pays what the prize's material says.

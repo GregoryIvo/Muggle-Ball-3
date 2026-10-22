@@ -151,6 +151,15 @@ void LevelScene::setDamage(ActorIndex actor, int index) {
     }
 }
 
+void LevelScene::appendActor(ActorIndex actor, std::vector<DrawItem>& out) const {
+    if (actor >= actorStart_.size() - 1) {
+        return;
+    }
+    for (std::uint32_t i = actorStart_[actor]; i < actorStart_[actor + 1]; ++i) {
+        out.push_back(items_[actorItems_[i]]);
+    }
+}
+
 void LevelScene::appendDrawn(std::vector<DrawItem>& out) const {
     for (std::size_t i = 0; i < items_.size(); ++i) {
         if (i >= levelItems_ || !hidden_[i]) {
