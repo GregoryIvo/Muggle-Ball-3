@@ -534,6 +534,20 @@ void testMassProperties() {
         const BodyId body = world.addBody(d);
         world.addImpulse(body, {1, 0, 0}, {0, 0, 0});
         check(near(world.linearVelocity(body).x, 0.5f, 1e-5f), "mass: density 2 on a unit cube gives mass 2");
+        check(near(world.mass(body), 2.0f, 1e-4f), "mass: mass() says so");
+        const BodyId ball = world.addBody(floating(at({5, 0, 0}), sphereShape(1.0f)));
+        const BodyId given = [&] {
+            BodyDesc heavy = floating(at({10, 0, 0}), boxShape({0.5f, 0.5f, 0.5f}));
+            heavy.mass = 5;
+            return world.addBody(heavy);
+        }();
+        check(near(world.mass(ball), 4.0f * kPi / 3.0f, 1e-3f) && near(world.mass(given), 5.0f, 1e-4f),
+              "mass: a sphere of radius 1 and density 1 is 4/3 pi, and a given mass is the mass");
+        BodyDesc kinematic = floating(at({15, 0, 0}), boxShape({0.5f, 0.5f, 0.5f}));
+        kinematic.motion = MotionType::Kinematic;
+        check(world.mass(world.addBody(staticBody(at({20, 0, 0}), boxShape({0.5f, 0.5f, 0.5f})))) == 0 &&
+                  world.mass(world.addBody(kinematic)) == 0 && world.mass(0) == 0,
+              "mass: none for a static or kinematic body, or none at all");
     }
     {
         // Mass given, inertia zero: the inertia of the shape scaled to that mass: 4/12 * (1 + 1).
@@ -1450,7 +1464,7 @@ void testUnknownAndRemovedIds() {
         world.wake(id);
         check(near(world.pose(id), Mat4::identity(), 0) && near(world.linearVelocity(id), {0, 0, 0}, 0) &&
                   near(world.angularVelocity(id), {0, 0, 0}, 0) && !world.isAwake(id) && world.userData(id) == 0 &&
-                  world.motionType(id) == MotionType::Static,
+                  world.motionType(id) == MotionType::Static && world.mass(id) == 0,
               "ids: reading an unknown body gives zeros");
     }
     world.removeJoint(0);

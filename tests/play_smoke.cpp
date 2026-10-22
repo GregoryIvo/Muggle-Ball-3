@@ -191,7 +191,7 @@ void testWinning(mb::Renderer& renderer, mb_app::Assets& assets) {
         if (completeAt < 0 && session.rules()->phase() == mb::SessionPhase::Complete) {
             completeAt = seconds;
             byStar = hud.caption == "NextLevel";  // the Next Level star ends a level with targets left
-            check(session.ending(), "win: the session is ending as soon as the last target is gone");
+            check(session.ending(), "win: the session is ending as soon as the level is won (the last target is gone, or the star was caught)");
         } else if (completeAt >= 0 && darkAt < 0 && session.darkness() > 0) {
             darkAt = seconds;
         }

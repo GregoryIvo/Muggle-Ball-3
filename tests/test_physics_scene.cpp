@@ -743,6 +743,25 @@ void testImpactBreaking() {
     check(byImpact.brokenJoints().empty(), "impact: the same joint does not break when nothing hits it");
 }
 
+// The game's ball weighs its volume times the density, whatever radius a prize gave it: a Big Ball breaks the joints a plain ball
+// cannot, and a Weak Ball does not break those a plain ball does (a hit's force is the reduced mass times the closing speed over the step).
+void testGameBallMassBreaksJoints() {
+    const auto breaks = [](float radius, float force) {
+        Joint weld = fixedJoint(0, 2, {0, 0.5f, 0}, {0, 0, 0});
+        weld.localAnchor[0] = {0, 0.5f, 10};
+        weld.maxForce = weld.maxTorque = force;
+        const Level level = levelOf({board(), brick(2, {0, 0.5f, 10})}, {weld});
+        PhysicsScene scene(level, materials(), options(), singleThreaded());
+        run(scene, 1);
+        scene.addGameBall({0, 0.6f, 3}, {0, 0, 15}, radius);
+        run(scene, 1.5f);
+        return !scene.brokenJoints().empty();
+    };
+    // The brick weighs 10; at 15 units/s the force is about 750 for the plain ball (0.9), 2600 for the Big Ball (4.2), 240 for the Weak one (0.27).
+    check(!breaks(0.6f, 1500) && breaks(1.0f, 1500), "game ball mass: a Big Ball breaks a joint of 1500 that a plain ball does not");
+    check(breaks(0.6f, 500) && !breaks(0.4f, 500), "game ball mass: a Weak Ball does not break a joint of 500 that a plain ball does");
+}
+
 void testPinnedBodies() {
     // ids: board 1; bricks 2 (welded to the world for good), 3 (by a joint that breaks at 500), 4 (twice for good),
     // 5 and 6 (welded to each other for good), 7 (kinematic, welded to the world for good).
@@ -1117,6 +1136,7 @@ int main() {
     testFallsAsleepInTheAir();
     testJointedPiecesWakeTogether();
     testImpactBreaking();
+    testGameBallMassBreaksJoints();
     testPinnedBodies();
     testMachinesRun();
     testHoveringBrickFalls();

@@ -348,8 +348,8 @@ void testChances() {
     check(tiers[0].chance > tiers[1].chance && tiers[1].chance > tiers[2].chance && tiers[2].chance > tiers[3].chance &&
               tiers[0].chance > 0.13f && tiers[2].chance < 0.08f && tiers[3].chance > 0.03f,
           "chance: cheap bricks drop most, 13 % and more, and the ones worth 120 or more 4 to 7 %");
-    // The destroyable objects of the 83 levels by value (tests/gameplay_smoke.cpp prints this mean from the data itself).
-    const int objects[] = {11282, 889, 789, 210, 61};
+    // The destroyable objects of the 83 levels by value (tests/prize_smoke.cpp prints this mean from the data itself).
+    const int objects[] = {11260, 889, 789, 210, 61};
     double sum = 0;
     int all = 0;
     for (int i = 0; i < 5; ++i) {
@@ -662,6 +662,43 @@ void testSkull() {
     check(held.count(EventType::BallLost) == 1 && held.count(EventType::LifeLost) == 1, "skull: it goes with the bat, and costs the heart");
 }
 
+// Two prizes fall onto the bat in the same step, the Skull first: nothing is caught after it. The bat is dead, and what a later prize
+// started would outlive it (the Skull ended every effect), or, for the star, end the level from a lost bat.
+void testSkullFirstInAStep() {
+    Game g(levelOf({board()}));
+    check(g.ready(), "skull first: the bat comes in");
+    g.launch();
+    const Vec3 from{g.bat().x, 0, g.bat().z + 1};
+    g.session.dropPrize(PrizeKind::Skull, from);
+    g.session.dropPrize(PrizeKind::BigBall, from);
+    g.session.dropPrize(PrizeKind::NextLevel, from);
+    g.run(0.2);
+    check(g.count(EventType::PrizeCaught, PrizeKind::Skull) == 1 && g.session.phase() == SessionPhase::Lost,
+          "skull first: the Skull is caught and the bat is dead");
+    check(g.count(EventType::PrizeCaught, PrizeKind::BigBall) == 0 && g.session.effect(PrizeKind::BigBall) == nullptr &&
+              g.count(EventType::EffectStarted) == 0 && near(g.session.ballRadius(), 0.6f),
+          "skull first: the Big Ball behind it is not caught, and starts nothing that would outlive the bat");
+    check(g.count(EventType::PrizeCaught, PrizeKind::NextLevel) == 0 && g.count(EventType::LevelComplete) == 0 &&
+              g.session.phase() == SessionPhase::Lost,
+          "skull first: nor does the star end the level");
+    g.run(0.5);
+    check(g.count(EventType::PrizeMissed) == 2, "skull first: they fall on and are missed");
+    g.run(4);
+    check(g.session.phase() == SessionPhase::Ready && g.session.activeEffects().empty() && near(g.session.ballRadius(), 0.6f),
+          "skull first: the next bat is plain");
+
+    // The same two the other way round: the Big Ball is caught, and the Skull ends it with the rest.
+    Game h(levelOf({board()}));
+    h.ready();
+    h.launch();
+    h.session.dropPrize(PrizeKind::BigBall, from);
+    h.session.dropPrize(PrizeKind::Skull, from);
+    h.run(0.2);
+    check(h.count(EventType::PrizeCaught, PrizeKind::BigBall) == 1 && h.count(EventType::EffectEnded, PrizeKind::BigBall) == 1 &&
+              h.session.effect(PrizeKind::BigBall) == nullptr,
+          "skull first: and when the Big Ball is first it is caught, and the Skull takes it away");
+}
+
 void testSpeedPrizes() {
     Game g(levelOf({board()}));
     check(g.ready(), "speed: the bat comes in");
@@ -835,6 +872,45 @@ void testExplosiveBall() {
     g.give(PrizeKind::ExplosiveBall);
     g.give(PrizeKind::ExplosiveBall);
     check(g.session.effect(PrizeKind::ExplosiveBall)->shots == 2 && g.session.activeEffects().size() == 1, "explosive: a second catch adds a blast");
+}
+
+// A ball that touches two bricks in one step hurts each of them once. The blast looks for what the ball did not hit, and the order of
+// the physics' contacts must not decide which brick takes the blast as well as the blow.
+void testExplosiveBallTwoBricksAtOnce() {
+    Game g(levelOf({board(), brick({-1, 1, 10}, "Tough.jpg"), brick({1, 1, 10}, "Tough.jpg")}));  // side by side: a seam at x = 0
+    g.ready();
+    g.give(PrizeKind::ExplosiveBall);
+    g.session.addBall({0, 0.6f, 3}, {0, 0, 1});  // onto the seam: both faces in the same step
+    g.run(0.8);
+    int hits = 0;
+    for (const GameEvent& event : g.log) {
+        hits += event.type == EventType::BrickHit && event.ball >= 0;
+    }
+    check(hits == 2 && g.count(EventType::Blast) == 1, "explosive: a ball on the seam of two bricks hits both (" + std::to_string(hits) + " hits)");
+    check(g.session.actor(1).energy == 2 && g.session.actor(2).energy == 2 && g.session.stats().bricksHit == 2,
+          "explosive: each takes one hit, the blow, not the blow and the blast, " + std::to_string(g.session.actor(1).energy) + " and " +
+              std::to_string(g.session.actor(2).energy) + " left of three");
+}
+
+// A blow is a contact that closes at 30 % of the ball's speed, whatever the speed prizes made it (GameplayRules::hitFraction): a graze at
+// 3 units/s of the 15 is none, and at the doubled speed one at 6 is none either, while one at 3 is a blow when the speed is halved.
+void testBlowFollowsTheBallSpeed() {
+    const auto hits = [](int speedUps, int slowDowns, float sine) {
+        Game g(levelOf({board(), brick({3, 1, 10}, "Cheap.jpg", kStatic, {1, 1, 4})}));  // a wall whose face is at x = 2
+        g.ready();
+        for (int i = 0; i < speedUps; ++i) {
+            g.session.givePrize(PrizeKind::SpeedUp);
+        }
+        for (int i = 0; i < slowDowns; ++i) {
+            g.session.givePrize(PrizeKind::SlowDown);
+        }
+        g.session.addBall({1.0f, 0.6f, 6}, {sine, 0, std::sqrt(1 - sine * sine)});  // closes on the face at sine x the speed
+        g.run(0.6);
+        return g.count(EventType::BrickHit);
+    };
+    check(hits(0, 0, 0.2f) == 0 && hits(0, 0, 0.4f) == 1, "blow: at speed 15 a closing speed of 3 is a graze and 6 a blow");
+    check(hits(8, 0, 0.2f) == 0 && hits(8, 0, 0.4f) == 1, "blow: at speed 30 a closing speed of 6 is a graze, 12 a blow");
+    check(hits(0, 8, 0.2f) == 0 && hits(0, 8, 0.4f) == 1, "blow: at speed 7.5 a closing speed of 1.5 is a graze, and 3 a blow");
 }
 
 void testNormalBall() {
@@ -1363,11 +1439,14 @@ int main() {
     testCatchScore();
     testInstantPrizes();
     testSkull();
+    testSkullFirstInAStep();
     testSpeedPrizes();
     testBatSize();
     testBallSize();
     testPowerBall();
     testExplosiveBall();
+    testExplosiveBallTwoBricksAtOnce();
+    testBlowFollowsTheBallSpeed();
     testNormalBall();
     testDrunkenBall();
     testMultiball();

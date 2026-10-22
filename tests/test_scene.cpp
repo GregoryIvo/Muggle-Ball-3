@@ -793,6 +793,41 @@ void testBallPosition() {
     check(near(ballPosition(held, bat, 0.01f), held.position), "ball: and as the bat comes in, which is not carried on, it stays");
 }
 
+// How much of a ball is drawn, which is also the size it vanishes from if it is lost: none of one in a teleport, so that a ball lost
+// there (the Skull) does not pop into view at the source and shrink; a speck that grows after it comes out.
+void testBallScale() {
+    BatView bat;
+    bat.phase = BatPhase::Present;
+    BallView flying;
+    check(ballScale(flying, bat) == 1, "ball scale: a ball in flight is whole");
+    flying.away = true;
+    flying.appear = 0;
+    check(ballScale(flying, bat) == 0, "ball scale: one in a teleport is not drawn");
+    flying.appear = 0.4f;
+    check(near(ballScale(flying, bat), 0.4f), "ball scale: and as it comes out it grows");
+    BallView stuck;
+    stuck.stuck = true;
+    check(ballScale(stuck, bat) == 1, "ball scale: one the Magnet holds is whole");
+    BallView held;
+    held.held = true;
+    check(ballScale(held, bat) == 1, "ball scale: a held ball is whole when the bat stands");
+    bat.phase = BatPhase::Absent;
+    check(ballScale(held, bat) == 0, "ball scale: and not drawn while there is no bat");
+}
+
+// A cannonball and a rocket are carried on past the session's last step like the balls.
+void testShotPositions() {
+    SpecialObjects::Shot shot;
+    shot.position = {2, 1.5f, 3};
+    shot.velocity = {30, -2, 0};
+    check(near(shotPosition(shot, 0.01f), {2.3f, 1.48f, 3}) && near(shotPosition(shot, 0), shot.position),
+          "shot: a cannonball goes on with its velocity");
+    SpecialObjects::Rocket rocket;
+    rocket.position = {4, 10, 6};
+    check(near(rocketPosition(rocket, 15.6f, 0.01f), {4, 10.156f, 6}) && near(rocketPosition(rocket, 15.6f, 0), rocket.position),
+          "shot: a rocket rises at its speed");
+}
+
 void testRotationAxis() {
     // As rotationX, rotationY and rotationZ turn: a quarter turn about z takes x to y.
     check(near(transformPoint({1, 0, 0}, Mat4::rotationAxis({0, 0, 1}, kPi / 2)), {0, 1, 0}) &&
@@ -837,6 +872,8 @@ int main() {
     testCamera();
     testBatPose();
     testBallPosition();
+    testBallScale();
+    testShotPositions();
     testRotationAxis();
     if (failures == 0) {
         std::puts("all scene tests passed");

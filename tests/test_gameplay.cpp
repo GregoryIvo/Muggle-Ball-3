@@ -1398,6 +1398,25 @@ void testPinnedBall() {
               near(shut->position.x, 0, 0.8f) && near(shut->position.z, 10, 0.8f),
           "pinned: with its speed, in the pocket");
 
+    // Freeing it puts it back into the same pocket, which has no way out (village-apple's lane between a fence of metal and the back wall
+    // is one): after jamFreesInARow frees it is given up on, and lost where it is. The ball held on the bat is still in play, so no heart.
+    g.run(2.0);
+    const GameEvent* lost = g.find(EventType::BallLost);
+    check(lost != nullptr && lost->ball == id && near(lost->position, {0, 0.6f, 10}, 0.8f) && g.count(EventType::BallFreed) == 3 &&
+              g.session.balls().size() == 1 && g.ball(id) == nullptr && g.session.hearts() == 2,
+          "pinned: freed three times in a row in the same pocket, the ball is lost there, not freed for ever");
+
+    // A ball freed again and again in free flight (made to fire by a distance no ball covers in the time) is far from where it was freed the
+    // time before, and is never given up on.
+    SessionOptions restless = options();
+    restless.rules.jamDistance = 1000;
+    restless.rules.jamTime = 0.5;
+    Game r(levelOf({board()}), restless);
+    r.session.addBall({-10, 0.6f, -12}, {0.3f, 0, 1});
+    r.run(6);
+    check(r.count(EventType::BallFreed) >= 8 && r.count(EventType::BallLost) == 0,
+          "pinned: frees that are far apart do not add up: a ball freed " + std::to_string(r.count(EventType::BallFreed)) + " times is not lost");
+
     // Where it is put back: away from the wall it was against and towards the middle of the board. Made to fire in free
     // flight by a distance no ball covers in the time, a ball from the left half and the near half is sent on to the right
     // and the far side, and from the far half to the near side.

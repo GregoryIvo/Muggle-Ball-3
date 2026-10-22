@@ -27,6 +27,9 @@ struct BatPose {
 BatPose batPose(const BatView& bat, float lead = 0);
 // How much of the ball held on the bat is shown, 0 to 1: it appears as the bat lands.
 float heldBallScale(const BatView& bat);
+// How much of a ball is drawn, 0 to 1: a held one grows as the bat lands (heldBallScale()), one the Magnet holds is whole, and one in
+// a teleport is a speck that grows after it comes out (BallView::appear), none before.
+float ballScale(const BallView& ball, const BatView& bat);
 // Where a ball is drawn, `lead` seconds past the session's last step: one in flight carries on with its velocity, one held
 // on the bat goes with the bat (the lead batPose() gives it), so that it does not shimmer against the bat as it moves.
 Vec3 ballPosition(const BallView& ball, const BatView& bat, float lead);
@@ -63,6 +66,7 @@ private:
         Mat4 turn;  // how the ball is turned, by the distance it rolled
         bool placed = false;
         float size = 1;  // against the plain ball, and the model it has, as of the last frame
+        float shown = 1;  // how much of it was drawn then (ballScale()): none of a ball in a teleport
         BallLook look = BallLook::Plain;
     };
     struct Vanishing {

@@ -680,6 +680,15 @@ std::uint64_t PhysicsWorld::userData(BodyId body) const {
     return record != nullptr ? record->userData : 0;
 }
 
+float PhysicsWorld::mass(BodyId body) const {
+    const BodyRecord* record = impl_->find(body, "mass");
+    const JPH::Body* jolt = record != nullptr ? impl_->joltBody(*record) : nullptr;
+    if (jolt == nullptr || !jolt->IsDynamic() || !(jolt->GetMotionProperties()->GetInverseMass() > 0)) {
+        return 0;
+    }
+    return 1.0f / jolt->GetMotionProperties()->GetInverseMass();
+}
+
 std::vector<ContactEvent> PhysicsWorld::takeContacts() {
     std::lock_guard lock(impl_->queueMutex);
     std::vector<ContactEvent> taken;

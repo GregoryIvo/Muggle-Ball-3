@@ -17,7 +17,6 @@ constexpr float kBallMass = 500.0f;
 constexpr float kBallMaxAngularVelocity = 60.0f;
 constexpr float kBallFloor = -30.0f;  // below this it has left the world
 constexpr double kBallMaxAge = 20.0;
-constexpr float kBallVolume = 4.0f * kPi / 3.0f * kBallRadius * kBallRadius * kBallRadius;
 
 constexpr float kLowBand = 0.3f;  // lowestPoints() gives the points this close to the lowest one
 // How often a body that fell asleep with nothing under it is woken again before it is let sleep anyway, and how many
@@ -235,13 +234,13 @@ void PhysicsScene::wakeUnsupported() {
     }
 }
 
-float PhysicsScene::massOf(std::uint64_t userData) const {
+float PhysicsScene::massOf(std::uint64_t userData, BodyId body) const {
     constexpr float kImmovable = std::numeric_limits<float>::infinity();
     if (userData == kBatData) {
         return kImmovable;
     }
     if (userData == kGameBallData) {
-        return kBallVolume * ballDensity_;
+        return world_.mass(body);  // (its radius is the prizes' to change: Big Ball, Weak Ball)
     }
     if (!isActor(userData)) {
         return kBallMass;
@@ -276,7 +275,7 @@ void PhysicsScene::breakByHit(const ContactEvent& contact) {
         return;
     }
     constexpr float kImmovable = std::numeric_limits<float>::infinity();
-    const float a = massOf(contact.userDataA), b = massOf(contact.userDataB);
+    const float a = massOf(contact.userDataA, contact.a), b = massOf(contact.userDataB, contact.b);
     if (a == kImmovable && b == kImmovable) {
         return;
     }

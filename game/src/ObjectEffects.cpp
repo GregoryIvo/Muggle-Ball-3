@@ -117,6 +117,14 @@ std::uint32_t seedOf(Vec3 at, double time) {
 
 }  // namespace
 
+Vec3 shotPosition(const SpecialObjects::Shot& shot, float lead) {
+    return shot.position + shot.velocity * lead;
+}
+
+Vec3 rocketPosition(const SpecialObjects::Rocket& rocket, float rocketSpeed, float lead) {
+    return rocket.position + Vec3{0, rocketSpeed * lead, 0};
+}
+
 ObjectEffects::ObjectEffects(ModelCache& cache, const MaterialLibrary& materials, const TextureIndex& textures)
     : rocket_(cache, materials, textures, modelLevel(ObjectType::FireRocket, "Fire-rocket.x", "Fire-rocket"), PhysicsPlan{}),
       shot_(cache, materials, textures, modelLevel(ObjectType::Bullet, "Yadro.x", "Telega1.jpg"), PhysicsPlan{}),
@@ -129,7 +137,8 @@ ObjectEffects::ObjectEffects(ModelCache& cache, const MaterialLibrary& materials
       smokeTexture_(cache.texture(textures.find("Particles/ParticleBubble.png"))),
       facing_(facingGameCamera()) {}
 
-void ObjectEffects::update(const GameSession& session, std::span<const GameEvent> events, double seconds, LevelScene& level) {
+void ObjectEffects::update(const GameSession& session, std::span<const GameEvent> events, double seconds, LevelScene& level,
+                           double lead) {
     time_ += seconds;
     for (const GameEvent& event : events) {
         Flash flash;
@@ -182,15 +191,17 @@ void ObjectEffects::update(const GameSession& session, std::span<const GameEvent
     items_.clear();
     const SpecialObjects& objects = session.objects();
     for (const SpecialObjects::Shot& shot : objects.shots()) {
-        addMesh(shot_, Mat4::translation(shot.position));
-        addShadow({shot.position.x, 0, shot.position.z}, 2.0f);
+        const Vec3 at = shotPosition(shot, static_cast<float>(lead));
+        addMesh(shot_, Mat4::translation(at));
+        addShadow({at.x, 0, at.z}, 2.0f);
     }
     for (const SpecialObjects::Rocket& rocket : objects.rockets()) {
-        addMesh(rocket_, Mat4::translation(rocket.position));
-        addShadow({rocket.position.x, 0, rocket.position.z}, 2.0f);
+        const Vec3 at = rocketPosition(rocket, session.rules().objects.rocketSpeed, static_cast<float>(lead));
+        addMesh(rocket_, Mat4::translation(at));
+        addShadow({at.x, 0, at.z}, 2.0f);
         for (int i = 1; i <= kTrailSprites; ++i) {
             const float u = static_cast<float>(i) / (kTrailSprites + 1);
-            addBillboard(rocket.position - Vec3{0, kTrailSpacing * static_cast<float>(i), 0}, kTrailSize * (1 - 0.6f * u),
+            addBillboard(at - Vec3{0, kTrailSpacing * static_cast<float>(i), 0}, kTrailSize * (1 - 0.6f * u),
                          {1, 0.7f, 0.3f, 0.8f * (1 - u)}, dotTexture_, BlendMode::Additive);
         }
     }
