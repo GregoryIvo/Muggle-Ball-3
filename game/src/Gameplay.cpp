@@ -24,6 +24,8 @@ constexpr float kBatLeaveSlack = 0.3f;
 constexpr float kFreedSlant = 0.3f;
 
 constexpr int kRuleCount = 2;  // the TargetRules that name targets
+// How often (in steps) the targets that are loose bodies are looked at again for being out of the ball's reach.
+constexpr std::uint64_t kReachCheckEvery = 30;
 
 // Events nobody collected; a game that never calls takeEvents() must not eat the memory.
 constexpr std::size_t kMostQueuedEvents = 1u << 14;
@@ -132,7 +134,9 @@ bool isTarget(TargetRule rule, ObjectType type, bool dynamic, const GameMaterial
         return false;
     }
     switch (rule) {
-        case TargetRule::DynamicBricks: return dynamic && (type == ObjectType::Brick || type == ObjectType::Tree);
+        case TargetRule::DynamicBricks:
+            return dynamic && (type == ObjectType::Tree ||
+                               (type == ObjectType::Brick && (material->brickType == 0 || material->brickType == 4)));
         case TargetRule::BrickType: return type == ObjectType::Brick && material->brickType == 0;
         case TargetRule::Never: return false;
     }
@@ -218,6 +222,26 @@ GameSession::GameSession(const Level& level, const MaterialLibrary& materials, c
             }
         }
     }
+    std::copy(std::begin(targetsLeft_), std::end(targetsLeft_), std::begin(targetsAtStart_));
+    if (options.ignoreUnreachable) {
+        // Below the board's near edge the ball is gone, so the ground of its plane starts there: what is beyond the side
+        // walls is joined to the board only by that strip, which no ball goes along.
+        BallReach::Options reachOptions;
+        reachOptions.planeY = rules_.ballPlaneY;
+        reachOptions.radius = kBallRadius;
+        reachOptions.cell = rules_.reachCell;
+        reachOptions.low = {-rules_.escapeX, 0, rules_.ballLostZ + 1.0f};
+        reachOptions.high = {rules_.escapeX, 0, rules_.escapeZ};
+        reach_.emplace(
+            scene_.plan(), [this](ActorIndex actor) { return !bricks_[actor].damageable; },
+            Vec3{0, rules_.ballPlaneY, rules_.batZ + rules_.heldOffsetZ}, reachOptions);
+        for (const ActorRef& ref : refs) {
+            if (bricks_[ref.index].targetFor != 0 && scene_.plan().actors[ref.index].motion == MotionType::Dynamic) {
+                loose_.push_back(ref.index);
+            }
+        }
+        releaseTargets(false);
+    }
     enterBat();
     refreshViews();
 }
@@ -264,11 +288,12 @@ ActorStatus GameSession::actor(ActorIndex actor) const {
     status.maxEnergy = brick.maxEnergy;
     status.textureIndex = brick.damageable ? damageTextureIndex(*brick.material, brick.energy) : 0;
     status.target = isTarget(actor, levelEnd_);
+    status.outOfPlay = brick.outOfPlay;
     return status;
 }
 
 bool GameSession::isTarget(ActorIndex actor, TargetRule rule) const {
-    return rule != TargetRule::Never && actor < bricks_.size() && !bricks_[actor].removed &&
+    return rule != TargetRule::Never && actor < bricks_.size() && !bricks_[actor].removed && !bricks_[actor].outOfPlay &&
            (bricks_[actor].targetFor & (1u << static_cast<int>(rule))) != 0;
 }
 
@@ -317,6 +342,13 @@ void GameSession::tick() {
     if (ticks_ % kFallCheckEvery == 0) {
         removeFallen();
     }
+    if (reach_ && ticks_ % kReachCheckEvery == 0) {
+        releaseTargets(true);
+    }
+    if (phase_ == SessionPhase::Playing) {
+        stalled_ += fixedStep_;
+    }
+    letGoOfStalled();
     runLifeSequence();
     checkComplete();
     refreshViews();
@@ -507,6 +539,7 @@ bool GameSession::hitBrick(ActorIndex actor, Vec3 at, float speed, int ball) {
     }
     --brick.energy;
     ++stats_.bricksHit;
+    stalled_ = 0;
     GameEvent event;
     event.type = EventType::BrickHit;
     event.ball = ball;
@@ -668,6 +701,7 @@ void GameSession::explodeDue() {
         }
         exploding_.erase(exploding_.begin() + static_cast<std::ptrdiff_t>(i));
         const Brick& brick = bricks_[actor];
+        stalled_ = 0;
         score_ += brick.material->brickScore;
         ++stats_.bricksDestroyed;
         GameEvent event;
@@ -697,6 +731,7 @@ void GameSession::removeFallen() {
             brick.exploding = false;
         }
         ++stats_.actorsFallen;
+        stalled_ = 0;
         GameEvent event;
         event.type = EventType::ActorFell;
         event.actor = actor;
@@ -715,12 +750,76 @@ void GameSession::removeBrick(ActorIndex actor) {
     Brick& brick = bricks_[actor];
     brick.removed = true;
     brick.exploding = false;
-    for (int rule = 0; rule < kRuleCount; ++rule) {
+    for (int rule = 0; rule < kRuleCount && !brick.outOfPlay; ++rule) {
         if ((brick.targetFor >> rule) & 1u) {
             --targetsLeft_[rule];
         }
     }
     scene_.removeActor(actor);
+}
+
+// Whether the ball can still get at a target that is in the level (SessionOptions::ignoreUnreachable).
+bool GameSession::inPlay(ActorIndex actor) const {
+    const ActorPlan& plan = scene_.plan().actors[actor];
+    const Bounds box = boundsOf(plan.body, scene_.actorPose(actor));
+    if (box.low.y >= rules_.ballPlaneY + kBallRadius) {  // above the ball
+        return plan.motion == MotionType::Dynamic && plan.body.gravity && reach_->touches(box.low.x, box.low.z, box.high.x, box.high.z);
+    }
+    return reach_->touches(box.low.x - kBallRadius, box.low.z - kBallRadius, box.high.x + kBallRadius,
+                           box.high.z + kBallRadius);
+}
+
+void GameSession::dropTarget(ActorIndex actor) {
+    Brick& brick = bricks_[actor];
+    brick.outOfPlay = true;
+    for (int rule = 0; rule < kRuleCount; ++rule) {
+        if ((brick.targetFor >> rule) & 1u) {
+            --targetsLeft_[rule];
+        }
+    }
+}
+
+void GameSession::releaseTargets(bool onlyLoose) {
+    const auto release = [&](ActorIndex actor) {
+        dropTarget(actor);
+        ++stats_.targetsOutOfPlay;
+    };
+    if (onlyLoose) {
+        std::erase_if(loose_, [&](ActorIndex actor) {
+            if (bricks_[actor].removed || bricks_[actor].outOfPlay) {  // gone, or let go of by letGoOfStalled()
+                return true;
+            }
+            if (inPlay(actor)) {
+                return false;
+            }
+            release(actor);
+            return true;
+        });
+        return;
+    }
+    for (ActorIndex actor = 0; actor < bricks_.size(); ++actor) {
+        if (bricks_[actor].targetFor != 0 && !inPlay(actor)) {
+            release(actor);
+        }
+    }
+    std::erase_if(loose_, [&](ActorIndex actor) { return bricks_[actor].outOfPlay; });
+}
+
+void GameSession::letGoOfStalled() {
+    if (stalled_ < rules_.stallSeconds || phase_ != SessionPhase::Playing || levelEnd_ == TargetRule::Never) {
+        return;
+    }
+    const int left = targetsLeft(levelEnd_);
+    const int most = std::max(rules_.stallMost, static_cast<int>(rules_.stallShare * static_cast<float>(targetsAtStart_[static_cast<int>(levelEnd_)])));
+    if (left == 0 || left > most) {
+        return;
+    }
+    for (ActorIndex actor = 0; actor < bricks_.size(); ++actor) {
+        if (isTarget(actor, levelEnd_)) {
+            dropTarget(actor);
+            ++stats_.targetsLetGo;
+        }
+    }
 }
 
 void GameSession::checkComplete() {

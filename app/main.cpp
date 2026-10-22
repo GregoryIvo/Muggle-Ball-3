@@ -1,7 +1,12 @@
 // Muggle Ball 3: entry point.
 //
 //   MuggleBall3                              open the game: the main menu, from which levels are played, with sound;
-//                                            options, bat and window are kept between runs (MB3_USER_DATA picks the folder)
+//                                            options, bat, progress and scores are kept between runs (MB3_USER_DATA
+//                                            picks the folder)
+//   MuggleBall3 --autoplay                   the game with the Autopilot playing the levels (watch it, or test the flow); it
+//                                            plays on nobody's behalf: it reads and writes none of the player's files
+//                                            (options, progress, scores) and leaves the system cursor alone
+//   MuggleBall3 --level <name> --autoplay    the game opened on this level, played by the Autopilot, then on to the next
 //   MuggleBall3 --level <name|path.json>     open the level viewer on this level (file stem or name, any case, or a path)
 //   MuggleBall3 --screenshot out.png [--size WxH] [--level ...] [--shapes] [--camera ex,ey,ez,tx,ty,tz,fov]
 //                                    [--simulate seconds] [--ball [x,degrees]]
@@ -10,6 +15,9 @@
 //                                            --simulate runs the physics that long first; --ball shoots a test ball
 //                                            at t = 0, from (x, 1.2, -15) at that angle off +z (default: at the
 //                                            middle of everything that can move)
+//   MuggleBall3 --screenshot out.png --level <name> --autoplay [--simulate seconds] [--size WxH]
+//                                            the level played for that long by the Autopilot (no window), with the
+//                                            real HUD, then rendered
 //   ... [--hud] [--hud-state lives,score,level[,icon...]]
 //                                            draw the in-game HUD over the level (screenshot or viewer)
 //   MuggleBall3 --check <level.json>         load a converted level JSON, print a summary, exit
@@ -27,14 +35,18 @@
 
 #include "GameAudio.h"
 
+#include "Assets.h"
 #include "FormViewer.h"
 #include "FrontEnd.h"
 #include "FrontEndAudio.h"
+#include "PlaySession.h"
 #include "mb/engine/Log.h"
 #include "mb/engine/Paths.h"
 #include "mb/engine/Renderer.h"
 #include "mb/engine/Window.h"
+#include "mb/game/Campaign.h"
 #include "mb/game/GameCamera.h"
+#include "mb/game/Gameplay.h"
 #include "mb/game/LevelCatalog.h"
 #include "mb/game/LevelLoader.h"
 #include "mb/game/LevelScene.h"
@@ -65,10 +77,11 @@ namespace {
 
 namespace fs = std::filesystem;
 using Clock = std::chrono::steady_clock;
+using mb_app::Assets;
+using mb_app::kClearColor;
 
 constexpr int kDefaultWidth = 1024;
 constexpr int kDefaultHeight = 768;
-constexpr mb::Color kClearColor{0.05f, 0.05f, 0.1f, 1.0f};  // only visible where a level has no sky
 
 // Where the test ball is shot from and at what angle (the bat's end of the board, away from the player).
 constexpr float kBallStartY = 1.2f;
@@ -96,6 +109,7 @@ struct Options {
     mb_app::HudOptions hud;                      // --hud
     mb_app::FormViewerOptions form;              // --form: the other fields are its options
     bool viewer = false;                         // an option for the level viewer was given: no menu
+    bool autoplay = false;                       // --autoplay: the Autopilot plays
     float simulate = 0;                          // --simulate: seconds of physics before the screenshot
     std::optional<BallShot> ball;                // --ball: a test ball at t = 0
 };
@@ -111,14 +125,6 @@ int checkLevel(const char* path) {
     }
     return 0;
 }
-
-// Everything that outlives a single level.
-struct Assets {
-    fs::path root = mb::assetRoot();
-    mb::MaterialLibrary materials = mb::MaterialLibrary::load(root / "Data" / "Materials" / "materials.json");
-    mb::TextureIndex textures{root / "Textures"};
-    mb::LevelCatalog catalog{root / "Data" / "Levels"};
-};
 
 // Builds the scene and its physics for one catalog entry at a time and keeps the camera.
 class Viewer {
@@ -154,7 +160,7 @@ public:
                         physics->world().awakeBodyCount(), counts.kinematicBodies, counts.staticBodies,
                         physics->plan().pinnedBodies, counts.withoutBody, counts.joints, counts.clothJoints,
                         ms(start, loaded), ms(loaded, simulated), ms(simulated, built));
-            logMissing(entry.name, next->report());
+            mb_app::logMissing(entry.name, next->report());
             logUnbuilt(entry.name, *physics);
             scene_ = std::move(next);
             physics_ = std::move(physics);
@@ -226,18 +232,6 @@ public:
     mb::Camera camera;
 
 private:
-    static void logMissing(const std::string& level, const mb::SceneReport& report) {
-        for (const std::string& name : report.missingMeshes) {
-            mb::logWarn("{}: missing mesh {}", level, name);
-        }
-        for (const std::string& name : report.missingFrames) {
-            mb::logWarn("{}: missing frame {}", level, name);
-        }
-        for (const std::string& name : report.missingTextures) {
-            mb::logWarn("{}: missing texture {}", level, name);
-        }
-    }
-
     static void logUnbuilt(const std::string& level, const mb::PhysicsScene& physics) {
         const mb::PhysicsPlan& plan = physics.plan();
         const mb::PhysicsScene::Counts& counts = physics.counts();
@@ -256,38 +250,6 @@ private:
     std::unique_ptr<mb::LevelScene> scene_;
     std::size_t index_ = 0;
     Clock::time_point shown_ = Clock::now();
-};
-
-// The front end's way into the scene code: levels are built by the viewer and drawn from the game camera. The
-// per-frame work of a level (physics, the rules, the HUD's numbers) goes into update().
-class ViewerSession : public mb_app::LevelSession {
-public:
-    ViewerSession(Viewer& viewer, Assets& assets) : viewer_(viewer), assets_(assets) {}
-
-    bool start(std::string_view levelName, const Progress&) override {
-        const std::optional<std::size_t> index = assets_.catalog.find(levelName);
-        if (!index) {
-            mb::logError("the campaign names the level \"{}\", which is not among the converted levels", levelName);
-            return false;
-        }
-        return viewer_.show(*index);
-    }
-
-    void update(const mb::InputEvents&, double seconds, mb::GameHud&) override {
-        viewer_.stepPhysics(std::min(static_cast<float>(seconds), kMaxFrameSeconds));
-        viewer_.follow(false);
-    }
-
-    void render(mb::Renderer& renderer, std::span<const mb::Sprite> overlay) override {
-        int width = 0, height = 0;
-        renderer.drawableSize(width, height);
-        const float aspect = height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 4.0f / 3.0f;
-        renderer.renderToWindow(viewer_.frame(aspect), viewer_.scene().items(), {}, overlay);
-    }
-
-private:
-    Viewer& viewer_;
-    Assets& assets_;
 };
 
 std::size_t startLevel(Assets& assets, const Options& options) {
@@ -333,6 +295,48 @@ int runScreenshot(const Options& options) {
     return 0;
 }
 
+// The player's files: options, progress and scores, in the folder mb::userDataDir() names. --autoplay plays on nobody's
+// behalf, so it neither reads nor writes them: it runs on the defaults, kept in memory (a SaveData with no folder saves
+// nothing), and what it remembers is gone with the process.
+mb::SaveData openSave(const Options& options) {
+    return mb::SaveData(options.autoplay ? fs::path() : mb::userDataDir());
+}
+
+// --autoplay with --screenshot: the level played for --simulate seconds by the Autopilot, with no window, then drawn as it
+// is in the game, hearts, points and level number included.
+int runPlayScreenshot(const Options& options) {
+    mb::Renderer renderer;
+    mb::logInfo("GPU backend: {}", renderer.backendName());
+    Assets assets;
+    const mb::SaveData save = openSave(options);
+    const std::string name = assets.catalog.levels()[startLevel(assets, options)].name;
+    mb_app::PlaySession session(renderer, assets, save, nullptr, {.autoplay = true});
+    mb::GameHud hud;
+    hud.lives = mb::GameplayRules{}.startHearts;
+    if (const std::optional<int> index = mb::Campaign::load(assets.root / "Data" / "xml" / "levels.json").indexOf(name)) {
+        hud.level = *index + 1;
+    }
+    if (!session.start(name, hud, [](float) {})) {
+        return 1;
+    }
+    const int frames = static_cast<int>(std::lround(options.simulate / kPhysicsStep));
+    for (int i = 0; i < frames; ++i) {
+        session.update({}, kPhysicsStep, hud);
+    }
+    mb::logInfo("after {:.1f} s: {} hearts, {} points, {} targets left", static_cast<double>(options.simulate), hud.lives,
+                hud.score, session.rules()->targetsLeft(session.rules()->levelEnd()));
+    mb_app::HudOverlay overlay(renderer, {true, hud});
+    const mb::Image image = renderer.renderToImage(
+        options.width, options.height, session.frame(static_cast<float>(options.width) / static_cast<float>(options.height)),
+        session.items(), {}, overlay.sprites(options.width, options.height, name));
+    if (image.empty() || !mb::writePng(options.screenshot, image)) {
+        mb::logError("cannot write screenshot {}", options.screenshot);
+        return 1;
+    }
+    mb::logInfo("wrote {} ({}x{})", options.screenshot, image.width, image.height);
+    return 0;
+}
+
 // Remembers how the player left the window. A size from --size was asked for once, so it is not kept.
 void saveWindowState(const mb::Window& window, mb::SaveData& save, bool keepSize) {
     save.settings.fullscreen = window.fullscreen();
@@ -348,34 +352,13 @@ void windowSize(const Options& options, const mb::SaveData& save, int& width, in
     height = options.sizeGiven ? options.height : save.settings.windowHeight;
 }
 
-// The game: the main menu on a window, levels played from it, with sound, and what the player keeps saved.
-int runGame(const Options& options) {
-    Assets assets;
-    mb::SaveData save(mb::userDataDir());
-    mb::logInfo("Save data: {}", save.directory().string());
-    int windowWidth = 0, windowHeight = 0;
-    windowSize(options, save, windowWidth, windowHeight);
-    mb::Window window("Muggle Ball 3", windowWidth, windowHeight, save.settings.fullscreen);
-    mb::Renderer renderer(window);
-    mb::logInfo("GPU backend: {}", renderer.backendName());
-    mb::logInfo("Asset root: {}", assets.root.string());
-
-    mb::GameAudio audio(assets.root);  // after the window, so the device closes before SDL quits
-    Viewer viewer(renderer, assets, options);
-    ViewerSession session(viewer, assets);
-    mb_app::FrontEndOptions frontEnd;
-    frontEnd.language = options.form.language;
-    frontEnd.lockLevels = false;  // nothing finishes a level yet, which is the only way to open the next ones
-    mb_app::connectAudio(frontEnd, audio);
-    const int result = mb_app::runFrontEnd(window, renderer, session, save, frontEnd);
-    saveWindowState(window, save, !options.sizeGiven);
-    return result;
-}
-
-// Average time per frame (and how much of it the physics took), logged every few seconds and when the window closes.
+// Average time per frame (and how much of it `work` took: the physics, the update of the rules), logged every few seconds
+// and when the window closes.
 class FrameStats {
 public:
-    void physics(double ms) { physicsMs_ += ms; }
+    explicit FrameStats(const char* work) : work_(work) {}
+
+    void work(double ms) { workMs_ += ms; }
 
     void frame() {
         const Clock::time_point now = Clock::now();
@@ -391,21 +374,53 @@ public:
 
     void report() {
         if (frames_ > 0) {
-            mb::logInfo("average frame time {:.2f} ms ({:.0f} fps) over {} frames, physics {:.2f} ms",
-                        totalMs_ / frames_, 1000.0 * frames_ / totalMs_, frames_, physicsMs_ / frames_);
+            mb::logInfo("average frame time {:.2f} ms ({:.0f} fps) over {} frames, {} {:.2f} ms", totalMs_ / frames_,
+                        1000.0 * frames_ / totalMs_, frames_, work_, workMs_ / frames_);
         }
         totalMs_ = 0;
-        physicsMs_ = 0;
+        workMs_ = 0;
         frames_ = 0;
     }
 
 private:
     static constexpr double kReportMs = 5000;
+    const char* work_;
     Clock::time_point last_{};
     double totalMs_ = 0;
-    double physicsMs_ = 0;
+    double workMs_ = 0;
     int frames_ = 0;
 };
+
+// The game: the main menu on a window, levels played from it, with sound, and what the player keeps saved.
+int runGame(const Options& options) {
+    Assets assets;
+    mb::SaveData save = openSave(options);
+    mb::logInfo("Save data: {}", options.autoplay ? "none (--autoplay)" : save.directory().string());
+    int windowWidth = 0, windowHeight = 0;
+    windowSize(options, save, windowWidth, windowHeight);
+    mb::Window window("Muggle Ball 3", windowWidth, windowHeight, save.settings.fullscreen);
+    mb::Renderer renderer(window);
+    mb::logInfo("GPU backend: {}", renderer.backendName());
+    mb::logInfo("Asset root: {}", assets.root.string());
+
+    mb::GameAudio audio(assets.root);  // after the window, so the device closes before SDL quits
+    mb_app::PlaySession session(renderer, assets, save, &audio, {.autoplay = options.autoplay});
+    mb_app::FrontEndOptions frontEnd;
+    frontEnd.language = options.form.language;
+    frontEnd.startLevel = options.level;
+    frontEnd.hideCursor = !options.autoplay;  // nobody plays with the pointer
+    mb_app::connectAudio(frontEnd, audio);
+    FrameStats stats("update");
+    frontEnd.events.frame = [&, audioFrame = std::move(frontEnd.events.frame)] {
+        audioFrame();
+        stats.work(session.takeUpdateMillis());
+        stats.frame();
+    };
+    const int result = mb_app::runFrontEnd(window, renderer, session, save, frontEnd);
+    stats.report();
+    saveWindowState(window, save, !options.sizeGiven);
+    return result;
+}
 
 int runWindow(const Options& options) {
     // Resolve the assets and the level first, so a bad argument fails before a window flashes up.
@@ -436,7 +451,7 @@ int runWindow(const Options& options) {
     mb_app::HudOverlay hud(renderer, options.hud);
     bool shapes = options.shapes;
     bool paused = false;
-    FrameStats stats;
+    FrameStats stats("physics");
     std::mt19937 random{std::random_device{}()};
     std::uniform_real_distribution<float> sideways(-5.0f, 5.0f);  // degrees off straight ahead
     Clock::time_point lastFrame = Clock::now();
@@ -489,7 +504,7 @@ int runWindow(const Options& options) {
         const float seconds = std::min(std::chrono::duration<float>(now - lastFrame).count(), kMaxFrameSeconds);
         lastFrame = now;
         if (!paused) {
-            stats.physics(viewer.stepPhysics(seconds));
+            stats.work(viewer.stepPhysics(seconds));
         }
         viewer.follow(shapes);
 
@@ -572,9 +587,11 @@ bool parseBallShot(const std::string& text, BallShot& out) {
 
 void printUsage() {
     std::fputs(
-        "usage: MuggleBall3 [--level <name|path.json>] [--ball [x,degrees]]\n"
+        "usage: MuggleBall3 [--autoplay [--level <name>]]\n"
+        "       MuggleBall3 [--level <name|path.json>] [--ball [x,degrees]]\n"
         "       MuggleBall3 --screenshot out.png [--size WxH] [--level ...] [--shapes] [--camera ex,ey,ez,tx,ty,tz,fov]\n"
         "                   [--simulate seconds] [--ball [x,degrees]]\n"
+        "       MuggleBall3 --screenshot out.png --level <name> --autoplay [--simulate seconds] [--size WxH]\n"
         "       MuggleBall3 [--level ...] [--hud] [--hud-state lives,score,level[,icon...]]\n"
         "       MuggleBall3 --check <level.json>\n"
         "       MuggleBall3 --form <name> [--screenshot out.png] [--size WxH] [--language L] [--hover W | --press W]"
@@ -598,6 +615,8 @@ int main(int argc, char** argv) {
             } else if (arg == "--level" && hasValue) {
                 options.level = argv[++i];
                 options.viewer = true;
+            } else if (arg == "--autoplay") {
+                options.autoplay = true;
             } else if (arg == "--screenshot" && hasValue) {
                 options.screenshot = argv[++i];
             } else if (arg == "--size" && hasValue && parseSize(argv[i + 1], options.width, options.height)) {
@@ -685,10 +704,14 @@ int main(int argc, char** argv) {
             printUsage();
             return 2;
         }
-        if (!options.screenshot.empty()) {
-            return runScreenshot(options);
+        if (options.autoplay && (options.shapes || options.ball || options.camera || options.hud.enabled)) {
+            printUsage();  // the level viewer's options: the game has its own camera, HUD and ball
+            return 2;
         }
-        return options.viewer ? runWindow(options) : runGame(options);
+        if (!options.screenshot.empty()) {
+            return options.autoplay ? runPlayScreenshot(options) : runScreenshot(options);
+        }
+        return options.viewer && !options.autoplay ? runWindow(options) : runGame(options);
     } catch (const std::exception& e) {
         mb::logError("fatal: {}", e.what());
         return 1;

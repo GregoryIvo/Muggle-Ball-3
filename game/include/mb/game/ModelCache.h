@@ -29,11 +29,16 @@ public:
     // Returns 0 (the renderer's white texture) when the image cannot be decoded; logged once.
     TextureHandle texture(const std::filesystem::path& file);
 
+    // A unit square in the xy plane, centred on the origin, facing -z (towards the viewer of the game's camera), the
+    // texture over all of it: what flashes and shadows are drawn on. Made on first use.
+    MeshHandle quad();
+
 private:
     Renderer& renderer_;
     std::filesystem::path meshesDir_;
     std::unordered_map<std::string, std::unique_ptr<Entry>> models_;  // null entries are failures
     std::unordered_map<std::string, TextureHandle> textures_;         // keyed by normalised path
+    MeshHandle quad_ = 0;
 };
 
 }  // namespace mb

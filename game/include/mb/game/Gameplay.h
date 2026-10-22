@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mb/engine/Math.h"
+#include "mb/game/BallReach.h"
 #include "mb/game/GameCamera.h"
 #include "mb/game/Level.h"
 #include "mb/game/MaterialLibrary.h"
@@ -20,7 +21,7 @@ namespace mb {
 // every frame, takes the events, and gives the session the cursor and the click:
 //
 //     std::optional<GameSession> session;  // not copyable or movable: it holds the physics world
-//     session.emplace(level, materials, SessionOptions{.levelEnd = TargetRule::BrickType});
+//     session.emplace(level, materials, SessionOptions{.hearts = 2});
 //     // every frame:
 //     session->update(dt, {.batTargetX = batTargetX(mouseX, mouseY, w, h, camera), .launch = clicked});
 //     for (const GameEvent& event : session->takeEvents()) { /* sounds, flashes, the HUD */ }
@@ -92,26 +93,45 @@ struct GameplayRules {
     float jamDistance = 1.0f;
     double jamTime = 1.0;
 
+    // ---- Targets the ball cannot get at (section 5.10; the end of the level, see GameSession)
+    // The grid the ground of the ball's plane is cut into for the look at what it can reach, BallReach.
+    float reachCell = 0.2f;
+    // What the look cannot tell: a piece that stays up where the physics left it (a mast held by joints that no longer
+    // hold it, a cactus that came to rest 10 cm above the ball's reach) is a target nobody can hit. When balls have been in
+    // flight this long without touching any brick and no more than stallMost targets, or stallShare of those the level
+    // began with, are left, they are let go and the level ends. The autopilot's runs that stood still (16 of the 63 levels
+    // it finished in 900 s, 6 of which it would not have finished without this) did so with 1 to 6 targets left [?].
+    double stallSeconds = 90;
+    int stallMost = 12;
+    float stallShare = 0.25f;
+
     // ---- Bricks (section 5)
     // A hit is a contact that begins with the ball closing on the thing at more than this share of its speed along
     // the contact normal (4.5 units/s of 15), and a ball laid on the floor or skimming past touches at none. A
     // ball that slides along a row of tiles meets the edge of each next one at up to a quarter of its speed, which
     // must not hurt it [I]. (Joints break at 2 units/s, the bounce threshold; that is a different thing.)
     float hitFraction = 0.3f;
-    // A dynamic body below this has left the board. It is taken out, and its brickScore is added if fallScores: a plank
-    // scored +34 while the ball was across the board, so loose pieces are destroyed without it, probably by falling or
-    // sinking ("Corrections" [M]; the cause [?]). It leaves the level's targets either way.
+    // A dynamic body below this has left the board: it stops being a target and is taken out (ActorFell), with no
+    // explosion. It is not destroyed. Loose pieces are destroyed by weapons and blasts (the Laser beam, lightning bolts,
+    // dynamite chains: step 5), not by falling or sinking: nothing that fell, sank or drifted died in the footage
+    // ("Rules settled by the second study" [M]). So it scores nothing; fallScores adds its brickScore, to try the other
+    // reading.
     float fallLimitY = -5.0f;
-    bool fallScores = true;
+    bool fallScores = false;
 };
 
-// Which objects must be destroyed to finish a level. The data does not say and the footage says only "when the last
-// destroyable brick is gone" (section 5.10), so there are two readings to try (docs/OBJECTS.md section 10), and a
-// third for a session that never ends.
+// Which objects must be destroyed to finish a level. The second study of the footage settled it (docs/GAMEPLAY.md,
+// "Rules settled by the second study"): DynamicBricks. BrickType, the other reading docs/OBJECTS.md section 10 weighed,
+// is refuted; it stays so that the autopilot's runs and the tests can still make a target out of a brick that does not
+// move. Never is for a session that never ends.
 enum class TargetRule {
-    // H-dyn: every brick and tree that is dynamic as saved; floor tiles, sharks and birds (kinematic) do not count.
+    // Every brick of material type 0 or 4 (people, buildings, ships, ground, rocks, crates, animals) and every tree that is
+    // dynamic as the level saved it. Not required: the kinematic ones (floor tiles, sharks, birds), and every object of a
+    // type other than brick and tree: metall, teleports, cannons, and, never seen to decide a level's end, dynamite,
+    // fireworks, generators, springs, volcanoes, cloth and vibro. Those can still be destroyed for their points.
     DynamicBricks,
-    // H-type: every brick whose material has brickType 0; crates, rocks, animals, ground (type 4) and trees (5) do not.
+    // Every brick whose material has brickType 0, moving or not; crates, rocks, animals, ground (type 4) and trees (5) do
+    // not count. The footage refutes it: a level did not end before its type 4 gorilla was destroyed.
     BrickType,
     // Nothing is a target: the level does not end (sandbox, measuring).
     Never,
@@ -119,15 +139,27 @@ enum class TargetRule {
 
 struct SessionOptions {
     GameplayRules rules;
-    // BrickType is the default: brickType is the field of the data that tells the targets (characters, buildings,
-    // ships, fences, lava) from ground, rocks, crates, animals and trees, and it does not depend on how a level
-    // happened to be saved (floor tiles are kinematic, 551 bodies are "dynamic" but welded to the world). In the
-    // autopilot runs nearly every level that finishes under H-dyn finishes under H-type too (tests/gameplay_smoke.cpp
-    // counts both). Neither can finish a level that has a target out of the ball's reach (above it on a support
-    // that stays, or beyond the walls), and 21 of the 83 have, most of them knight boards (docs/OBJECTS.md will say
-    // what the original counted). Until the footage settles it, a flow that must not stall needs forceLevelComplete()
-    // or a skip as well.
-    TargetRule levelEnd = TargetRule::BrickType;
+    // DynamicBricks is the default: the rule the footage shows (a level ends when the last dynamic brick or tree is gone,
+    // with metal, portals and cannons still on the board). The autopilot finishes 63 of the 83 levels in 900 s under it
+    // (tests/gameplay_smoke.cpp counts them), but not one that has a target out of the ball's reach (above it on a support
+    // that stays, or beyond the walls: 39 of the 83 have, most of them knight boards), so a target the ball cannot get at
+    // is not one: see ignoreUnreachable.
+    TargetRule levelEnd = TargetRule::DynamicBricks;
+    // A target does not count once the ball cannot get at it, so that no level ends up impossible to finish. The ball
+    // gets at what it can touch on its plane (a part of the plane joined to the bat's end of the board without a gap
+    // narrower than itself, bounded by the immovable parts of the level: walls, platforms, pinned buildings, and what is
+    // beyond the board's edge), and at what stands above the plane over ground it can be on, which falls if what holds
+    // it is a brick. So a target is out of play when
+    //  - it is within the ball's height and no ground it can be on is within a ball's radius of it: it is behind a wall,
+    //    beyond the edge of the board or in a pocket too narrow for the ball;
+    //  - it is higher, and is held where it is (pinned to the level, on a path, or a body that has no gravity) or has no
+    //    ground it can be on under it (it rests on a platform, a wall top or a building that the ball cannot touch or
+    //    destroy).
+    // The look is made when the level starts and then twice a second at every target that is a loose body (bricks fall
+    // and are thrown): what is out of play stays so, and counts for nothing in targetsLeft(), isTarget() and the end of
+    // the level. Weapons would reach more (step 5). False keeps every target of the rule, but for the last resort of
+    // GameplayRules::stallSeconds, which does not depend on it.
+    bool ignoreUnreachable = true;
     std::optional<int> hearts;  // carried over from the level before; GameplayRules::startHearts for the first
     std::int64_t score = 0;     // likewise
     PhysicsOptions physics;
@@ -144,7 +176,7 @@ enum class EventType {
     BrickHit,        // ball (-1 for hit()), actor, position (the contact), speed, energy (left), material
     // BrickDestroyed comes exploseDelay milliseconds after the hit that took the last energy.
     BrickDestroyed,  // actor, position (centre of mass), points (added to the score), material
-    ActorFell,       // actor, position (centre of mass), points (if fallScores), material: it left the board
+    ActorFell,       // actor, position (centre of mass), points (only with fallScores), material: it left the board
     BallLost,        // ball, position, velocity: behind the bat's line (or out of the world); it shrinks away
     BallFreed,       // ball, position: it was pinned and is put back in the world (see GameplayRules::jamTime)
     LifeLost,        // hearts (left): the heart is spent, 2.1 s after the last ball was lost
@@ -219,11 +251,14 @@ struct ActorStatus {
     int maxEnergy = 0;
     int textureIndex = 0;     // which of the material's textures shows now, see damageTextureIndex()
     bool target = false;      // it must be destroyed to finish the level, by the session's TargetRule
+    bool outOfPlay = false;   // the ball cannot get at it, so it does not count (SessionOptions::ignoreUnreachable)
 };
 
 struct SessionStats {
     int ballsLaunched = 0, ballsLost = 0, ballsFreed = 0, batHits = 0;
     int bricksHit = 0, bricksDestroyed = 0, actorsFallen = 0;
+    int targetsOutOfPlay = 0;  // targets of either rule the ball could not get at, found so far
+    int targetsLetGo = 0;      // targets that were let go because the level stood still (GameplayRules::stallSeconds)
 };
 
 // What the player does in a frame.
@@ -284,7 +319,7 @@ public:
     //  - a ball that touches a brick at more than hitFraction of its speed hits it (BrickHit): one hit takes one
     //    energy, at zero the brick explodes exploseDelay milliseconds later (BrickDestroyed): its body goes (and what
     //    rested on it falls), its brickScore is added;
-    //  - dynamic bodies below fallLimitY are taken out (ActorFell), with their points if fallScores;
+    //  - dynamic bodies below fallLimitY are taken out (ActorFell), no longer targets, with no points unless fallScores;
     //  - when no target is left, LevelComplete.
     void update(double seconds, const GameInput& input);
 
@@ -344,6 +379,7 @@ private:
         bool damageable = false;
         bool exploding = false;
         bool removed = false;
+        bool outOfPlay = false;  // a target the ball cannot get at: it does not count
         int energy = 0;
         int maxEnergy = 0;
         double explodeAt = 0;
@@ -358,7 +394,11 @@ private:
     double fixedStep_;
     std::vector<Brick> bricks_;  // by ActorIndex
     std::vector<ActorIndex> dynamicActors_;
-    int targetsLeft_[2] = {0, 0};  // by TargetRule
+    std::optional<BallReach> reach_;  // null with ignoreUnreachable off
+    std::vector<ActorIndex> loose_;   // the targets that are loose bodies and still count: looked at again and again
+    int targetsLeft_[2] = {0, 0};     // by TargetRule
+    int targetsAtStart_[2] = {0, 0};
+    double stalled_ = 0;              // seconds of play since a brick was last touched
     std::vector<ActorIndex> exploding_;
     std::vector<ActorIndex> hitThisStep_;
 
@@ -404,6 +444,10 @@ private:
     void explodeDue();
     void removeFallen();
     void removeBrick(ActorIndex actor);
+    bool inPlay(ActorIndex actor) const;
+    void releaseTargets(bool onlyLoose);
+    void dropTarget(ActorIndex actor);
+    void letGoOfStalled();
     void checkComplete();
     void complete();
     void emit(GameEvent event);

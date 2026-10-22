@@ -270,7 +270,8 @@ there are no prefixes to extend with a number: the `1` and `2` in
 `knight_period`. 23 of the 600 sound names in `materials.json` (18 different
 ones) are not in `sounds.xml` at all, for example `train_period`, `wood_hit`,
 `cannon_hit` and `jaba_drop`; `village_roof_drop` is spelled `village_roof_frop`
-in the XML. The runtime treats all of them as silent.
+in the XML. The runtime treats all of them as silent (`AUDIO.md` lists the five a
+hit or a destruction would play, and why none is mapped to a near name).
 
 ## Textures
 

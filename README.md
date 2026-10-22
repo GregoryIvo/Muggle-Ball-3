@@ -5,7 +5,7 @@ Alawar, 2006), built macOS-first. The runtime is new code; the game's art,
 sound, music and levels are loaded from **your own installed copy** and are
 never committed to this repository.
 
-Status: early. Step 2, drawing a level standing still, is done: the window opens
+Status: early, but a level can be played. Step 2, drawing a level standing still, is done: the window opens
 through the SDL3 GPU API (Metal on macOS) and shows any of the 83 converted
 levels from the original's fixed camera, with models, textures (animated ones
 included), sky and the level's own light, and wireframes of the physics shapes on
@@ -22,18 +22,21 @@ the sound library is ready for gameplay to play hits (see
 Options (volumes, check boxes, window size), the bat and the window itself (see
 [`docs/SAVES.md`](docs/SAVES.md)). The rules of play are in as `GameSession` (the
 bat, the ball, bricks that die and score, hearts, the end of a level; see
-[`docs/GAMEPLAY.md`](docs/GAMEPLAY.md)) and are tested without a window, but nothing
-draws or plays them yet, so a level cannot be played yet. Not there yet: prizes,
-sails (cloth), moving sharks and trains, cannons, shadows and reflections, and model
-animation.
+[`docs/GAMEPLAY.md`](docs/GAMEPLAY.md)), and a level is played with them: the mouse moves the
+bat and a click launches the ball; the bat swoops in and out, the ball rolls and shrinks away
+when it is lost, bricks that explode flash and leave, damaged ones show their cracks, and every
+hit has its sound. The hearts and points carry from level to level, a finished level opens the
+next, a lost game goes to Game Over or the high scores, and `--autoplay` lets an autopilot play
+(see below). Not there yet: prizes and the bat's weapons, sails (cloth), moving sharks and trains,
+cannons, reflections, particle systems, and model animation.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
 | `engine/` | Platform-neutral runtime: window and input, GPU renderer and shaders, model and image loading, physics (`PhysicsWorld` over Jolt), audio (Ogg Vorbis decoding, mixer, device), logging, paths |
-| `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, level physics (`PhysicsScene`), the rules of play (`GameSession`), camera, sound library, save data; the 2D UI (bitmap fonts, string table, menu forms, the menu screens and their flow, the HUD) |
-| `app/` | Executable entry point: the game's front end, the level viewer (with physics and music) and the menu form viewer |
+| `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, level physics (`PhysicsScene`), the rules of play (`GameSession`, `BallReach`), what a session looks and sounds like (`PlayScene`, `PlaySounds`), camera, sound library, save data; the 2D UI (bitmap fonts, string table, menu forms, the menu screens and their flow, the HUD) |
+| `app/` | Executable entry point: the game's front end and its play session (`PlaySession`), the level viewer (with physics and music) and the menu form viewer |
 | `platform/macos/` | App bundle metadata (the only per-platform code so far) |
 | `scripts/` | `package_macos.sh`: universal build, ad-hoc signing, Developer ID signing and notarization |
 | `tools/` | Asset pipeline: `convert_assets.py` runs the converters for levels (`mb3level.py`), meshes (`x2glb.py`), materials, sounds and music (`sounds.py`), textures, the menus, strings and fonts (`ui.py`) and the level list (`campaign.py`), object and particle definitions (`objects.py`), and on macOS the app icon (`make_icon.py`); also the MoleBox dumper and the shader compiler |
@@ -94,10 +97,13 @@ to regenerate them; that is the only thing that needs `glslangValidator` and
    ```sh
    MuggleBall3=./build/app/MuggleBall3.app/Contents/MacOS/MuggleBall3
    $MuggleBall3                                  # the game: the main menu
+   $MuggleBall3 --autoplay                       # the game, with the autopilot playing the levels you start
+   $MuggleBall3 --level piratos-ostrovok --autoplay   # straight into a level, played by the autopilot, then on to the next
    $MuggleBall3 --level piratos-ostrovok         # the level viewer on a level, by name (any case) or by .json path
    $MuggleBall3 --screenshot out.png --level cowboys-napadenie [--size 1024x768] [--shapes]
    $MuggleBall3 --level piratos-ostrovok --hud [--hud-state 3,1529,1,Cannon,Magnit]   # with the in-game HUD (also in screenshots)
    $MuggleBall3 --screenshot out.png --level piratos-ostrovok --simulate 3 --ball -5,0   # a test ball, 3 s of physics
+   $MuggleBall3 --screenshot out.png --level cowboys-napadenie --autoplay --simulate 20   # 20 s played by the autopilot, no window
    $MuggleBall3 --check assets/Data/Levels/piratos-po-krugy.json
    $MuggleBall3 --play-sound pirat_hit           # play a named sound (sounds.xml), wait, exit
    $MuggleBall3 --play-music Pirates --seconds 20  # one pass of Menu, Village, Pirates, Cowboys or Knights
@@ -107,10 +113,14 @@ to regenerate them; that is the only thing that needs `glslangValidator` and
 
    In the game: the main menu leads to Start Game, then a stage, then a level (or
    Quick Start); Escape in a menu goes one step back, Escape in a level pauses it
-   (Escape again: main menu, any other key: resume). The menus have their sounds and
-   music, the Options sliders set the volumes as you move them, and the game opens
-   with the window size, fullscreen state, volumes and bat you left it with. Every
-   level can be started from the stage screens for now, since nothing finishes a level.
+   (Escape again: main menu, any other key: resume). In a level the mouse is the bat (the
+   cursor is hidden and kept in the window), a click or Space launches the ball, and you have
+   two hearts to spare; a level is won when its last target is gone, then the next one of the
+   campaign follows with your hearts and points, and the one you finished is open on the stage
+   screens (the first level of each stage always is). Lose the last ball with no heart left and
+   you get Game Over, or the name entry if your points make the high-score table. The menus have
+   their sounds and music, the Options sliders set the volumes as you move them, and the game
+   opens with the window size, fullscreen state, volumes and bat you left it with.
    In the level viewer (`--level`, `--shapes`, `--camera`, `--hud`, `--ball`): Left/Right (or PageUp/PageDown) switch
    level, Space shoots a test ball, P pauses the physics, L reloads the level (with
    fresh physics), F1 shows the physics shapes (where the bodies are now), left-drag
@@ -124,7 +134,14 @@ to regenerate them; that is the only thing that needs `glslangValidator` and
    shoots a test ball at t = 0: from `(x, 1.2, -15)`, that many degrees off straight
    ahead, or without the argument at the middle of the movable bodies.
    `--camera ex,ey,ez,tx,ty,tz,fov` overrides the camera and `--size` sets the
-   window or image size. `MB3_GPU_DEBUG=1` turns on the GPU back end's validation
+   window or image size. `--autoplay` is the game, not the viewer: the autopilot (a player that needs
+   no hands: it launches at once and keeps the bat where the ball will meet it) plays the levels,
+   with `--level <name>` from that level on and without it from the ones you pick in the menus; it
+   plays on nobody's behalf, so it reads and writes none of your saved options, progress and scores
+   and leaves the mouse pointer alone;
+   with `--screenshot` it plays `--simulate <seconds>` of the level without a window and the
+   picture is the game's own, HUD included (a flash needs a lucky time to be caught). In the window
+   the log reports the frame time every few seconds. `MB3_GPU_DEBUG=1` turns on the GPU back end's validation
    layer. `--form` shows a menu form over the `background` form
    (`--no-background` leaves it out), with sample high scores; in the window Left/Right
    switch form and the menus work as in the game (the log names the sounds they would

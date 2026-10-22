@@ -1,5 +1,7 @@
 #include "mb/game/GameFlow.h"
 
+#include "mb/game/Gameplay.h"
+
 #include <algorithm>
 
 namespace mb {
@@ -20,10 +22,7 @@ GameFlow::Step GameFlow::update(const UiInput& input, double seconds, const UiLa
             if (result.kind == MenuResult::Kind::Quit) {
                 step.quit = true;
             } else if (result.kind == MenuResult::Kind::StartLevel) {
-                level_ = result.level;
-                mode_ = Mode::Loading;
-                loadAsked_ = loadDone_ = false;
-                menu_.open("Loading");  // drawn for a frame before the (blocking) build starts
+                startGame(result.level);
             }
             break;
         }
@@ -41,7 +40,7 @@ GameFlow::Step GameFlow::update(const UiInput& input, double seconds, const UiLa
             for (const UiInput::Pointer& sample : input.pointer) {
                 pointerDown_ = sample.down;
             }
-            if (has(input.keys, UiKey::Escape)) {
+            if (has(input.keys, UiKey::Escape) && !levelEnding_) {
                 mode_ = Mode::Paused;
             }
             break;
@@ -57,6 +56,7 @@ GameFlow::Step GameFlow::update(const UiInput& input, double seconds, const UiLa
                 menu_.open("MainMenu");
             } else if (resume) {
                 mode_ = Mode::Playing;
+                step.resumed = true;
             }
             break;
         }
@@ -64,20 +64,68 @@ GameFlow::Step GameFlow::update(const UiInput& input, double seconds, const UiLa
     return step;
 }
 
+void GameFlow::startGame(int level) {
+    level_ = level;
+    levelEnding_ = false;
+    hud_ = GameHud{};
+    hud_.lives = GameplayRules{}.startHearts;
+    hud_.level = level + 1;
+    levelStartScore_ = 0;
+    mode_ = Mode::Loading;
+    loadAsked_ = loadDone_ = advancing_ = false;
+    menu_.open("Loading");  // drawn for a frame before the (blocking) build starts
+}
+
 void GameFlow::loaded(bool ok) {
-    if (mode_ != Mode::Loading) {
+    if (mode_ != Mode::Loading && !advancing_) {
         return;
     }
-    if (ok) {
+    if (ok && !advancing_) {
         loadDone_ = true;
         menu_.setProgress(1);
-        hud_ = GameHud{};
-        hud_.level = level_ + 1;
-    } else {
+    }
+    advancing_ = false;
+    if (!ok) {
         mode_ = Mode::Menu;
         const Stage* stage = campaign_.stageOf(level_);
         menu_.open(stage ? stage->form : "MainMenu");
     }
+}
+
+GameFlow::Step GameFlow::levelEnded(LevelOutcome outcome) {
+    Step step;
+    if (mode_ != Mode::Playing || outcome == LevelOutcome::Playing) {
+        return step;
+    }
+    levelEnding_ = false;
+    const std::string* name = campaign_.levelName(level_);
+    const std::string level = name ? *name : std::string();
+    const int score = hud_.score;
+    const int earned = score - levelStartScore_;
+    if (outcome == LevelOutcome::GameOver) {
+        // The level's best is what was made on it, not the total the game was carrying.
+        save_.progress.recordScore(level, earned);
+        save_.saveProgress();
+        mode_ = Mode::Menu;
+        menu_.openGameOver(score, level);
+        return step;
+    }
+    if (const Stage* stage = campaign_.stageOf(level_)) {
+        save_.progress.recordCompletion(stage->name, level_ - stage->first, level, earned);
+        save_.saveProgress();
+    }
+    if (level_ + 1 < campaign_.levelCount()) {
+        ++level_;
+        hud_.level = level_ + 1;
+        hud_.powerUps.clear();
+        levelStartScore_ = score;
+        advancing_ = true;
+        step.loadLevel = level_;
+    } else {
+        mode_ = Mode::Menu;
+        menu_.openEnding(score, level);
+    }
+    return step;
 }
 
 }  // namespace mb

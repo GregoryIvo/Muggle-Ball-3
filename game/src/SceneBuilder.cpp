@@ -45,6 +45,9 @@ std::size_t distinctModelTextures(const Model& model, const std::vector<int>& no
 struct TexturePlan {
     std::vector<fs::path> files;  // empty: nothing found
     int animTimeMs = 0;           // > 0: files are animation frames
+    // The damage states of a material that has several and does not animate, in the material's order (an empty path
+    // where the texture was not found); `files` has the one a fresh brick shows.
+    std::vector<fs::path> states;
 };
 
 TexturePlan materialTextures(const GameMaterial& game, const TextureIndex& index, std::set<std::string>& missing) {
@@ -76,6 +79,11 @@ TexturePlan materialTextures(const GameMaterial& game, const TextureIndex& index
         // from the textures and the energies, not from the original's code.
         const int last = static_cast<int>(names.size()) - 1;
         resolve(names[std::clamp(game.brickEnergy - 1, 0, last)]);
+        if (names.size() > 1) {
+            for (const std::string& name : names) {
+                plan.states.push_back(index.find(name));
+            }
+        }
     }
     return plan;
 }
@@ -216,6 +224,7 @@ struct Builder {
                 if (!plan.files.empty()) {
                     draw.textures = plan.files;
                     draw.animTimeMs = plan.animTimeMs;
+                    draw.damageTextures = plan.states;
                 } else if (own) {
                     ownTexture(*own, draw);
                 }

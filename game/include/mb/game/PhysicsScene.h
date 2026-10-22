@@ -5,6 +5,7 @@
 #include "mb/game/Level.h"
 #include "mb/game/MaterialLibrary.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <set>
 #include <span>
@@ -107,6 +108,22 @@ PhysicsPlan planPhysics(const Level& level, const MaterialLibrary& materials, co
 
 // PhysX material of a game material.
 PhysicsMaterial physicsMaterial(const GameMaterial& material);
+
+// The box round a body's shapes with its frame at `pose`, in world space.
+struct Bounds {
+    Vec3 low{1e30f, 1e30f, 1e30f};
+    Vec3 high{-1e30f, -1e30f, -1e30f};
+
+    void add(Vec3 p, float grow) {
+        low = {std::min(low.x, p.x - grow), std::min(low.y, p.y - grow), std::min(low.z, p.z - grow)};
+        high = {std::max(high.x, p.x + grow), std::max(high.y, p.y + grow), std::max(high.z, p.z + grow)};
+    }
+    bool near(const Bounds& other, float margin) const {
+        return low.x < other.high.x + margin && high.x > other.low.x - margin && low.y < other.high.y + margin &&
+               high.y > other.low.y - margin && low.z < other.high.z + margin && high.z > other.low.z - margin;
+    }
+};
+Bounds boundsOf(const BodyDesc& body, const Mat4& pose);
 
 // The points of a body's shapes (corners, hull points, the bottom of spheres and capsules) within 0.3 units of
 // its lowest one, in world space with the body's frame at `pose`: where it would touch what it rests on.

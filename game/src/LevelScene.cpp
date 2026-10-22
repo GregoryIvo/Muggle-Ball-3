@@ -1,5 +1,6 @@
 #include "mb/game/LevelScene.h"
 
+#include <algorithm>
 #include <optional>
 #include <utility>
 
@@ -51,11 +52,28 @@ LevelScene::LevelScene(ModelCache& cache, const MaterialLibrary& materials, cons
     };
 
     items_.reserve(scene.draws.size());
+    const std::vector<ActorRef> actors = flattenActors(level);
+    actorStart_.assign(actors.size() + 1, 0);
+    for (const SceneDraw& draw : scene.draws) {
+        ++actorStart_[draw.actor + 1];
+    }
+    for (std::size_t i = 1; i < actorStart_.size(); ++i) {
+        actorStart_[i] += actorStart_[i - 1];
+    }
+    actorItems_.resize(scene.draws.size());
+    std::vector<std::uint32_t> filled(actorStart_.begin(), actorStart_.end() - 1);
     for (const SceneDraw& draw : scene.draws) {
         auto [item, animation] = prepare(draw);
+        actorItems_[filled[draw.actor]++] = static_cast<std::uint32_t>(items_.size());
         if (animation) {
             animation->item = items_.size();
             animations_.push_back(std::move(*animation));
+        }
+        if (!draw.damageTextures.empty()) {
+            std::vector<TextureHandle>& states = damage_[items_.size()];
+            for (const std::filesystem::path& file : draw.damageTextures) {
+                states.push_back(file.empty() ? 0 : cache.texture(file));
+            }
         }
         const ActorPlan* actor = draw.actor < physics.actors.size() ? &physics.actors[draw.actor] : nullptr;
         if (actor && actor->simulated && actor->motion != MotionType::Static) {
@@ -64,13 +82,13 @@ LevelScene::LevelScene(ModelCache& cache, const MaterialLibrary& materials, cons
         items_.push_back(item);
     }
     levelItems_ = items_.size();
+    hidden_.assign(levelItems_, false);
 
     // The ball's texture is a single frame, so there is nothing to animate.
     for (const SceneDraw& draw : describeScene(ballLevel(), lookup, materials, textures).draws) {
         ballItems_.push_back(prepare(draw).first);
     }
 
-    const std::vector<ActorRef> actors = flattenActors(level);
     for (ActorShapeLines& entry : actorShapeLines(level)) {
         const Mat4 pose = rigidTransform(actors[entry.actor].actor->pose);
         const ActorPlan* actor = entry.actor < physics.actors.size() ? &physics.actors[entry.actor] : nullptr;
@@ -91,6 +109,39 @@ void LevelScene::update(double seconds) {
     for (const Animation& animation : animations_) {
         const std::size_t frame = animationFrame(milliseconds, animation.frameTimeMs, animation.frames.size());
         items_[animation.item].material.texture = animation.frames[frame];
+    }
+}
+
+void LevelScene::hide(ActorIndex actor) {
+    if (actor >= actorStart_.size() - 1) {
+        return;
+    }
+    for (std::uint32_t i = actorStart_[actor]; i < actorStart_[actor + 1]; ++i) {
+        hidden_[actorItems_[i]] = true;
+    }
+}
+
+void LevelScene::setDamage(ActorIndex actor, int index) {
+    if (actor >= actorStart_.size() - 1 || index < 0) {
+        return;
+    }
+    for (std::uint32_t i = actorStart_[actor]; i < actorStart_[actor + 1]; ++i) {
+        const auto states = damage_.find(actorItems_[i]);
+        if (states == damage_.end()) {
+            continue;
+        }
+        const TextureHandle texture = states->second[std::min<std::size_t>(static_cast<std::size_t>(index), states->second.size() - 1)];
+        if (texture != 0) {
+            items_[actorItems_[i]].material.texture = texture;
+        }
+    }
+}
+
+void LevelScene::appendDrawn(std::vector<DrawItem>& out) const {
+    for (std::size_t i = 0; i < items_.size(); ++i) {
+        if (i >= levelItems_ || !hidden_[i]) {
+            out.push_back(items_[i]);
+        }
     }
 }
 

@@ -53,20 +53,7 @@ float roundness(const PhysicsShape& shape) {
     return shape.type == PhysicsShapeType::Sphere || shape.type == PhysicsShapeType::Capsule ? shape.radius : 0.0f;
 }
 
-// The box round a body's shapes with its frame at `pose`, in world space.
-struct Bounds {
-    Vec3 low{1e30f, 1e30f, 1e30f};
-    Vec3 high{-1e30f, -1e30f, -1e30f};
-
-    void add(Vec3 p, float grow) {
-        low = {std::min(low.x, p.x - grow), std::min(low.y, p.y - grow), std::min(low.z, p.z - grow)};
-        high = {std::max(high.x, p.x + grow), std::max(high.y, p.y + grow), std::max(high.z, p.z + grow)};
-    }
-    bool near(const Bounds& other, float margin) const {
-        return low.x < other.high.x + margin && high.x > other.low.x - margin && low.y < other.high.y + margin &&
-               high.y > other.low.y - margin && low.z < other.high.z + margin && high.z > other.low.z - margin;
-    }
-};
+}  // namespace
 
 Bounds boundsOf(const BodyDesc& body, const Mat4& pose) {
     Bounds bounds;
@@ -78,8 +65,6 @@ Bounds boundsOf(const BodyDesc& body, const Mat4& pose) {
     }
     return bounds;
 }
-
-}  // namespace
 
 std::vector<Vec3> lowestPoints(const BodyDesc& body, const Mat4& pose) {
     std::vector<Vec3> points;

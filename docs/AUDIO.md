@@ -108,6 +108,37 @@ the menus come back, or their first hover sound would wait: the front end announ
 the menus' sounds play after it, and `tests/frontend_smoke.cpp` checks the sequence through the real front end. A
 sound that must play during a pause would need a mixer that pauses only the game's voices; this one cannot.
 
+### In play
+
+`PlaySession` plays the events of a `GameSession` through `PlaySounds` (`game/PlaySounds.h`), panned by where on the board they
+happened (x over half the board's width, within -1 and 1) and at the sound's own volume; the library's replay delays
+hold back a pile of the same sound in one frame.
+
+| Event | Sound | How sure |
+|---|---|---|
+| `BrickHit` | the material's `hit` sound | data (`sounds` of the material) |
+| `BrickDestroyed` | the material's `dead` sound | data |
+| `ActorFell` with points | the material's `dead` sound (a piece that was scored was destroyed); a piece that fell scores nothing by default (`GameplayRules::fallScores`), so none | inferred |
+| `BatHit`, `BallLaunched` | `ballHitBat` (the launch is the bat's hit on the ball) | name in `sounds.xml`, use inferred |
+| `BoardHit` | `ballHitBoard` (the ball material's own `hit` sound) | data |
+| `BallsHit` | `ballHitBall` (the ball material's `period` sound) | data |
+| `BatLeft` | `bat_dead`: the bat flies off after the last ball is lost | inferred |
+| `LevelComplete` | `endlevel` (also the Next Level prize's sound) | inferred |
+| `BallLost`, `BallFreed`, `LifeLost`, `BatEntered`, `GameOver` | none | |
+
+`ballMagnited`, `ballRubbered`, `explosion_ball` and the prizes' sounds wait for the prizes (step 5).
+
+**Sounds a brick names that `sounds.xml` does not have.** Five names are heard in play, and each is silent and warned about once
+(`SoundLibrary::lookup`; `tests/test_sound.cpp` checks that a repeated unknown name warns once): `wood_hit` and `wood_dead`
+(the barrel `apple_bochka.jpg`, in 7 cowboy levels), `cannon_hit` and `cannon_dead` (the interactive cannon `int_cannon`, in 11 levels
+of all four worlds) and `mikrofon_hit` (the microphone `mikrofon`, in `knight-miss-1457` and `village-rock-koncert`). The other
+thirteen of the 18 that `ASSET_FORMATS.md` counts are `*_period` and `*_drop` sounds, which are not played yet. None of the five has a
+near name that is a misspelling: the closest are the world-prefixed `cowboy_wood_hit` (which has no file itself) and
+`cowboy_wood_dead`, `cannon` (the Cannon prize's sound) and `mikrofon_dead`/`mikrofon_drop`, which belong to other bricks or other
+events, so they are not mapped (as `village_roof_frop`, a typo of a drop sound that has no file either, is not): the original looked
+these names up as they are, and a hit that makes no sound is what its data says. If the original turns out to have played the
+`cowboy_wood_*` pair for the barrel, the change is the two names in `materials.json`.
+
 ## Trying it without speakers
 
 ```sh

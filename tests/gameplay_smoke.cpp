@@ -1,18 +1,22 @@
 // Plays every converted level with the autopilot against the real game data (needs it: skips with exit code 77 when
 // MB3_ASSETS is not set), no GPU.
 //
-//   mb_gameplay_smoke [--seconds S] [--log] [--left] [level]
+//   mb_gameplay_smoke [--seconds S] [--rule never|type|dyn] [--strict] [--log] [--left] [level]
 //        each level is played for S seconds of game time (default 60) by the autopilot (the bat follows the ball that
-//        comes down first), with hearts to spare so that it plays on after a lost ball, and the level ending set to
-//        "never" so that both readings of "destroy every target" (TargetRule) can be followed in one run. The table
-//        has, per level: the targets under each reading at the start; bricks destroyed, points, balls lost, bat hits,
-//        brick hits and balls freed from a pin; the targets left under each reading, and when each reading's last
-//        target fell (a dash: not within S). Sanity is asserted, not the result: no pose may be not finite, no body
-//        may fly faster than a sane simulation, a ball's speed must be the rules' speed and its y the plane's after
-//        every frame, a ball may only leave past the bat, a ball in flight must move at least 0.3 units in 2 s (the
-//        speed the session reports is the one it sets, so a ball frozen by the solver shows only here), and none may
+//        comes down first), with hearts to spare so that it plays on after a lost ball, and ends as the game ends it
+//        (SessionOptions::levelEnd: the dynamic bricks and trees, with the look at what the ball can reach and the stall
+//        rule as safety nets). --rule never keeps the level going, so that both readings of "destroy every target"
+//        (TargetRule) can be followed in one run, and --rule type or dyn picks one. The table has, per level: the targets
+//        under each reading at the start; bricks destroyed, points, balls lost, bat hits, brick hits and balls freed from a
+//        pin; the targets left under each reading, and when each reading's last target fell (a dash: not within S); with the
+//        level's own rule the summary counts the levels it finished and how many of those only the stall rule ended (a
+//        line under the level says how many targets it let go). Sanity is asserted, not the result: no pose may be not
+//        finite, no body may fly faster than a sane simulation, a ball's speed must be the rules' speed and its y the
+//        plane's after every frame, a ball may only leave past the bat, a ball in flight must move at least 0.3 units in 2 s
+//        (the speed the session reports is the one it sets, so a ball frozen by the solver shows only here), and none may
 //        be pinned against the bat (the session frees a ball that is pinned elsewhere, in a pocket of the board, and
-//        the table counts those). With a level name, --log prints its event log.
+//        the table counts those). --strict switches the look at what the ball can reach and the stall rule off. With a
+//        level name, --log prints its event log.
 
 #include "mb/game/Autopilot.h"
 #include "mb/game/Gameplay.h"
@@ -61,9 +65,12 @@ struct Outcome {
     SessionStats stats;
     std::int64_t score = 0;
     int hearts = 0;
+    bool complete = false;           // the level ended: every target gone or let go of
+    int letGo = 0;                   // targets let go of because the level stood still
     int targetsAtStart[2] = {0, 0};  // DynamicBricks, BrickType
     int targetsLeft[2] = {0, 0};
     double finishedAt[2] = {-1, -1};
+    double lastProgress = 0;  // when the last brick went (destroyed or fallen): a level far from done that has stood still a long time is stuck
     float fastest = 0;
     float furthest = 0;  // the ball's greatest |x|
     float farthest = 0;  // and its greatest z
@@ -86,9 +93,16 @@ const char* motionName(MotionType motion) {
     return motion == MotionType::Dynamic ? "dynamic" : (motion == MotionType::Kinematic ? "kinem." : "static");
 }
 
+TargetRule gRule = SessionOptions{}.levelEnd;
+bool gStrict = false;  // every target counts, whatever the ball can reach, and the level never stands still
+
 Outcome play(const Level& level, const MaterialLibrary& materials, double seconds) {
     SessionOptions options;
-    options.levelEnd = TargetRule::Never;
+    options.levelEnd = gRule;
+    if (gStrict) {
+        options.ignoreUnreachable = false;
+        options.rules.stallSeconds = 1e9;
+    }
     options.hearts = 99;
     GameSession session(level, materials, options);
 
@@ -169,6 +183,9 @@ Outcome play(const Level& level, const MaterialLibrary& materials, double second
                  static_cast<double>(std::max<std::uint64_t>(frame, 1));
 
     for (const GameEvent& event : result.events) {
+        if (event.type == EventType::BrickDestroyed || event.type == EventType::ActorFell) {
+            out.lastProgress = event.time;
+        }
         // A ball may only leave past the bat.
         if (event.type == EventType::BallLost &&
             !(event.position.z < rules.ballLostZ && event.position.z > rules.ballLostZ - 1.0f &&
@@ -181,6 +198,8 @@ Outcome play(const Level& level, const MaterialLibrary& materials, double second
         out.problems.push_back(std::format("a body reached {:.0f} units per second", static_cast<double>(out.fastest)));
     }
     out.stats = session.stats();
+    out.complete = session.phase() == SessionPhase::Complete;
+    out.letGo = session.stats().targetsLetGo;
     out.score = session.score();
     out.hearts = session.hearts();
     for (int i = 0; i < 2; ++i) {
@@ -211,14 +230,24 @@ std::string finish(double at) {
     return at < 0 ? "-" : std::format("{:.1f}", at);
 }
 
+std::string join(const std::vector<std::string>& parts) {
+    std::string text;
+    for (const std::string& part : parts) {
+        text += (text.empty() ? "" : ", ") + part;
+    }
+    return text;
+}
+
 int run(const MaterialLibrary& materials, const LevelCatalog& catalog, double seconds, bool log, bool left,
         const char* only) {
-    std::printf("%-26s | %9s | %5s %7s %4s %5s %6s %5s | %9s | %-11s | %s\n", "level", "targets", "dead", "points",
-                "lost", "bat", "hits", "freed", "left", "done at (s)", "ms/step");
-    std::printf("%-26s | %4s %4s | %5s %7s %4s %5s %6s %5s | %4s %4s | %5s %5s |\n", "", "dyn", "type", "", "", "", "",
-                "", "", "dyn", "type", "dyn", "type");
+    std::printf("%-26s | %14s | %5s %7s %4s %5s %6s %5s | %9s | %-11s | %7s | %s\n", "level", "targets", "dead", "points",
+                "lost", "bat", "hits", "freed", "left", "done at (s)", "last (s)", "ms/step");
+    std::printf("%-26s | %4s %4s %4s | %5s %7s %4s %5s %6s %5s | %4s %4s | %5s %5s | %7s |\n", "", "dyn", "type", "out", "",
+                "", "", "", "", "", "dyn", "type", "dyn", "type", "");
     int failed = 0, levels = 0, finishedBy[2] = {0, 0}, withTargets[2] = {0, 0};
-    int emptyLevels = 0, standingHigh = 0, standingOutside = 0, standingOnField = 0, freed = 0, levelsWithFreed = 0;
+    int emptyLevels = 0, levelsLetGo = 0, standingHigh = 0, standingOutside = 0, standingOnField = 0, freed = 0, levelsWithFreed = 0;
+    int completed = 0, outOfPlay = 0, levelsOutOfPlay = 0;
+    std::vector<std::string> notCompleted;
     double share[2] = {0, 0};  // summed over the levels: the part of the targets destroyed
     double stepMs = 0, worstStepMs = 0, slowest = 0;
     std::string worstLevel;
@@ -229,11 +258,11 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, double se
         ++levels;
         const Level level = loadLevelJson(entry.path);
         const Outcome out = play(level, materials, seconds);
-        std::printf("%-26s | %4d %4d | %5d %7lld %4d %5d %6d %5d | %4d %4d | %5s %5s | %.3f\n", entry.name.c_str(),
-                    out.targetsAtStart[0], out.targetsAtStart[1], out.stats.bricksDestroyed,
+        std::printf("%-26s | %4d %4d %4d | %5d %7lld %4d %5d %6d %5d | %4d %4d | %5s %5s | %7.1f | %.3f\n", entry.name.c_str(),
+                    out.targetsAtStart[0], out.targetsAtStart[1], out.stats.targetsOutOfPlay, out.stats.bricksDestroyed,
                     static_cast<long long>(out.score), out.stats.ballsLost, out.stats.batHits, out.stats.bricksHit,
                     out.stats.ballsFreed, out.targetsLeft[0], out.targetsLeft[1], finish(out.finishedAt[0]).c_str(),
-                    finish(out.finishedAt[1]).c_str(), out.stepMs);
+                    finish(out.finishedAt[1]).c_str(), out.lastProgress, out.stepMs);
         std::fflush(stdout);
         for (int i = 0; i < 2; ++i) {
             withTargets[i] += out.targetsAtStart[i] > 0;
@@ -243,6 +272,16 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, double se
             }
         }
         emptyLevels += out.targetsAtStart[0] == 0 || out.targetsAtStart[1] == 0;
+        levelsLetGo += out.letGo > 0;
+        completed += out.complete;
+        outOfPlay += out.stats.targetsOutOfPlay;
+        levelsOutOfPlay += out.stats.targetsOutOfPlay > 0;
+        if (!out.complete && gRule != TargetRule::Never) {
+            notCompleted.push_back(std::format("{} ({} left)", entry.name, out.targetsLeft[static_cast<int>(gRule)]));
+        }
+        if (out.letGo > 0) {
+            std::printf("  (%d targets were let go: the level stood still from %.1f s)\n", out.letGo, out.lastProgress);
+        }
         freed += out.stats.ballsFreed;
         levelsWithFreed += out.stats.ballsFreed > 0;
         standingHigh += out.standingHigh;
@@ -270,12 +309,23 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, double se
         }
     }
     std::printf("\n%d levels played for %.0f s of game time each by the autopilot\n", levels, seconds);
-    std::printf("finished within the time, targets being every dynamic brick and tree (H-dyn): %d of %d levels\n",
-                finishedBy[0], withTargets[0]);
-    std::printf("finished within the time, targets being every brick of material type 0 (H-type): %d of %d levels\n",
-                finishedBy[1], withTargets[1]);
-    std::printf("on average %.0f%% of the targets were destroyed under H-dyn and %.0f%% under H-type\n",
-                100 * share[0] / std::max(withTargets[0], 1), 100 * share[1] / std::max(withTargets[1], 1));
+    if (gRule == TargetRule::Never) {
+        std::printf("finished within the time, targets being every dynamic brick and tree (H-dyn): %d of %d levels\n",
+                    finishedBy[0], withTargets[0]);
+        std::printf("finished within the time, targets being every brick of material type 0 (H-type): %d of %d levels\n",
+                    finishedBy[1], withTargets[1]);
+        std::printf("on average %.0f%% of the targets were destroyed under H-dyn and %.0f%% under H-type\n",
+                    100 * share[0] / std::max(withTargets[0], 1), 100 * share[1] / std::max(withTargets[1], 1));
+    } else {
+        std::printf("levels completed within the time: %d of %d (%d by destroying every target, %d only because the stall rule "
+                    "let go of the last few)\n",
+                    completed, levels, completed - levelsLetGo, levelsLetGo);
+        if (!notCompleted.empty()) {
+            std::printf("not completed (%zu): %s\n", notCompleted.size(), join(notCompleted).c_str());
+        }
+        std::printf("on average %.0f%% of the targets were destroyed\n", 100 * share[static_cast<int>(gRule)] / std::max(withTargets[static_cast<int>(gRule)], 1));
+        std::printf("the look at what the ball can reach put %d targets out of play, in %d levels\n", outOfPlay, levelsOutOfPlay);
+    }
     std::printf("targets still standing at the end under either reading: %d on the field, %d higher than %.1f (out of "
                 "reach until they fall), %d beyond where any ball went (out of reach)\n",
                 standingOnField, standingHigh, static_cast<double>(kHigh), standingOutside);
@@ -313,10 +363,15 @@ int main(int argc, char** argv) {
             log = true;
         } else if (std::strcmp(argv[i], "--left") == 0) {
             left = true;
+        } else if (std::strcmp(argv[i], "--strict") == 0) {
+            gStrict = true;
+        } else if (std::strcmp(argv[i], "--rule") == 0 && i + 1 < argc) {
+            const std::string rule = argv[++i];
+            gRule = rule == "type" ? TargetRule::BrickType : (rule == "dyn" ? TargetRule::DynamicBricks : TargetRule::Never);
         } else if (argv[i][0] != '-') {
             only = argv[i];
         } else {
-            std::printf("usage: mb_gameplay_smoke [--seconds S] [--log] [--left] [level]\n");
+            std::printf("usage: mb_gameplay_smoke [--seconds S] [--rule never|type|dyn] [--strict] [--log] [--left] [level]\n");
             return 2;
         }
     }

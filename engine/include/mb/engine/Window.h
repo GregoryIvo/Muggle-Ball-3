@@ -64,6 +64,9 @@ public:
     void setTextInput(bool on);
 
     void setTitle(const std::string& title);
+    // While a level is played the pointer is the bat: the system cursor is hidden and kept inside the window, so that a
+    // flick past the edge does not lose the bat. False shows and frees it again (the menus, the pause screen).
+    void setCursorHidden(bool hidden);
     // The window's size in points (the unit of the constructor's size).
     void setSize(int width, int height);
     // The size in points of the display the window is on; false if SDL cannot tell.

@@ -4,6 +4,7 @@
 #include "mb/game/GameCamera.h"
 #include "mb/game/LevelCatalog.h"
 #include "mb/game/PhysicsScene.h"
+#include "mb/game/PlayScene.h"
 #include "mb/game/SceneBuilder.h"
 
 #include <algorithm>
@@ -352,9 +353,9 @@ void testTextureRules() {
     TextureDir dir;
     const fs::path wood = dir.add("Wood.jpg");
     const fs::path ball = dir.add("Ball.png");
-    dir.add("Crate-D.jpg");
-    dir.add("Crate-C.jpg");
-    dir.add("Crate-B.jpg");
+    const fs::path crateD = dir.add("Crate-D.jpg");
+    const fs::path crateC = dir.add("Crate-C.jpg");
+    const fs::path crateB = dir.add("Crate-B.jpg");
     const fs::path crateA = dir.add("Crate-A.jpg");
     const fs::path f1 = dir.add("F1.png");
     const fs::path f2 = dir.add("F2.png");
@@ -431,6 +432,12 @@ void testTextureRules() {
     scene = describe(brick("test.x", "One", "Crate.jpg", 7));
     check(scene.draws.at(0).textures == std::vector<fs::path>{crateA} && scene.draws.at(0).animTimeMs == 0,
           "texture: damage states show the intact one");
+    check(scene.draws.at(0).damageTextures == std::vector<fs::path>{crateD, crateC, crateB, crateA},
+          "texture: and all of them are there for the game to switch between, most damaged first");
+    scene = describe(brick("test.x", "One", "Wood.jpg"));
+    check(scene.draws.at(0).damageTextures.empty(), "texture: a material with one texture has no damage states");
+    scene = describe(brick("test.x", "One", "Spin"));
+    check(scene.draws.at(0).damageTextures.empty(), "texture: nor has an animated one");
 
     // 7. No game material, but the material names a texture.
     scene = describe(brick("test.x", "One", "sky.jpg"));
@@ -704,6 +711,114 @@ void testCamera() {
 
 }  // namespace
 
+// The bat swoops in, stands, and spins off; the held ball shows as the bat lands.
+void testBatPose() {
+    BatView bat;
+    bat.position = {5, 0.6f, -21};
+    bat.phase = BatPhase::Present;
+    check(near(batPose(bat).position, {5, 0, -21}) && batPose(bat).visible && near(batPose(bat).yaw, 0) && near(batPose(bat).scale, 1),
+          "bat: it stands on the floor under the centre of its sphere");
+    bat.velocityX = 10;
+    check(near(batPose(bat, 0.01f).position.x, 5.1f), "bat: and is carried on with its speed between steps");
+
+    bat.velocityX = 0;
+    bat.phase = BatPhase::Entering;
+    bat.phaseDuration = 0.5;
+    bat.phaseTime = 0;
+    const BatPose start = batPose(bat);
+    check(start.visible && start.position.x < 5 - 20 && start.position.z < -21 - 5,
+          "bat: it starts beyond the lower left, nearer the player");
+    float last = start.position.x;
+    bool moves = true;
+    for (double t = 0.05; t <= 0.5; t += 0.05) {
+        bat.phaseTime = t;
+        const BatPose pose = batPose(bat);
+        moves = moves && pose.position.x >= last - 1e-4f;
+        last = pose.position.x;
+    }
+    check(moves, "bat: and comes right all the way");
+    bat.phaseTime = 0.5;
+    check(near(batPose(bat).position, {5, 0, -21}) && near(batPose(bat).yaw, 0), "bat: it lands where it will stand, no longer turned");
+    bat.phaseTime = 0.25;
+    check(batPose(bat).position.y > 0.5f && batPose(bat).yaw != 0, "bat: halfway it is in the air, still spinning");
+    bat.phaseDuration = 0;
+    check(near(batPose(bat).position, {5, 0, -21}), "bat: a swoop of no duration has landed");
+
+    check(heldBallScale(bat) == 1, "held ball: shown at once when there is no swoop");
+    bat.phaseDuration = 0.5;
+    bat.phaseTime = 0.2;
+    check(heldBallScale(bat) == 0, "held ball: not while the bat is still on its way");
+    bat.phaseTime = 0.5;
+    check(near(heldBallScale(bat), 1), "held ball: and whole when the bat has landed");
+    bat.phaseTime = 0.42;
+    check(heldBallScale(bat) > 0 && heldBallScale(bat) < 1, "held ball: growing as it lands");
+    bat.phase = BatPhase::Present;
+    check(heldBallScale(bat) == 1, "held ball: shown while the bat stands");
+
+    bat.phase = BatPhase::Leaving;
+    bat.phaseDuration = 0.4;
+    bat.phaseTime = 0.2;
+    const BatPose leaving = batPose(bat);
+    check(leaving.visible && leaving.position.x > 5 && leaving.scale < 1 && heldBallScale(bat) == 0,
+          "bat: leaving it goes to the right, because it stood to the right of the middle, and gets smaller");
+    bat.position.x = -5;
+    check(batPose(bat).position.x < -5, "bat: and to the left from the left");
+    bat.phaseTime = 0.4;
+    check(!batPose(bat).visible, "bat: gone when its time is up");
+    bat.phase = BatPhase::Absent;
+    check(!batPose(bat).visible, "bat: absent");
+}
+
+// A ball is carried on past the session's last step: a ball in flight with its velocity, a held one with the bat.
+void testBallPosition() {
+    BatView bat;
+    bat.position = {5, 0.6f, -21};
+    bat.phase = BatPhase::Present;
+    bat.velocityX = 10;
+    BallView flying;
+    flying.position = {1, 0.6f, 2};
+    flying.velocity = {3, 0, 12};
+    check(near(ballPosition(flying, bat, 0.01f), {1.03f, 0.6f, 2.12f}) && near(ballPosition(flying, bat, 0), flying.position),
+          "ball: in flight it goes on with its velocity");
+
+    BallView held;
+    held.held = true;
+    held.position = {bat.position.x - 0.75f, 0.6f, -17.3f};
+    check(near(ballPosition(held, bat, 0.01f), {held.position.x + 0.1f, 0.6f, -17.3f}),
+          "ball: held, it is carried on with the bat, 0.1 further at 10 units/s and 0.01 s");
+    check(near(ballPosition(held, bat, 0.01f).x - held.position.x, batPose(bat, 0.01f).position.x - batPose(bat, 0).position.x),
+          "ball: by exactly the lead the bat has, so that it does not move against it");
+    bat.phase = BatPhase::Entering;
+    bat.phaseDuration = 0.7;
+    check(near(ballPosition(held, bat, 0.01f), held.position), "ball: and as the bat comes in, which is not carried on, it stays");
+}
+
+void testRotationAxis() {
+    // As rotationX, rotationY and rotationZ turn: a quarter turn about z takes x to y.
+    check(near(transformPoint({1, 0, 0}, Mat4::rotationAxis({0, 0, 1}, kPi / 2)), {0, 1, 0}) &&
+              near(transformPoint({1, 0, 0}, Mat4::rotationZ(kPi / 2)), {0, 1, 0}),
+          "rotation: a quarter turn about z takes x to y, as rotationZ does");
+    const Vec3 axes[] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+    const Mat4 reference[] = {Mat4::rotationX(0.7f), Mat4::rotationY(0.7f), Mat4::rotationZ(0.7f)};
+    bool same = true;
+    for (int a = 0; a < 3; ++a) {
+        const Mat4 m = Mat4::rotationAxis(axes[a], 0.7f);
+        for (int i = 0; i < 4; ++i) {
+            for (int j = 0; j < 4; ++j) {
+                same = same && near(m.m[i][j], reference[a].m[i][j]);
+            }
+        }
+    }
+    check(same, "rotation: about a coordinate axis it is rotationX, Y or Z");
+    // A ball that rolls towards +x turns its top forwards: the axis across the path is (dz, 0, -dx).
+    const Mat4 roll = Mat4::rotationAxis({0, 0, -1}, 0.3f);
+    check(transformPoint({0, 1, 0}, roll).x > 0, "rotation: rolling along +x moves the top towards +x");
+    const Mat4 about = Mat4::rotationAxis(normalize({1, 2, -1}), 1.1f);
+    check(near(length(transformPoint({3, -1, 2}, about)), length(Vec3{3, -1, 2})) &&
+              near(transformPoint(normalize({1, 2, -1}), about), normalize({1, 2, -1})),
+          "rotation: about any axis it keeps lengths, and the axis stays put");
+}
+
 int main() {
     testMeshFileName();
     testUnsafeMeshIsNeverLookedUp();
@@ -720,6 +835,9 @@ int main() {
     testHullLines();
     testCatalog();
     testCamera();
+    testBatPose();
+    testBallPosition();
+    testRotationAxis();
     if (failures == 0) {
         std::puts("all scene tests passed");
     }

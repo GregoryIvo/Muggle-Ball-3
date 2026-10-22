@@ -7,6 +7,7 @@
 #include "mb/engine/Renderer.h"
 #include "mb/game/Campaign.h"
 #include "mb/game/GameFlow.h"
+#include "mb/game/Gameplay.h"
 #include "mb/game/Hud.h"
 #include "mb/game/LevelCatalog.h"
 #include "mb/game/Menu.h"
@@ -210,7 +211,7 @@ void checkCrawl(const fs::path& root, Game& game) {
 
 // A walk through the screens with the real forms and layouts.
 void checkWalk(Game& game) {
-    mb::GameFlow flow(game.menu, game.campaign);
+    mb::GameFlow flow(game.menu, game.campaign, game.save);
     const auto step = [&](const mb::UiInput& in = {}, double seconds = 0.016) {
         return flow.update(in, seconds, game.layout, game.imageSizes());
     };
@@ -232,7 +233,7 @@ void checkWalk(Game& game) {
     check(game.menu.formName() == "stagecowboys", "walk: a stage button leads to its levels");
     check(game.widget("46")->enabled && !game.widget("47")->enabled && !game.widget("62")->enabled && game.widget("45") == nullptr,
           "walk: the cowboys have levels 46 to 62, and a new player can start the first only");
-    game.menu.setLevelsLocked(false);  // as the game has them while nothing finishes a level
+    game.menu.setLevelsLocked(false);
     game.menu.open("stagecowboys");
     check(game.widget("46")->enabled && game.widget("62")->enabled, "walk: with the locks off all of them are open");
     mb::GameFlow::Step s = click("50");
@@ -242,7 +243,7 @@ void checkWalk(Game& game) {
     flow.loaded(true);
     step();
     step({}, 0.1);
-    check(flow.mode() == mb::GameFlow::Mode::Playing && flow.hud().level == 51 && flow.hud().lives == 3, "walk: Playing, with the HUD's placeholders");
+    check(flow.mode() == mb::GameFlow::Mode::Playing && flow.hud().level == 51 && flow.hud().lives == mb::GameplayRules{}.startHearts, "walk: Playing, with the hearts of a new game");
     mb::UiInput esc;
     esc.keys = {mb::UiKey::Escape};
     step(esc);
