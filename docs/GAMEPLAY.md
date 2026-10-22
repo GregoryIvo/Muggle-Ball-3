@@ -297,7 +297,7 @@ A second pass over V1 (all 83 levels: the HUD score read as text every 1/30 s, a
 | natural end | `LevelComplete` as the last required object is gone: with its score, or for a person or an animal (`exploseType` 5) 0.35 s after it, shrinking away meanwhile; the picture holds **0.1 s**, fades out in 0.8 s, and the next level comes up out of the dark |
 | a piece off the board | not a target any more, taken out (`ActorFell`), no points, no explosion |
 | level order | `levels.xml`, as `Campaign` has it |
-| Next Level, prizes | not built (step 5); `GameSession::forceLevelComplete()` is what the star will call |
+| Next Level, prizes | step 5, section 15; `GameSession::forceLevelComplete()` is what the star calls |
 
 ### Still open [?]
 
@@ -582,3 +582,71 @@ F26 and F49 are plots drawn from the tracked positions (not screenshots).
 - Ball speed prizes: do the +-10 percent steps persist across levels, is there a floor or ceiling, and does Normal Ball reset them? Do timed prizes always end at the level change (only Big Ball's icon at V2 89.5 was seen)?
 - Path movers: do they push the ball, and are the sharks and birds required to end a level (second-study item 2 is disputed)? Two rings of 10 and 9 actors on `po-krugy`: the start phase of each actor is the position of its key in the level data, not checked against footage.
 - Prize catch: the real overlap rule (the 4 u rule here rests on a catch at 1.8 u and misses at 8.8 and 26 u), and whether a second prize of the same kind caught during the first one's timer adds time or replaces it.
+
+## 15. Prizes as built (step 5, prizes)
+
+What the game does with the prizes of sections 7 and 14 where they leave room; `[I]` is a choice made from the footage rather than a measurement. The rules (what drops, how it falls and is caught, what each of the 28 does, and the state and events the picture reads) are `game/Prizes.h` (`PrizeRules`, the table `prizeInfo`) and `GameSession` (`game/src/SessionPrizes.cpp`, called from `Gameplay.cpp` at a few marked places); the sounds, the HUD and the look are the presentation's. Tests: `mb_prize_tests` (made-up levels), `mb_prize_smoke` (the table against the real data), `mb_gameplay_smoke` (the autopilot with the prizes on).
+
+### 15.1 What drops
+
+| rule | in the game |
+|---|---|
+| when | each destroyed object (`BrickDestroyed`, any damageable object: bricks, trees, metal, dynamite...) is rolled once, with a random generator seeded per session (`SessionOptions::prizeSeed`, SplitMix64, the same numbers on every machine); a piece that fell off the board is no kill and leaves nothing; nothing drops once the level is complete; a hit that carries `disablePrize` (`GameSession::hit(actor, at, false)`, for the Thunderbolt and the meteors [D]) leaves nothing |
+| how often | by what the object was worth (`PrizeRules::tiers`): 15.8 % below 80 points, 10 % to 119, 6.5 % to 199, 5 % to 299, 7 % from 300. The second study's fit by value is 13.5, 8.5, 5.5, 4.2 and 5.9 % of the kills that had a caught prize; the numbers here are those raised by 1.18, so that the mean over the 13,231 destroyable objects of the 83 levels (11,282, 889, 789, 210 and 61 in the five tiers) is **14.64 %**, the 14.7 % of all kill events [M, I]. `mb_prize_smoke` prints the mean from the data |
+| bad prizes | the seven with a red halo (Skull, Decrease Bat Size, Increase Ball Speed, Weak Ball, Normal Ball, Drunken Ball, Night) drop from campaign level `PrizeRules::badFromLevel` = 10 on, none before [M]; `SessionOptions::campaignLevel` carries the level's place (the HUD's number) |
+| which | drawn by weight from the table below, over the prizes allowed. There is no weight in the data [D]; the weights are the second study's counts of caught prizes by score jump (levels 2 to 83, 1,320 of its 1,355), a value shared by two prizes split by what the footage shows of each [I]. They give the bad ones 11.5 % of the drops (9 % of the catches of levels 10 to 83 in the footage had a red-only value, a few more with the three that share one) |
+| the Next Level star | **rolled apart from the others**, once for each destroyed object, and left out of the weights: it ended 70 of 83 levels, always with most of the board gone, and was 5 % of the catches [M], so it cannot be a drop of constant chance (that would end levels early, and a fifth of them never). The chance is 0 until fewer than a tenth of the level's targets (at least 6) are left, then rises in a straight line to 0.5 for the last one (`starChance`). A star in the air blocks another, and a level that never ends (`TargetRule::Never`) has none. It falls in nine levels of ten (97 % of the levels of 100 bricks destroyed one by one, never before the last ten; in the 83 levels the autopilot plays for 15 minutes, 66, and the 12 it does not finish are most of the rest: 15.5), and a player who catches nine stars in ten would end four levels in five, the footage's 70 of 83 [I] |
+
+The weights (`PrizeInfo::weight`), their halo and what the footage had: Bonus 146 and Life 7 (777 together: 153 jumps; the hearts rose from 2 to 6 in three hours, two lost), Increase Bat Size 135, Decrease Bat Size 26 and Big Ball 40 (180 together: 66), Increase Ball Speed 83 and Night 5 (the 88 jumps of 280, 5 darkened the scene), Decrease Ball Speed 22 and Normal Ball 17 (the 39 jumps of 120 that are not stars), Wind 87, Explosive Ball 81, Thunderbolt 81, Power Ball 77, Multiball 40 and Earthquake 25 (190 together: 65), Machine Gun 64, Magnet 58, Cannon 54, Surprise 51, Bazooka 45, Wall 39, Laser 39, Yo-Yo 11, Drunken Ball 8, Weak Ball 6, Skull 2 and Meteorite Rain 30 (worth 4 points, which no score jump shows: a guess). The values of 110, 120 and 150 are also the price of bricks, so Increase Bat Size, Explosive Ball and Normal Ball may be too high [?].
+
+### 15.2 Fall and catch
+
+| rule | in the game |
+|---|---|
+| fall | from where the object was (its centre of mass at `BrickDestroyed`: x and z), at y 1.0, straight along -z at **10 u/s**, x unchanged and not homing; several at once. The slower first 0.3 s of the footage (7 u/s, 0.45 u) is left out [I] |
+| catch | each step, if the orb is within **batRadius + 1** of the bat's centre in the plane (4 u for the plain bat; a wider bat reaches farther). The bat must be there: not as it swoops in, once the last ball is lost, or while it flies off. A prize already falling when the level is won is still caught, and pays its score and, for a Life, its heart; nothing else it does |
+| score | the catch adds the prize material's `brickScore` (`PrizeCaught::points`, the material in `PrizeCaught::material`, whose dead sound is the catch's sound). `meteor` names two materials in `materials.json`, the projectile's first (250) and the prize's (4): the prize is the one in the group `Prizes` |
+| missed | at z = -21 (the bat's line) it fizzles (`PrizeMissed`), no score |
+| caption | `prizeInfo(kind).caption`, the key in `languages.json` (`Drunken Ball` has a space, Weak Ball is `Weak`) |
+
+### 15.3 What they do
+
+A **timed** effect starts over from its full time when the prize is caught again (it does not add up, and stays one effect with one icon) and ends with its time or with the bat; **weapons** and **Explosive Ball** count shots and blasts, and a second catch adds them. The footage never watched a second catch [?]. Timers count the session's fixed steps; the HUD shows `ceil(timeLeft)`.
+
+| prize | in the game |
+|---|---|
+| Bonus | the score only |
+| Life | +1 heart, no cap |
+| Skull | the bat dies at the catch: `phase()` is `Lost` at once, the bat flies off 0.4 s later (`BatLeft`), every ball (held ones too) vanishes 1.5 s after the catch (`BallLost`), the heart goes at 1.9 s (`LifeLost`, `BatEntered`) and the ball is ready at 2.43 s: the life sequence of a lost ball, run as if the loss began `skullLead` = 0.2 s before the catch [M, V1 8536.6]. With no heart left it is `GameOver` |
+| Next Level | `forceLevelComplete()` |
+| Increase / Decrease Ball Speed | the ball speed of the session (`ballSpeed()`) times 1.10 or 0.91 for each catch, no timer and no icon; the balls in flight change at once. Limits 0.5 to 2 times [?]. It stays through the loss of a bat and is gone with the level [I: the footage has 15.0 u/s at levels 1 and 65] |
+| Increase / Decrease Bat Size | the bat's collision sphere and its look (`batScale()`, `batRadius()`) times 1.24 or 1/1.24 for each catch, between 0.6 and 1.9 times; the bat is rebuilt at the new size, its outer edge stays inside x = 19 (the walls are at 20: the centre is held to 19 minus the radius when that is under 16) and the held ball sits in front of it. A new bat after a loss is plain |
+| Big Ball / Weak Ball | radius 1.0 / 0.4 (`ballRadius()`, `BallView::radius`) for 20 s; the balls in flight are rebuilt (the same velocity). One replaces the other |
+| Power Ball | 20 s. The footage does not say if it passes through bricks [?]; here every hit of the ball takes **all** the energy of the brick (a bullet, a blast or a thunderbolt still do one). The alternative, a ball that goes through, needs a ball the bricks do not stop |
+| Explosive Ball | one blast: the next brick the ball hurts is hurt as usual and everything damageable within 2.5 u of the contact point (the distance to the box round it) takes a hit as well, from the radius of `explose.xml` [D] (`Blast`, `speed` holds the radius); then it is spent. No icon, no timer |
+| Normal Ball | ends Big Ball, Weak Ball, Power Ball, Explosive Ball, Drunken Ball and Yo-Yo. The speed prizes and the bat's are not ball effects |
+| Drunken Ball | 30 s. Each ball's heading is turned by 20 degrees/s x sin(2 pi t / 1.6 s + a phase of its own) every step, so it wobbles about 10 degrees from side to side with the speed unchanged [M, I] |
+| Multiball | on the ball nearest the bat (not a held or stuck one; with none, nothing happens), two balls beside it, 1.3 u away on headings turned by -20 and +98 degrees from its own [M, one case]; at most 12 balls. A life is still lost only with the last |
+| Magnet | 30 s. A ball that touches the bat sticks where it touched (`BallStuck`, `BallView::stuck`, still, on the bat at the same offset) and goes with it; a click (`GameInput::launch` with no ball held), 4 s without one, or the end of the magnet lets it go along the line from the bat's centre through the ball, and it does not stick again until it has left the bat [M, the release I]. The autopilot clicks |
+| Yo-Yo | 7.5 s. A ball farther than 7 u from the bat's centre and going further is turned back (mirrored about the string's direction) [M, I]. No icon (the footage shows none) |
+| Wall | 30 s. A ball on its way to the near edge turns back at z = -19.04 (the far face of the 0.74 deep rope box at z -20.01 [D], plus the ball's radius), as off a wall (`BoardHit`), anywhere across the board's width |
+| Night | 10 s. `nightLevel()` runs 0 to 1 over the first second, holds, and goes back to 0 over the last 1.5 s (the board's brightness falls to 0.38 of itself within a second and is back at about 80 % at the end [M]) |
+| Earthquake | 3 s. Every 0.1 s each dynamic body, asleep or not, gets a kick of up to 0.5 u/s sideways (x and z) and 1 u/s up [I]; nothing for the camera |
+| Wind | 5 s. Every dynamic body that is awake is accelerated 2.5 u/s^2 along x, to the left or the right (drawn when it is caught); resting pieces and the balls are left alone [I: the footage shows nothing] |
+| Surprise | an instant gift: a random **good** prize that is no Surprise and no Next Level, by the same weights, announced as a second `PrizeCaught` worth 0 [?] |
+| Machine Gun, Cannon, Bazooka, Laser | 12, 6, 7 and 5 shots (`weapon()`, `shotsLeft()`, `useShot()`). The weapons are for wave 3: a weapon is granted and counted, nothing fires. The weapon caught last is the one a click fires; the others keep their shots, as the footage's HUD shows two at once (V2 108-117); the effect ends with its last shot |
+| Thunderbolt, Meteorite Rain | `StrikeGranted` with the prize; the strikes are for wave 3 |
+
+When the **bat is lost** (the last ball, or the Skull) every effect of the bat and the ball ends (`EffectEnded`) and the next bat is plain; the night, the quake and the wind run on, and so does the speed. Timed effects end with the level, which is a new session.
+
+### 15.4 What the presentation reads
+
+- `fallingPrizes()` (`FallingPrize`: kind, position of the orb, age, source), `activeEffects()` (`ActiveEffect`: kind, `timeLeft`, `duration`, `shots`; those with `prizeInfo(kind).icon` go on the HUD, oldest first, as the number `ceil(timeLeft)` or `shots`), `weapon()`, `ballRadius()`, `ballSpeed()`, `batRadius()`, `batScale()`, `nightLevel()`, `BallView::stuck` and `radius`.
+- Events: `PrizeDropped`, `PrizeCaught` (prize, points, material), `PrizeMissed`, `EffectStarted`, `EffectEnded`, `StrikeGranted`, `BallStuck`, `Blast`; `SessionStats::prizesDropped/Caught/Missed`.
+- `GameSession::dropPrize(kind, from)` starts a prize falling and `givePrize(kind)` applies one, for tests and tools.
+
+### 15.5 The autopilot with the prizes
+
+`mb_gameplay_smoke --seconds 900`, each level played as the n-th of the campaign, the prizes on, the autopilot as before (the bat under the ball, no aim, 99 hearts; it clicks to let go of the Magnet and catches prizes only when they fall on the bat by chance):
+
+**71 of 83** levels finished (60 without the prizes): 54 by destroying every target and 17 only because the stall rule let go of the last few (it was 46 and 14), 12 not finished (6 knights', 5 village's and 1 pirates' boards, 1 to 116 targets left; 11 were still destroying bricks in the last 40 s, the 12th, knight-nazad-k-mame, with one target left, stood still for 37 s: slow, not stuck, as before). 2,063 prizes dropped (25 a level, as 14.7 % of about 170 destroyed objects), 709 caught (a third: the bat is under the ball, not under the prize) and 1,339 missed. The Next Level star fell in 66 of the 83 levels, was caught in 25 and ended 25 of the 71 finished (a player who goes for it ends most, section 14.4); the other 46 ended as before. The look at what the ball can reach puts 194 targets out of play (it was 151): a quake or a wind that throws a piece out of reach takes it out of the count, which is the rule working as meant. Three balls were freed from a pin in as many levels. Nothing broke: the ball keeps its speed (the session's, which the speed prizes move) and its plane after every frame, in every level.

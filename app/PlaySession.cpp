@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <exception>
+#include <random>
 #include <utility>
 
 namespace mb_app {
@@ -56,6 +57,9 @@ bool PlaySession::start(std::string_view levelName, const mb::GameHud& hud, cons
         mb::SessionOptions rules;
         rules.hearts = hud.lives;
         rules.score = hud.score;
+        rules.campaignLevel = hud.level;
+        // What drops differs from play to play; an autoplay (the screenshots, the scripted checks) repeats.
+        rules.prizeSeed = options_.autoplay ? static_cast<std::uint64_t>(hud.level) : std::random_device{}();
         auto session = std::make_unique<mb::GameSession>(level, assets_.materials, rules);
         progress(0.6f);
         auto scene = std::make_unique<mb::PlayScene>(models_, assets_.materials, assets_.textures, level, *session,

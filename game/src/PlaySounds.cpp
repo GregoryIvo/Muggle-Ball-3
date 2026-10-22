@@ -43,6 +43,15 @@ void PlaySounds::play(const GameEvent& event) {
                 sounds_.play(*event.material, MaterialSound::Dead, 1, pan);
             }
             break;
+        case EventType::PrizeDropped:  // (the prizes' sounds are the presentation's: step 5, stage 2)
+        case EventType::PrizeCaught:
+        case EventType::PrizeMissed:
+        case EventType::EffectStarted:
+        case EventType::EffectEnded:
+        case EventType::StrikeGranted:
+        case EventType::BallStuck:
+        case EventType::Blast:
+            break;
         case EventType::BatLeft:
             sounds_.play("bat_dead", 1, pan);
             break;

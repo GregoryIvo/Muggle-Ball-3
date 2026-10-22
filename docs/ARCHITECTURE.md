@@ -168,6 +168,13 @@ them where they are (`PhysicsScene::pathMovers()`, `pathTime()`). The player is 
 own tests: `mb_path_tests` on made-up paths, `mb_path_smoke` on the real levels; the format is in `LEVEL_FORMAT.md`
 ("Path motion") and the rules in `GAMEPLAY.md` section 13.
 
+The prizes are in the session too (`GAMEPLAY.md` section 15; `game/Prizes.h` has the table of the 28 and `PrizeRules`, the code is
+`game/src/SessionPrizes.cpp` with a few calls from `Gameplay.cpp`): a destroyed object may leave one (`PrizeDropped`), which falls straight
+down the board (`fallingPrizes()`) and is caught by the bat (`PrizeCaught`, `PrizeMissed`), and the effects, timed, counted or instant, are
+state the picture reads (`activeEffects()`, `weapon()`, `ballRadius()`, `ballSpeed()`, `batRadius()`, `nightLevel()`, `BallView::stuck`) with
+`EffectStarted`/`EffectEnded` for the sounds. `SessionOptions::campaignLevel` and `prizeSeed` say which prizes may drop and make a session
+repeat. Tests: `mb_prize_tests` (made-up levels), `mb_prize_smoke` (the table against the data).
+
 What falls off the board stops being a target and is taken out (`ActorFell`), with no points and no explosion
 (`GameplayRules::fallLimitY`, `fallScores`): loose pieces are destroyed by weapons and blasts, not by falling.
 

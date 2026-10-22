@@ -11,6 +11,8 @@ add_library(mb_game
   src/PhysicsScene.cpp
   src/BallReach.cpp
   src/Gameplay.cpp
+  src/Prizes.cpp
+  src/SessionPrizes.cpp
   src/Autopilot.cpp
   src/ModelCache.cpp
   src/LevelScene.cpp
