@@ -4,6 +4,7 @@
 #include "mb/game/Gameplay.h"
 #include "mb/game/LevelScene.h"
 #include "mb/game/ModelCache.h"
+#include "mb/game/ObjectEffects.h"
 
 #include <cstdint>
 #include <span>
@@ -85,6 +86,7 @@ private:
     std::vector<Vanishing> vanishing_;
     std::vector<ActorIndex> shrinking_;  // paid for and shrinking, until the session has removed them
     std::vector<Explosion> explosions_;
+    ObjectEffects effects_;  // the special objects' (dynamite, cannons, rockets, teleports ...)
     std::vector<DrawItem> items_;
 };
 

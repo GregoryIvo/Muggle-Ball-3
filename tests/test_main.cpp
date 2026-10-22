@@ -5,6 +5,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -451,6 +452,14 @@ int main() {
     check(level.countObjects(mb::ObjectType::Cloth) == 1, "cloth counted");
     check(level.paths.size() == 1 && level.paths[0].points[0].up[1] == 1.0f, "path point");
     check(mb::objectTypeFromName("teleportdest") == mb::ObjectType::TeleportDest, "type lookup");
+
+    // A dynamite carries its explosion's particle file and, as the bits of a float, its blast radius (0x40A00000 is 5.0).
+    const mb::Level charge = mb::parseLevelJson(R"({"gravity":[0,0,0],"actors":[{"pose":{"rotation":[1,0,0,0,1,0,0,0,1],"position":[0,0,0]},
+        "shapes":[],"object":{"type":"dynamite","id":3,"flags":14,"material":"dinamit.jpg","target":"explosebig","param":1084227584}}]})");
+    check(charge.actors.at(0).object && charge.actors[0].object->target == "explosebig" &&
+              std::bit_cast<float>(charge.actors[0].object->param) == 5.0f,
+          "a dynamite's target and blast radius");
+    check(level.actors[0].object->target.empty() && level.actors[0].object->param == 0, "other objects have none");
 
     bool threw = false;
     try {

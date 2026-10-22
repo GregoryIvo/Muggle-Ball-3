@@ -564,7 +564,10 @@ plus, by type:
   `projectionMode`.
 
 An object is `{type, id, flags}` plus whichever of `material`, `mesh`, `frame`,
-`extra` (hex), `prize`, `target`, `param`, `names` and `cloth` its type carries.
+`extra` (hex), `prize`, `target`, `param`, `names` and `cloth` its type carries. A
+dynamite's `target` is its explosion's particle file (`explosebig` on 101 of the 116,
+`explosesmall` on 15) and its `param` the bits of an `f32`, the blast radius: 5.0 and 3.0
+(`GameObject::target` and `param`; `GAMEPLAY.md` 15.2).
 
 ### Versions
 

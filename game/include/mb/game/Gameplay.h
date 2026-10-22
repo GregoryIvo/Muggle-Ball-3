@@ -6,6 +6,7 @@
 #include "mb/game/Level.h"
 #include "mb/game/MaterialLibrary.h"
 #include "mb/game/PhysicsScene.h"
+#include "mb/game/SpecialObjects.h"
 
 #include <cstdint>
 #include <optional>
@@ -125,6 +126,9 @@ struct GameplayRules {
     // paid 143.75, gone 144.15; level 17's gorilla: paid 1943.6, gone about 1944.0; docs/GAMEPLAY.md, "Rules settled by the
     // second study", 8) [M].
     double shrinkTime = 0.35;
+
+    // ---- The level's special objects: dynamite, cannons, teleports, fireworks, springs, metal ... (docs/GAMEPLAY.md section 15)
+    SpecialObjectRules objects;
 };
 
 // Which objects must be destroyed to finish a level. The second study of the footage and its fact-check settled it
@@ -136,7 +140,7 @@ enum class TargetRule {
     // motion: dynamic, kinematic (floor tiles, sharks, birds) or bound to a path. Not required: every object of a type
     // other than brick and tree: metall, teleports and cannons (left on the board at natural ends), and, never seen to
     // decide a level's end, dynamite, fireworks, generators, springs, volcanoes, cloth and vibro. Those can still be
-    // destroyed for their points.
+    // destroyed for their points, by a blast, a cannonball or a weapon (not by the ball: docs/GAMEPLAY.md section 15.1).
     Bricks,
     // Every brick whose material has brickType 0, moving or not; crates, rocks, animals, ground (type 4) and trees (5) do
     // not count. The footage refutes it: a level did not end before its type 4 gorilla was destroyed.
@@ -186,6 +190,15 @@ enum class EventType {
     // (shrinksAway()) is then still there for GameplayRules::shrinkTime, shrinking (ActorStatus::shrink): the others are gone.
     BrickDestroyed,  // actor, position (centre of mass), points (added to the score), material
     ActorFell,       // actor, position (centre of mass), points (only with fallScores), material: it left the board
+    // The special objects (SpecialObjects; docs/GAMEPLAY.md section 15). Dynamite that goes off also reports its
+    // BrickDestroyed, with the charge's points and sound.
+    Blast,           // actor (the charge), position (its centre), speed (the blast's radius)
+    CannonFired,     // actor (the cannon), position (the muzzle), velocity (the cannonball's)
+    ShotHit,         // actor (what the cannonball struck: a brick, the board ...), position: it bursts
+    RocketLaunched,  // actor (the crate), position: a firework rocket leaves a crate
+    RocketBurst,     // position: and bursts
+    BallEntered,     // ball, actor (the source), position: it vanishes into a teleport
+    BallEmerged,     // ball, actor (the exit), position: and comes out
     BallLost,        // ball, position, velocity: behind the bat's line (or out of the world); it shrinks away
     BallFreed,       // ball, position: it was pinned and is put back in the world (see GameplayRules::jamTime)
     LifeLost,        // hearts (left): the heart is spent, 2.1 s after the last ball was lost
@@ -249,11 +262,15 @@ struct BallView {
     Vec3 position{};
     Vec3 velocity{};  // zero while held; the rules' own (always ballSpeed along the path), not what the solver left
     bool held = false;  // on the bat, waiting for the click
+    bool away = false;  // in a teleport (velocity zero, not lost) until it leaves the exit
+    // How much of the ball there is, 0 to 1: none while it is in a teleport and until it comes out, then it grows to the
+    // whole.
+    float appear = 1;
 };
 
 // One actor of the level as the rules see it.
 struct ActorStatus {
-    bool damageable = false;  // a ball hurts it (canBeDamaged()) and it is still there
+    bool damageable = false;  // something can hurt it (canBeDamaged(); not always a ball: SpecialObjectRules) and it is still there
     bool exploding = false;   // out of energy, waiting out exploseDelay
     // After its score, a person or an animal shrinks away over GameplayRules::shrinkTime: 0 as it begins, up to 1 as it is
     // removed. It is a target until then, and no more to be hurt.
@@ -283,11 +300,13 @@ struct GameInput {
 
 // ---- Rules that stand on their own
 
-// Whether balls hurt an actor of this object type with this material: it has a brick material (brickType other than
-// 2, which the ball, bullets, board, water and the fallback have, and energy above 0). The board and markers never
-// do. A cloth is a placeholder for a sail the cloth simulation has yet to build (step 5), so a ball goes by it, though
-// the original scored sails (60 each: piratos-ostrovok's 62 bricks and 3 sails are the 65 bricks, 4,231 points of
-// docs/GAMEPLAY.md), and they are not targets here.
+// Whether something can hurt an actor of this object type with this material: it has a brick material (brickType other
+// than 2, which the ball, bullets, board, water and the fallback have, and energy above 0). The board and markers never
+// do, and neither do the teleports, which a charge of dynamite 3.8 units away left standing (docs/GAMEPLAY.md section
+// 15.1). The ball itself hurts only bricks, trees, vibros and flickers (SpecialObjects); the rest of the objects are hurt
+// by blasts, cannonballs and weapons. A cloth is a placeholder for a sail the cloth simulation has yet to build (step 5),
+// so a ball goes by it, though the original scored sails (60 each: piratos-ostrovok's 62 bricks and 3 sails are the 65
+// bricks, 4,231 points of docs/GAMEPLAY.md), and they are not targets here.
 bool canBeDamaged(ObjectType type, const GameMaterial* material);
 
 // Whether a destroyed object of this material shrinks away instead of being gone with its score: exploseType 5, the
@@ -353,6 +372,8 @@ public:
     const SessionStats& stats() const { return stats_; }
     const GameplayRules& rules() const { return rules_; }
     TargetRule levelEnd() const { return levelEnd_; }
+    // The level's special objects: the cannonballs and rockets in flight, for the presentation.
+    const SpecialObjects& objects() const { return objects_; }
 
     ActorStatus actor(ActorIndex actor) const;
     // Whether an actor that is still in the level counts toward a rule (whatever rule the session ends by), and how
@@ -380,10 +401,13 @@ public:
     void forceLevelComplete();
 
 private:
+    friend class SpecialObjects;
+
     struct Ball {
         int id = 0;
-        BodyId body = 0;  // none while held
+        BodyId body = 0;  // none while held, or in a teleport
         bool held = false;
+        bool away = false;      // in a teleport (SpecialObjects): no body, not lost
         bool onBat = false;     // touched the bat at the last step: one hit for a stay on it
         bool bounced = false;   // began to touch something besides the bat in this step
         Vec3 heading{0, 0, 1};  // unit, in the plane: where it goes, kept for the step in which it stands still
@@ -410,6 +434,7 @@ private:
     GameplayRules rules_;
     TargetRule levelEnd_;
     PhysicsScene scene_;
+    SpecialObjects objects_;
     double fixedStep_;
     std::vector<Brick> bricks_;  // by ActorIndex
     std::vector<ActorIndex> dynamicActors_;

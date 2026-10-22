@@ -122,6 +122,10 @@ hold back a pile of the same sound in one frame.
 | `BatHit`, `BallLaunched` | `ballHitBat` (the launch is the bat's hit on the ball) | name in `sounds.xml`, use inferred |
 | `BoardHit` | `ballHitBoard` (the ball material's own `hit` sound) | data |
 | `BallsHit` | `ballHitBall` (the ball material's `period` sound) | data |
+| `CannonFired` | `brick_cannon_shoot` (`br_cannon.ogg`, the interactive cannon's `period` sound) | name in `sounds.xml`, use inferred |
+| `RocketBurst` | `firerocket_dead` (the fire rocket's material's `dead` sound) | data |
+| `BallEntered`, `BallEmerged` | `teleport`, at the source and at the exit | name in `sounds.xml`, use inferred |
+| `Blast` (the charge's `BrickDestroyed` plays `dynamite_dead`), `ShotHit` (what it struck makes its own sounds), `RocketLaunched` | none | |
 | `BatLeft` | `bat_dead`: the bat flies off after the last ball is lost | inferred |
 | `LevelComplete` | `endlevel` (also the Next Level prize's sound) | inferred |
 | `BallLost`, `BallFreed`, `LifeLost`, `BatEntered`, `GameOver` | none | |

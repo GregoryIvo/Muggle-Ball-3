@@ -43,12 +43,25 @@ void PlaySounds::play(const GameEvent& event) {
                 sounds_.play(*event.material, MaterialSound::Dead, 1, pan);
             }
             break;
+        case EventType::CannonFired:
+            sounds_.play("brick_cannon_shoot", 1, pan);
+            break;
+        case EventType::RocketBurst:
+            sounds_.play("firerocket_dead", 1, pan);
+            break;
+        case EventType::BallEntered:
+        case EventType::BallEmerged:
+            sounds_.play("teleport", 1, pan);
+            break;
         case EventType::BatLeft:
             sounds_.play("bat_dead", 1, pan);
             break;
         case EventType::LevelComplete:
             sounds_.play("endlevel");
             break;
+        case EventType::Blast:  // (the charge makes its own sound as it is destroyed)
+        case EventType::ShotHit:
+        case EventType::RocketLaunched:
         case EventType::BallLost:
         case EventType::BallFreed:
         case EventType::LifeLost:

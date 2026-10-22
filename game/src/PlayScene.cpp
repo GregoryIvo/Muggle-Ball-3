@@ -143,7 +143,8 @@ PlayScene::PlayScene(ModelCache& cache, const MaterialLibrary& materials, const 
       quad_(cache.quad()),
       flashTexture_(cache.texture(textures.find("Oreols/02.png"))),
       sparkTexture_(cache.texture(textures.find("Particles/PARTICLE.PNG"))),
-      facing_(facingGameCamera()) {
+      facing_(facingGameCamera()),
+      effects_(cache, materials, textures) {
     update(session, {}, 0);
 }
 
@@ -151,6 +152,7 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
     time_ += seconds;
     level_.update(time_);
     level_.follow(session.scene());
+    effects_.update(session, events, seconds, level_);
 
     for (const GameEvent& event : events) {
         switch (event.type) {
@@ -221,6 +223,7 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
             scale = heldBallScale(session.bat());
             roll.placed = false;
         } else {
+            scale = ball.appear;
             if (roll.placed) {
                 // Rolling on the floor: turned about the horizontal axis across its path by the distance over its radius.
                 const float dx = at.x - roll.at.x, dz = at.z - roll.at.z;
@@ -243,6 +246,7 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
     for (const Explosion& explosion : explosions_) {
         addExplosion(explosion);
     }
+    items_.insert(items_.end(), effects_.items().begin(), effects_.items().end());
 }
 
 void PlayScene::addBall(Vec3 at, const Mat4& turn, float scale) {

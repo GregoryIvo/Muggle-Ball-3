@@ -39,6 +39,13 @@ std::string_view eventName(EventType type) {
         case EventType::BrickHit: return "BrickHit";
         case EventType::BrickDestroyed: return "BrickDestroyed";
         case EventType::ActorFell: return "ActorFell";
+        case EventType::Blast: return "Blast";
+        case EventType::CannonFired: return "CannonFired";
+        case EventType::ShotHit: return "ShotHit";
+        case EventType::RocketLaunched: return "RocketLaunched";
+        case EventType::RocketBurst: return "RocketBurst";
+        case EventType::BallEntered: return "BallEntered";
+        case EventType::BallEmerged: return "BallEmerged";
         case EventType::BallLost: return "BallLost";
         case EventType::BallFreed: return "BallFreed";
         case EventType::LifeLost: return "LifeLost";
@@ -115,8 +122,6 @@ bool canBeDamaged(ObjectType type, const GameMaterial* material) {
         case ObjectType::Firework:
         case ObjectType::Spring:
         case ObjectType::Volcano:
-        case ObjectType::TeleportSrc:
-        case ObjectType::TeleportDest:
         case ObjectType::GeneratorGood:
         case ObjectType::GeneratorBad:
         case ObjectType::Vibro:
@@ -192,6 +197,7 @@ GameSession::GameSession(const Level& level, const MaterialLibrary& materials, c
     : rules_(options.rules),
       levelEnd_(options.levelEnd),
       scene_(level, materials, options.physics, options.physicsSettings),
+      objects_(level, scene_.plan(), options.rules.objects),
       fixedStep_(scene_.world().settings().fixedStep),
       score_(options.score),
       hearts_(options.hearts.value_or(options.rules.startHearts)),
@@ -341,6 +347,7 @@ void GameSession::tick() {
     scene_.step(static_cast<float>(fixedStep_));
     processContacts();
     keepBalls();
+    objects_.update(*this);
     explodeDue();
     removeShrunk();
     if (ticks_ % kFallCheckEvery == 0) {
@@ -505,7 +512,9 @@ void GameSession::processContacts() {
                 emit(event);
             } else if (bricks_[actor].damageable && std::ranges::find(hitThisStep_, actor) == hitThisStep_.end()) {
                 hitThisStep_.push_back(actor);
-                hitBrick(actor, contact.point, contact.normalSpeed, ball->id);
+                if (!objects_.ballHit(*this, actor, contact, ball->id)) {
+                    hitBrick(actor, contact.point, contact.normalSpeed, ball->id);
+                }
             }
         }
     }
@@ -568,7 +577,7 @@ void GameSession::keepBalls() {
                         std::fabs(batVelocity_) * static_cast<float>(fixedStep_);
     for (std::size_t i = 0; i < balls_.size();) {
         Ball& ball = balls_[i];
-        if (ball.held) {
+        if (ball.held || ball.away) {
             ++i;
             continue;
         }
@@ -715,6 +724,7 @@ void GameSession::explodeDue() {
         event.points = brick.material->brickScore;
         event.material = brick.material;
         emit(event);
+        objects_.destroyed(*this, actor, event.position);
         if (shrinksAway(brick.material)) {
             brick.exploding = false;
             brick.shrinking = true;
@@ -887,6 +897,11 @@ void GameSession::refreshViews() {
         if (ball.held) {
             view.position = {bat_.position.x + rules_.heldOffsetX, rules_.ballPlaneY,
                              bat_.position.z + rules_.heldOffsetZ};
+        } else if (ball.away) {
+            const SpecialObjects::Away away = objects_.away(ball.id, time_);
+            view.position = away.position;
+            view.appear = away.appear;
+            view.away = true;
         } else {
             view.position = scene_.world().pose(ball.body).translationPart();
             view.velocity = scene_.world().linearVelocity(ball.body);

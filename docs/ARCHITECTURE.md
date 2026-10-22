@@ -156,7 +156,7 @@ for (const GameEvent& e : session.takeEvents()) { /* BrickHit, BrickDestroyed, B
 | What | Where |
 |---|---|
 | Every number the rules use, each with its source in `GAMEPLAY.md` and how well it is known | `GameplayRules` |
-| What happens, for the sound and the look | `GameEvent`: `BallLaunched`, `BatHit`, `BoardHit`, `BallsHit`, `BrickHit`, `BrickDestroyed`, `ActorFell`, `BallLost`, `LifeLost`, `BatLeft`, `BatEntered`, `LevelComplete`, `GameOver` |
+| What happens, for the sound and the look | `GameEvent`: `BallLaunched`, `BatHit`, `BoardHit`, `BallsHit`, `BrickHit`, `BrickDestroyed`, `ActorFell`, the special objects' `Blast`, `CannonFired`, `ShotHit`, `RocketLaunched`, `RocketBurst`, `BallEntered`, `BallEmerged`, then `BallLost`, `LifeLost`, `BatLeft`, `BatEntered`, `LevelComplete`, `GameOver` |
 | Which bricks are hurt, and which must go for the level to end | `canBeDamaged`, `isTarget`, `TargetRule` (the default `Bricks`, every brick and tree whatever its motion, is the rule of the footage, `GAMEPLAY.md` "Rules settled by the second study"; `BrickType`, H-type of `OBJECTS.md`, is refuted and kept for comparing and for tests; chosen in `SessionOptions::levelEnd`); targets out of the ball's reach do not count (below) |
 | The cursor as a bat position | `cursorOnPlane`, `batTargetX` |
 | A player that needs no hands | `Autopilot`, `autoplay()` (returns the events; `mb_gameplay_smoke --log <level>` prints them) |
@@ -167,6 +167,16 @@ time) and sets the kinematic target of each path actor before every fixed step, 
 them where they are (`PhysicsScene::pathMovers()`, `pathTime()`). The player is pure (no physics, no GPU) and has its
 own tests: `mb_path_tests` on made-up paths, `mb_path_smoke` on the real levels; the format is in `LEVEL_FORMAT.md`
 ("Path motion") and the rules in `GAMEPLAY.md` section 13.
+
+The level's special objects (dynamite, interactive cannons, teleports, firework crates, springs, volcanoes, generators, metal, vibros and
+flickers) are the rules of `SpecialObjects` (`game/SpecialObjects.h`, `GAMEPLAY.md` sections 14 and 15), a member of `GameSession` that is its friend and
+is called at three places: `processContacts` (a ball with a blow met an object that the ball does not hurt: `ballHit`), `explodeDue` (a charge
+of dynamite was destroyed: `destroyed`, its blast) and once a fixed step (`update`: what touched the cannons and the crates, the cannonballs,
+the rockets, the balls in teleports, the vibros). It reports through the session's events and keeps the state the picture reads
+(`GameSession::objects()`: `shots()`, `rockets()`, `flickers()`); a ball in a teleport has no body and is no lost ball
+(`BallView::away`, `appear`). Its numbers are `SpecialObjectRules` in `GameplayRules::objects`. `canBeDamaged` says which objects something can
+hurt (not the teleports), `SpecialObjects` which of them the ball does not (`GAMEPLAY.md` 15.1). It has its own tests: `mb_special_object_tests` on
+made-up levels and `mb_special_object_smoke` on the real ones.
 
 What falls off the board stops being a target and is taken out (`ActorFell`), with no points and no explosion
 (`GameplayRules::fallLimitY`, `fallScores`): loose pieces are destroyed by weapons and blasts, not by falling.
@@ -200,6 +210,7 @@ the click each frame, and turns what they report into what is seen and heard.
 |---|---|
 | `GameSession` + `Autopilot` | The rules; with `--autoplay` the autopilot's input replaces the mouse's. `PlayerInput` (`app/`, the keys are SDL's) turns the mouse into the bat's target through `batTargetX` and the drawable size; a click (the button going down, not held) or Space launches. The click or key that ends the pause is not given to it: `GameFlow::Step::resumed` makes the front end call `LevelSession::resume()` instead of `update()` for that frame, which starts `PlayerInput` over. |
 | `PlayScene` (`game/`) | The picture of a session as a list of draws: `LevelScene` for the level (actors at their physics poses, what exploded or fell hidden, a hit brick retextured by its damage state, a person or an animal that was destroyed scaled down about its centre while it shrinks, `LevelScene::setScale`), the bat (the frames of `bat.x` that make the default bat, with the texture of `Settings::bat`), the balls (rolling by the distance over the radius, a soft shadow, shrinking away over 0.25 s when lost), and the flash and sparks at each `BrickDestroyed` (not for a person or an animal, who shrinks instead). Reads the session and its events; no window. |
+| `ObjectEffects` (`game/`, drawn by `PlayScene`) | What the special objects look like: the flash and sparks of a blast, a cannonball (`Yadro.x`) with its shadow and the puff at the muzzle, a rocket (`Fire-rocket.x`) with its trail and its burst, the ring where a ball goes into a teleport and comes out, a spring that gives (`LevelScene::setScale`), the glow of a flicker. Billboards and two meshes from the session's events and `objects()`; no rules, no window. The full particle systems come later. |
 | `PlaySounds` (`game/`) | An event as its sound through the `SoundLibrary`, panned by x (the table is in `AUDIO.md`). |
 | the fades | A level comes up out of the dark in 0.6 s; when the last target is gone the picture holds for 0.1 s (0.45 s when the game is lost) and fades out in 0.8 s, under the HUD; then `update` reports the outcome. The level cannot be paused meanwhile (`LevelSession::ending()` to `GameFlow::setLevelEnding`): leaving from the pause would lose the outcome, the win never recorded or the game over never reaching the name entry. |
 

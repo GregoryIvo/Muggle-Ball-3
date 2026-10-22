@@ -136,7 +136,7 @@ Outcome play(const Level& level, const MaterialLibrary& materials, double second
             freed = s.stats().ballsFreed;
             for (const BallView& ball : s.balls()) {
                 const Vec3 bat = s.bat().position;
-                if (!ball.held && std::hypot(ball.position.x - bat.x, ball.position.z - bat.z) <
+                if (!ball.held && !ball.away && std::hypot(ball.position.x - bat.x, ball.position.z - bat.z) <
                                       rules.batRadius + kBallRadius + kReachBeyond) {
                     problem(std::format("ball {} was pinned against the bat at ({:.2f}, {:.2f})", ball.id,
                                         static_cast<double>(ball.position.x), static_cast<double>(ball.position.z)));
@@ -144,7 +144,7 @@ Outcome play(const Level& level, const MaterialLibrary& materials, double second
             }
         }
         for (const BallView& ball : s.balls()) {
-            if (ball.held) {
+            if (ball.held || ball.away) {  // (a ball in a teleport is gone for 0.4 s)
                 anchors.erase(ball.id);
                 continue;
             }

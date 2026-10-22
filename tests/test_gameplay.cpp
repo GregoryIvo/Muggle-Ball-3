@@ -222,12 +222,14 @@ void testPredicates() {
          {ObjectType::Metall, ObjectType::Cannon, ObjectType::TeleportSrc, ObjectType::TeleportDest, ObjectType::Dynamite,
           ObjectType::Firework, ObjectType::GeneratorGood, ObjectType::GeneratorBad, ObjectType::Spring, ObjectType::Volcano,
           ObjectType::Vibro, ObjectType::Flicker}) {
+        const bool portal = type == ObjectType::TeleportSrc || type == ObjectType::TeleportDest;
         others = others && !isTarget(TargetRule::Bricks, type, &shark);
-        damageable = damageable && canBeDamaged(type, &shark);
+        damageable = damageable && canBeDamaged(type, &shark) != portal;
     }
     check(others && damageable,
-          "required: not metal, portals, cannons, dynamite, fireworks, generators, springs, volcanoes, vibros or flickers, "
-          "which a ball can still destroy");
+          "required: not metal, portals, cannons, dynamite, fireworks, generators, springs, volcanoes, vibros or flickers; a blast "
+          "can still destroy them, but for the portals, which nothing hurts (a charge 3.8 units away left one standing: "
+          "docs/GAMEPLAY.md section 15.1)");
 
     // What shrinks away: the materials of exploseType 5.
     check(shrinksAway(materials().find("Pirate.jpg")) && !shrinksAway(&shark) && !shrinksAway(&crate) && !shrinksAway(&steel) &&
@@ -953,9 +955,10 @@ void testRequiredSet() {
           "required: the level is complete when every brick and the tree are gone, the kinematic and the fixed ones too");
     bool standing = true;
     for (ActorIndex i = 6; i <= 14; ++i) {
-        standing = standing && !g.session.actor(i).removed && g.session.actor(i).damageable;
+        const bool teleport = i == 8 || i == 9;  // (they cannot be hurt at all)
+        standing = standing && !g.session.actor(i).removed && g.session.actor(i).damageable == !teleport;
     }
-    check(standing, "required: and the other nine are standing, and can still be destroyed");
+    check(standing, "required: and the other nine are standing, and can still be destroyed (but for the two portals)");
     const std::int64_t before = g.session.score();
     g.session.hit(6, {});  // the metal: 50 points for the destruction, which nothing waited for
     g.run(0.5);
