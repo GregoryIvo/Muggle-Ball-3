@@ -53,8 +53,10 @@ std::string_view eventName(EventType type) {
 // A path nearer the x axis than asin(sinFlat), or the z axis than asin(sinSteep), turned out to that angle: to the side
 // it was going in x and in z, and towards the middle of the board (from `atX`) if it was going to none.
 Vec3 turnedOut(Vec3 heading, float atX, float sinFlat, float sinSteep) {
-    const float side = heading.x != 0 ? heading.x : (atX > 0 ? -1.0f : 1.0f);
-    const float forward = heading.z < 0 ? -1.0f : 1.0f;
+    // A component this small is rounding left by the bounce, and its sign differs between CPUs: it is no side.
+    constexpr float kNoSide = 1e-3f;
+    const float side = std::fabs(heading.x) > kNoSide ? heading.x : (atX > 0 ? -1.0f : 1.0f);
+    const float forward = heading.z < -kNoSide ? -1.0f : 1.0f;
     if (std::fabs(heading.z) < sinFlat) {
         return {std::copysign(std::sqrt(1 - sinFlat * sinFlat), side), 0, forward * sinFlat};
     }
