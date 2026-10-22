@@ -28,6 +28,9 @@ constexpr double kGameOverHoldSeconds = 0.45;
 constexpr double kFadeOutSeconds = 0.8;
 // A prize the harness drops starts at the far end of the board.
 constexpr float kCueDropZ = 18.0f;
+// An effect it sets going: a beam without an end runs this far along the board; an emitter emits for this long, a beam is held.
+constexpr float kCueBeamLength = 10.0f;
+constexpr float kCueSeconds = 3.0f;
 
 using Clock = std::chrono::steady_clock;
 
@@ -71,6 +74,45 @@ bool parsePrizeCue(std::string_view text, bool catchNow, PrizeCue& cue) {
     return true;
 }
 
+bool parseEffectCue(std::string_view text, EffectCue& cue) {
+    const std::size_t at = text.find('@');
+    EffectCue parsed;
+    parsed.name = std::string(text.substr(0, at));
+    if (parsed.name.empty()) {
+        return false;
+    }
+    if (at != std::string_view::npos) {
+        // The numbers after the @: the seconds, then x, y and z, then a beam's other end.
+        std::vector<float> numbers;
+        for (std::size_t start = at + 1;;) {
+            const std::size_t comma = text.find(',', start);
+            const std::string field(text.substr(start, comma == std::string_view::npos ? comma : comma - start));
+            char* end = nullptr;
+            const float value = std::strtof(field.c_str(), &end);
+            if (field.empty() || std::isspace(static_cast<unsigned char>(field.front())) || end != field.c_str() + field.size() || !std::isfinite(value)) {
+                return false;
+            }
+            numbers.push_back(value);
+            if (comma == std::string_view::npos) {
+                break;
+            }
+            start = comma + 1;
+        }
+        if ((numbers.size() != 1 && numbers.size() != 4 && numbers.size() != 7) || !(numbers[0] >= 0)) {
+            return false;
+        }
+        parsed.seconds = numbers[0];
+        if (numbers.size() > 1) {
+            parsed.at = {numbers[1], numbers[2], numbers[3]};
+        }
+        if (numbers.size() > 4) {
+            parsed.to = mb::Vec3{numbers[4], numbers[5], numbers[6]};
+        }
+    }
+    cue = std::move(parsed);
+    return true;
+}
+
 PlaySession::PlaySession(mb::Renderer& renderer, Assets& assets, const mb::SaveData& save, mb::GameAudio* audio,
                          const PlayOptions& options)
     : renderer_(renderer),
@@ -103,8 +145,8 @@ bool PlaySession::start(std::string_view levelName, const mb::GameHud& hud, cons
         rules.prizeSeed = options_.autoplay ? static_cast<std::uint64_t>(hud.level) : std::random_device{}();
         auto session = std::make_unique<mb::GameSession>(level, assets_.materials, rules);
         progress(0.6f);
-        auto scene = std::make_unique<mb::PlayScene>(models_, assets_.materials, assets_.textures, level, *session,
-                                                     save_.settings.bat);
+        auto scene = std::make_unique<mb::PlayScene>(models_, assets_.materials, assets_.textures, assets_.particles, level,
+                                                     *session, save_.settings.bat);
         mb::logInfo("{}: {} targets; {:.0f} ms to build", entry.name, session->targetsLeft(session->levelEnd()),
                     millisecondsSince(begin));
         logMissing(entry.name, scene->report());
@@ -119,6 +161,7 @@ bool PlaySession::start(std::string_view levelName, const mb::GameHud& hud, cons
     player_ = {};
     caption_ = {};
     cues_ = options_.prizes;
+    effectCues_ = options_.effects;
     return true;
 }
 
@@ -129,6 +172,20 @@ void PlaySession::giveCues() {
             return false;
         }
         session_->dropPrize(cue.kind, cue.catchNow ? bat.position : mb::Vec3{cue.x.value_or(bat.position.x), 0, kCueDropZ});
+        return true;
+    });
+    std::erase_if(effectCues_, [&](const EffectCue& cue) {
+        if (session_->time() < cue.seconds) {
+            return false;
+        }
+        const mb::ParticleDef* def = assets_.particles.find(cue.name);
+        if (def == nullptr) {
+            mb::logError("--effect: no particle effect named {}", cue.name);
+        } else if (def->type == mb::ParticleType::Laser || def->type == mb::ParticleType::Lightning) {
+            scene_->particles().beam(cue.name, cue.at, cue.to.value_or(cue.at + mb::Vec3{0, 0, kCueBeamLength}), {.seconds = kCueSeconds});
+        } else {
+            scene_->particles().spawn(cue.name, cue.at, {.seconds = kCueSeconds});  // the emitters run for a while
+        }
         return true;
     });
 }
@@ -199,6 +256,10 @@ std::span<const mb::DrawItem> PlaySession::items() const {
     return scene_->items();
 }
 
+std::span<const mb::EffectBatch> PlaySession::effects() const {
+    return scene_->effects();
+}
+
 void PlaySession::render(mb::Renderer& renderer, std::span<const mb::Sprite> overlay) {
     int width = 0, height = 0;
     renderer.drawableSize(width, height);
@@ -213,7 +274,7 @@ void PlaySession::render(mb::Renderer& renderer, std::span<const mb::Sprite> ove
         sprites.push_back(cover);
     }
     sprites.insert(sprites.end(), overlay.begin(), overlay.end());
-    renderer.renderToWindow(frame(aspect), items(), {}, sprites);
+    renderer.renderToWindow(frame(aspect), items(), {}, sprites, effects());
 }
 
 }  // namespace mb_app

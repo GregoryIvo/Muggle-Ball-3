@@ -60,6 +60,16 @@ struct SpriteRun {
     Uint32 vertexCount = 0;
 };
 
+// One effect batch after its handles are resolved: where its triangles are in the uploaded stream.
+struct EffectRun {
+    SDL_GPUTexture* texture = nullptr;
+    BlendMode blend = BlendMode::Additive;
+    bool depthTest = false;
+    bool colourOnly = false;
+    Uint32 firstVertex = 0;
+    Uint32 vertexCount = 0;
+};
+
 // A draw item after its handles are resolved, ready to sort.
 struct PendingDraw {
     const DrawItem* item = nullptr;
@@ -93,10 +103,12 @@ struct Renderer::Impl {
     OffscreenTarget offscreen;
     StreamBuffer lineBuffer;
     StreamBuffer spriteBuffer;
+    StreamBuffer effectBuffer;
 
     std::vector<PendingDraw> opaqueDraws;   // kept between frames to reuse their storage
     std::vector<PendingDraw> blendedDraws;
     std::vector<SpriteRun> spriteRuns;
+    std::vector<EffectRun> effectRuns;
     bool warnedMissingResource = false;
     bool swapchainFailed = false;
 
@@ -117,9 +129,10 @@ struct Renderer::Impl {
     void releaseOffscreen();
 
     void renderWindow(const FrameParams& frame, std::span<const DrawItem> items, std::span<const DebugLine> lines,
-                      std::span<const Sprite> sprites);
+                      std::span<const Sprite> sprites, std::span<const EffectBatch> effects);
     Image renderOffscreen(int width, int height, const FrameParams& frame, std::span<const DrawItem> items,
-                          std::span<const DebugLine> lines, std::span<const Sprite> sprites);
+                          std::span<const DebugLine> lines, std::span<const Sprite> sprites,
+                          std::span<const EffectBatch> effects);
 
     void collectDraws(SDL_GPUTextureFormat colorFormat, const FrameParams& frame, std::span<const DrawItem> items);
     void releaseStream(StreamBuffer& buffer);
@@ -127,12 +140,15 @@ struct Renderer::Impl {
     void uploadStream(SDL_GPUCommandBuffer* cmd, StreamBuffer& buffer, Uint32 bytes);
     Uint32 uploadLines(SDL_GPUCommandBuffer* cmd, std::span<const DebugLine> lines);
     Uint32 uploadSprites(SDL_GPUCommandBuffer* cmd, std::span<const Sprite> sprites);
+    Uint32 uploadEffects(SDL_GPUCommandBuffer* cmd, std::span<const EffectBatch> effects);
     void drawFrame(SDL_GPUCommandBuffer* cmd, SDL_GPUTexture* color, SDL_GPUTextureFormat colorFormat,
                    SDL_GPUTexture* depth, Uint32 width, Uint32 height, const FrameParams& frame,
                    std::span<const DrawItem> items, std::span<const DebugLine> lines,
-                   std::span<const Sprite> sprites);
+                   std::span<const Sprite> sprites, std::span<const EffectBatch> effects);
     void drawMeshes(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, const Mat4& viewProj,
                     const FrameParams& frame);
+    void drawEffects(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, SDL_GPUTextureFormat colorFormat,
+                     const Mat4& viewProj);
     void drawSprites(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, SDL_GPUTextureFormat colorFormat,
                      Uint32 width, Uint32 height);
     void warnMissing(const char* what, std::uint32_t handle);

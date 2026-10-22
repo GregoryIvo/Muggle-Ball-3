@@ -36,12 +36,15 @@ struct PipelineKey {
     bool depthTest = true;
     bool lines = false;  // the DebugLine pipeline; blend, cull and depth flags are fixed for it
     bool sprites = false;  // the Sprite pipeline: alpha blending, no culling, no depth
+    bool effects = false;  // the Effect pipeline (EffectVertex): no culling, no depth write; blend and depthTest as set
 
     // Resolves BlendMode::AlphaBlend and Additive to their factors, so materials that blend the same way
     // share one pipeline however they were described.
     static PipelineKey forMaterial(SDL_GPUTextureFormat colorFormat, const MaterialParams& material);
     static PipelineKey forLines(SDL_GPUTextureFormat colorFormat);
     static PipelineKey forSprites(SDL_GPUTextureFormat colorFormat);
+    // `blend` is an EffectBatch's: Additive, or alpha blending for any other.
+    static PipelineKey forEffects(SDL_GPUTextureFormat colorFormat, BlendMode blend, bool depthTest);
 
     // Unique per distinct key; also used to sort draws so equal pipelines sit together.
     std::uint64_t pack() const;
@@ -71,6 +74,8 @@ private:
     SDL_GPUShader* lineFragment_ = nullptr;
     SDL_GPUShader* spriteVertex_ = nullptr;
     SDL_GPUShader* spriteFragment_ = nullptr;
+    SDL_GPUShader* effectVertex_ = nullptr;
+    SDL_GPUShader* effectFragment_ = nullptr;
     std::unordered_map<std::uint64_t, SDL_GPUGraphicsPipeline*> pipelines_;
 };
 

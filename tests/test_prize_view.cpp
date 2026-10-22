@@ -1,5 +1,6 @@
 // What the prizes put on screen, without a GPU or game data: the caption and its fade, the icon stack with its numbers, the night's
-// light, and the words the harness takes for a prize to drop or catch (--drop-prize, --catch-prize) and for the HUD (--hud-state).
+// light, and the words the harness takes for a prize to drop or catch (--drop-prize, --catch-prize), for a particle effect (--effect) and
+// for the HUD (--hud-state).
 
 #include "FrontEnd.h"
 #include "PlaySession.h"
@@ -148,6 +149,7 @@ void testNight() {
     check(items[0].material.diffuse.r == 1, "night: what the light dims is left to it");
     check(near(items[1].material.diffuse.r, 0.49f) && near(items[1].material.diffuse.g, 0.245f) && items[1].material.diffuse.a == 0.8f,
           "night: the sky and the flashes go to 0.49, their opacity unchanged");
+    check(unlitNightShare(0) == 1 && near(unlitNightShare(1), 0.49f) && near(unlitNightShare(0.5f), 0.745f), "night: the share of themselves the sky, the flashes and the particles keep");
 }
 
 void testPrizeCue() {
@@ -166,6 +168,19 @@ void testPrizeCue() {
     for (int i = 0; i < kPrizeKindCount; ++i) {
         const PrizeKind kind = static_cast<PrizeKind>(i);
         check(mb_app::parsePrizeCue(std::string(prizeInfo(kind).stem), false, cue) && cue.kind == kind, std::string(prizeInfo(kind).stem) + ": every prize can be named");
+    }
+}
+
+void testEffectCue() {
+    mb_app::EffectCue cue;
+    check(mb_app::parseEffectCue("explosebig", cue) && cue.name == "explosebig" && cue.seconds == 0 && cue.at.x == 0 && cue.at.y == 2 && cue.at.z == 0 && !cue.to,
+          "effect cue: a particle effect by its name, over the middle of the board");
+    check(mb_app::parseEffectCue("Fireworks/red@2.5", cue) && cue.name == "Fireworks/red" && cue.seconds == 2.5 && cue.at.y == 2, "effect cue: a file and a name, with the seconds to wait");
+    check(mb_app::parseEffectCue("Smoke@1,-8,0.5,10", cue) && cue.seconds == 1 && cue.at.x == -8 && cue.at.y == 0.5f && cue.at.z == 10 && !cue.to, "effect cue: and where");
+    check(mb_app::parseEffectCue("Lightning@5,-8,1,0,8,1,10", cue) && cue.to && cue.to->x == 8 && cue.to->y == 1 && cue.to->z == 10, "effect cue: and where a beam ends");
+    for (const char* bad : {"", "@1", "Smoke@", "Smoke@x", "Smoke@-1", "Smoke@1,2", "Smoke@1,2,3", "Smoke@1,2,3,x", "Smoke@1,2,3,4,5", "Smoke@1,2,3,4,5,6", "Smoke@1,2,3,4,5,6,7,8", "Smoke@1,2,3,"}) {
+        mb_app::EffectCue before = cue;
+        check(!mb_app::parseEffectCue(bad, cue) && cue.name == before.name && cue.seconds == before.seconds, std::string("effect cue: \"") + bad + "\" is refused and changes nothing");
     }
 }
 
@@ -190,6 +205,7 @@ int main() {
     testPowerUps();
     testNight();
     testPrizeCue();
+    testEffectCue();
     testHudState();
     if (failures == 0) {
         std::puts("all prize view tests passed");

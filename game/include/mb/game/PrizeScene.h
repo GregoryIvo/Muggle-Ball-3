@@ -79,7 +79,10 @@ private:
 // The scene's light at night, 0 (day) to 1 (full night): the board's brightness falls to 0.38 of itself and the sky's to 0.49
 // (docs/GAMEPLAY.md section 14.3 [M]).
 DirectionalLight nightLight(const DirectionalLight& day, float night);
-// The same for what has no light of its own (the sky, the halos, the flashes): their colour is dimmed.
+// The same for what has no light of its own (the sky, the halos, the flashes): their colour is dimmed, by this share of itself
+// (1 by day) ...
+float unlitNightShare(float night);
+// ... as dimUnlit does to draws.
 void dimUnlit(std::span<DrawItem> items, float night);
 
 }  // namespace mb

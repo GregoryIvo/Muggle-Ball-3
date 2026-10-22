@@ -63,7 +63,7 @@ Renderer::Impl::~Impl() {
         if (windowDepth.texture) {
             SDL_ReleaseGPUTexture(device, windowDepth.texture);
         }
-        for (StreamBuffer* stream : {&lineBuffer, &spriteBuffer}) {
+        for (StreamBuffer* stream : {&lineBuffer, &spriteBuffer, &effectBuffer}) {
             releaseStream(*stream);
         }
         for (const auto& entry : textures) {
@@ -353,17 +353,19 @@ void Renderer::drawableSize(int& width, int& height) const {
 }
 
 void Renderer::renderToWindow(const FrameParams& frame, std::span<const DrawItem> items,
-                              std::span<const DebugLine> lines, std::span<const Sprite> sprites) {
+                              std::span<const DebugLine> lines, std::span<const Sprite> sprites,
+                              std::span<const EffectBatch> effects) {
     if (!impl_->window) {
         logError("renderToWindow called on a headless Renderer");
         return;
     }
-    impl_->renderWindow(frame, items, lines, sprites);
+    impl_->renderWindow(frame, items, lines, sprites, effects);
 }
 
 Image Renderer::renderToImage(int width, int height, const FrameParams& frame, std::span<const DrawItem> items,
-                              std::span<const DebugLine> lines, std::span<const Sprite> sprites) {
-    return impl_->renderOffscreen(width, height, frame, items, lines, sprites);
+                              std::span<const DebugLine> lines, std::span<const Sprite> sprites,
+                              std::span<const EffectBatch> effects) {
+    return impl_->renderOffscreen(width, height, frame, items, lines, sprites, effects);
 }
 
 }  // namespace mb

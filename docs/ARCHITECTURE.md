@@ -6,7 +6,7 @@ Goal: native on macOS first, then other platforms without rewriting the game.
 |---|---|---|
 | Language and build | C++20, CMake | CMake also generates Xcode projects. |
 | Window, input, audio device | SDL3 | Same API on macOS, Windows, Linux, iOS and consoles. |
-| Rendering | SDL3 GPU API | Metal on macOS, Vulkan elsewhere. Shaders are GLSL, compiled ahead of time to SPIR-V and MSL by `tools/build_shaders.py` (glslang + SPIRV-Cross); the generated headers are committed, so building needs neither tool. |
+| Rendering | SDL3 GPU API | Metal on macOS, Vulkan elsewhere. Shaders are GLSL, compiled ahead of time to SPIR-V and MSL by `tools/build_shaders.py` (glslang + SPIRV-Cross); the generated headers are committed, so building needs neither tool. Meshes are `DrawItem`s, the particles `EffectBatch`es of world-space triangles (one call for each texture and blend, whatever the number of particles), 2D `Sprite`s go over both. |
 | Physics | Jolt Physics | Replaces PhysX 2.x. Levels store PhysX boxes, spheres, capsules, convexes and joints, all of which map directly. `PhysicsWorld` is the PhysX model over Jolt, `PhysicsScene` runs a level in it; how, and why, is in `PHYSICS.md`. |
 | Audio | stb_vorbis, a software mixer, SDL3 audio | All sounds and music are Ogg Vorbis. See [`AUDIO.md`](AUDIO.md). |
 | XML | Converted offline | `materials.xml`, the sound and music lists, the menus and the string table, and the object and particle definitions are converted to JSON by `tools/materials.py`, `tools/sounds.py`, `tools/ui.py` and `tools/objects.py` (see `OBJECTS.md`). |
@@ -139,6 +139,34 @@ and the level's number counting from 1 when a game starts, `PlaySession` keeps t
 it, and it carries over to the next level. `MuggleBall3 --level <name> --hud [--hud-state 3,1529,1,Cannon:6]` shows
 placeholders on the level viewer or a screenshot.
 
+## Particles
+
+The effects of `Data/Particles` (docs/GAMEPLAY.md section 19, docs/OBJECTS.md section 8) are one system that anything can ask for an effect by name; it has no GPU and no window, and the renderer sees only batches of triangles.
+
+| Layer | What |
+|---|---|
+| `engine/` `EffectBatch` | A span of `EffectVertex` (a world position, a texture coordinate and a colour; three to a triangle), one texture, additive or alpha blending, depth tested or not, and whether the vertex colour replaces the texture's. `Renderer::renderToWindow` and `renderToImage` take a list of them as a last argument (`effects`, empty by default), stream them through one vertex buffer and draw each with one call, after the meshes and before the debug lines and the sprites, in order, with no culling and no depth write (`engine/shaders/effect.*`). |
+| `game/` `ParticleLibrary` | The definitions of the 20 files (`ParticleDef`: every attribute they use), by `file` or `file/name`. Reports what it cannot read and any attribute it does not know. |
+| `game/` `ParticleSystem` | The simulation: `spawn`, `attach`, `beam`, `moveTo`, `aim`, `stop`, `alive`, `update(dt)`, and `appendQuads(view, out)`, which says what quads everything alive is as a camera sees it. A particle's state is a function of its age and its seed, so it is deterministic and tested without a GPU. |
+| `game/` `ParticleBatches` | The quads as `EffectBatch`es, grouped by texture and blend (it resolves a definition's texture name once, through a function the caller gives; a missing one is drawn as a soft dot), dimmed for the night. Owns the vertices the batches point into. |
+| `game/` `explosionEffects` | The table from a material's `exploseType` to the effects of a brick that breaks. |
+
+`PlayScene` owns the one `ParticleSystem` (`scene.particles()`), steps it near the end of `update()` and builds the batches last (`scene.effects()`, which `PlaySession` gives the renderer after the items). Spawn from there, before it is stepped: from an event handler of `PlayScene::update`, or from a class `update()` calls, as `ObjectEffects` does for the dynamite's flash, the rocket's trail and burst, the flickers' fire and the cannon's smoke.
+
+```cpp
+ParticleSystem& fx = scene.particles();
+fx.spawn("explosebig", at);                                           // a flash, a firework or a fall of leaves goes off and is gone
+fx.spawn("Fireworks/red", at, {.scale = 0.5f});                       // `scale` is of sizes and distances, not times
+fx.spawn("Smoke", muzzle, {.direction = barrel, .seconds = 0.15f});   // an emitter, for a moment
+const EffectId trail = fx.attach("Trail/TrailOrange", rocket);        // an emitter until stopped ...
+fx.moveTo(trail, rocket);                                             // ... told every frame where it is
+fx.stop(trail);                                                       // no more come out; what it left fades
+const EffectId bolt = fx.beam("Lightning", from, to, {.seconds = 0.2f});   // a beam (Laser) or a bolt, strong for `seconds`, then it fades
+fx.aim(bolt, from, to);                                               // moves it, and keeps it strong for `seconds` more
+```
+
+A name is a file (`explosebig`, its first definition) or `file/name` (`Trail/TrailBlue`), any case. `spawn` is for the types that go off at once (Flash, Firework, LeafFall) and, with `seconds`, for emitters (Trail, Smoke, WaterBubble, Tornado); `attach` only for emitters; `beam` only for Laser and Lightning; the wrong call, or a name the library lacks, gives `kNoEffect` (0) and every call takes it harmlessly. `MuggleBall3 --autoplay --effect <name>[@seconds[,x,y,z[,x2,y2,z2]]] --screenshot out.png --simulate <seconds>` puts any of them on a level. Tests: `mb_particle_tests` (made-up files with the real numbers: the parser, each type, the batches), `mb_particle_smoke` (the 20 real files and what names them), `mb_effects_smoke` (the effects in the scene from the rules' events, on the GPU) and `mb_render_test` (the batches in the renderer).
+
 ## Gameplay
 
 `GameSession` (`game/Gameplay.h`) is one level being played: the rules of `GAMEPLAY.md` on top of a `PhysicsScene`. It
@@ -222,8 +250,8 @@ the click each frame, and turns what they report into what is seen and heard.
 | Part | What it does |
 |---|---|
 | `GameSession` + `Autopilot` | The rules; with `--autoplay` the autopilot's input replaces the mouse's. `PlayerInput` (`app/`, the keys are SDL's) turns the mouse into the bat's target through `batTargetX` and the drawable size; a click (the button going down, not held) or Space launches. The click or key that ends the pause is not given to it: `GameFlow::Step::resumed` makes the front end call `LevelSession::resume()` instead of `update()` for that frame, which starts `PlayerInput` over. |
-| `PlayScene` (`game/`) | The picture of a session as a list of draws: `LevelScene` for the level (actors at their physics poses, what exploded or fell hidden, a hit brick retextured by its damage state, a person or an animal that was destroyed scaled down about its centre while it shrinks, `LevelScene::setScale`), the bat (the frames of `bat.x` that make the default bat, with the texture of `Settings::bat`), the balls (rolling by the distance over the radius, a soft shadow, shrinking away over 0.25 s when lost), and the flash and sparks at each `BrickDestroyed` (not for a person or an animal, who shrinks instead). Reads the session and its events; no window. |
-| `ObjectEffects` (`game/`, drawn by `PlayScene`) | What the special objects look like: the flash and sparks of a blast, a cannonball (`Yadro.x`) with its shadow and the puff at the muzzle, a rocket (`Fire-rocket.x`) with its trail and its burst, the ring where a ball goes into a teleport and comes out, a spring that gives (`LevelScene::setScale`), the glow of a flicker. Billboards and two meshes from the session's events and `objects()`; no rules, no window. The full particle systems come later. |
+| `PlayScene` (`game/`) | The picture of a session as a list of draws: `LevelScene` for the level (actors at their physics poses, what exploded or fell hidden, a hit brick retextured by its damage state, a person or an animal that was destroyed scaled down about its centre while it shrinks, `LevelScene::setScale`), the bat (the frames of `bat.x` that make the default bat, with the texture of `Settings::bat`), the balls (rolling by the distance over the radius, a soft shadow, shrinking away over 0.25 s when lost), and, through the one `ParticleSystem` it owns (see "Particles"), the flash of each `BrickDestroyed` by its material's `exploseType` (none for a person or an animal, who shrinks instead). Reads the session and its events; no window. |
+| `ObjectEffects` (`game/`, drawn by `PlayScene`) | What the special objects look like: a cannonball (`Yadro.x`) with its shadow and a flare at the muzzle, a rocket (`Fire-rocket.x`) with its shadow, the ring where a ball goes into a teleport and comes out, a spring that gives (`LevelScene::setScale`), the glow of a flicker; and what the particle files define, asked of the `ParticleSystem`: the blast's flash (the explosion the level names), the cannonball's burst, the muzzle's smoke, the rocket's trail and burst, the flickers' sparks and smoke, a tree's leaves. Billboards and two meshes from the session's events and `objects()`; no rules, no window. |
 | `PlaySounds` (`game/`) | An event as its sound through the `SoundLibrary`, panned by x (the table is in `AUDIO.md`). |
 | the fades | A level comes up out of the dark in 0.6 s; when the last target is gone the picture holds for 0.1 s (0.45 s when the game is lost) and fades out in 0.8 s, under the HUD; then `update` reports the outcome. The level cannot be paused meanwhile (`LevelSession::ending()` to `GameFlow::setLevelEnding`): leaving from the pause would lose the outcome, the win never recorded or the game over never reaching the name entry. |
 

@@ -15,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -34,9 +35,22 @@ struct PrizeCue {
 // play to wait after an @ and, after a comma, where along the board it falls from. False if the text is not that.
 bool parsePrizeCue(std::string_view text, bool catchNow, PrizeCue& cue);
 
+// A particle effect the harness sets going at a time of play, for looking at the particle files without waiting for the game to
+// need them (--effect; docs/GAMEPLAY.md section 19).
+struct EffectCue {
+    std::string name;       // a particle file, or "file/name" (ParticleLibrary::find)
+    double seconds = 0;     // of play
+    mb::Vec3 at{0, 2, 0};   // where it goes off, or a beam starts
+    std::optional<mb::Vec3> to;  // a beam's other end (Laser, Lightning); 10 units on along the board if not given
+};
+// "Fireworks/red", "explosebig@5" or "Lightning@5,-8,1,0,8,1,10": a particle effect, the seconds of play to wait after an @ and,
+// after a comma, where it goes off (x, y, z) and, after three more numbers, where a beam ends. False if the text is not that.
+bool parseEffectCue(std::string_view text, EffectCue& cue);
+
 struct PlayOptions {
     bool autoplay = false;  // the Autopilot plays: it moves the bat and launches (--autoplay)
     std::vector<PrizeCue> prizes;  // given to every level that is played
+    std::vector<EffectCue> effects;  // likewise
 };
 
 // The game's level, for the front end: builds the scene and the rules of a level, plays it and draws it. The cursor is
@@ -59,6 +73,7 @@ public:
     // The picture without a window, for screenshots: what to draw (after start()) and how to look at it.
     mb::FrameParams frame(float aspect) const;
     std::span<const mb::DrawItem> items() const;
+    std::span<const mb::EffectBatch> effects() const;
     // The rules, null before a level has started.
     const mb::GameSession* rules() const { return session_.get(); }
     // How dark the picture is, 0 to 1: the fades of the start and the end of a level.
@@ -82,6 +97,7 @@ private:
     std::optional<mb::PlaySounds> sounds_;
     mb::PrizeCaption caption_;
     std::vector<PrizeCue> cues_;  // not yet given
+    std::vector<EffectCue> effectCues_;
 
     double age_ = 0;    // seconds since the level began
     double clock_ = 0;  // the frames' time, which runs on beyond the session's steps
