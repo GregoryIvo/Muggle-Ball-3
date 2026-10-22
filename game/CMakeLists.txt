@@ -20,7 +20,6 @@ add_library(mb_game
   src/UiForm.cpp
   src/UiAssets.cpp
   src/UiDraw.cpp
-  src/Profile.cpp
   src/Campaign.cpp
   src/Menu.cpp
   src/Hud.cpp

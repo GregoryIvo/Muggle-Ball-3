@@ -101,6 +101,8 @@ public:
     void playMusicForLevel(std::string_view levelName, float fadeSeconds = kMusicFadeSeconds);
     void stopMusic(float fadeSeconds = kMusicFadeSeconds);
     static std::string_view musicForLevel(std::string_view levelName);
+    // The track asked for last, in lower case ("menu", "pirates"); empty before the first and after stopMusic().
+    const std::string& music() const { return music_; }
 
 private:
     struct Periodic {

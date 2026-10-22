@@ -204,6 +204,7 @@ void SoundLibrary::playMusic(std::string_view name, float fadeSeconds) {
     }
     audio_.playMusic(*file, fadeSeconds, true);
     music_ = key;
+    logInfo("Music: {}", name);
 }
 
 void SoundLibrary::playMusicForLevel(std::string_view levelName, float fadeSeconds) {

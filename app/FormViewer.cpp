@@ -6,6 +6,7 @@
 #include "mb/engine/Renderer.h"
 #include "mb/engine/Window.h"
 #include "mb/game/Menu.h"
+#include "mb/game/SaveData.h"
 #include "mb/game/UiAssets.h"
 
 #include <SDL3/SDL.h>
@@ -27,15 +28,16 @@ using Clock = std::chrono::steady_clock;
 
 constexpr int kDemoScore = 1234;
 
-// A table to show on the high-score form: made up, for looking at the screen only.
-mb::Profile demoProfile() {
-    mb::Profile profile;
+// The player's data to show, with a high-score table made up for looking at the screen. It has no folder, so it stays
+// in memory and nothing the menus save here reaches the real files.
+mb::SaveData demoSave() {
+    mb::SaveData save{std::filesystem::path()};
     int score = 48500;
     for (const char* name : {"Ivan", "Alexey", "Sergey", "Lena", "Artem", "Igor", "Andrew", "Maria", "Olga", "Nikolay"}) {
-        profile.highScores.push_back({name, score});
+        save.highScores.add(name, score, "");
         score -= 2750;
     }
-    return profile;
+    return save;
 }
 
 bool sameName(const std::string& a, const std::string& b) {
@@ -43,14 +45,15 @@ bool sameName(const std::string& a, const std::string& b) {
            std::ranges::equal(a, b, [](unsigned char x, unsigned char y) { return std::tolower(x) == std::tolower(y); });
 }
 
-// The menus on their own, with the sounds and the saving written to the log.
+// The menus on their own, with the sounds and the settings they change written to the log.
 class Viewer {
 public:
     Viewer(mb::UiAssets& assets, bool background)
         : assets_(assets),
           names_(assets.formNames()),
           campaign_(mb::Campaign::load(assets.root() / "Data" / "xml" / "levels.json")),
-          menu_([this](std::string_view name) { return assets_.loadForm(name); }, campaign_, hooks()) {
+          save_(demoSave()),
+          menu_([this](std::string_view name) { return assets_.loadForm(name); }, campaign_, save_, hooks()) {
         menu_.setBackground(background);
         menu_.setVideoModes({{800, 600}, {1024, 768}, {1280, 960}});
     }
@@ -99,19 +102,18 @@ private:
     static mb::MenuHooks hooks() {
         mb::MenuHooks hooks;
         hooks.playSound = [](std::string_view sound) { mb::logInfo("sound \"{}\"", sound); };
-        hooks.loadProfile = demoProfile;
-        hooks.settingsChanged = [](const mb::MenuSettings& s) {
-            mb::logInfo("settings: music {} sound {} smart camera {} freeze sky {} shadows {} mirrors {} fullscreen {} bat {}", s.musicVolume,
+        hooks.settingsChanged = [](const mb::Settings& s) {
+            mb::logInfo("settings: music {:.2f} sound {:.2f} smart camera {} freeze sky {} shadows {} mirrors {} fullscreen {} bat {}", s.musicVolume,
                         s.soundVolume, s.smartCamera, s.freezeSky, s.shadows, s.mirrors, s.fullscreen, s.bat);
         };
-        hooks.applyVideo = [](const mb::MenuSettings& s) { mb::logInfo("video: {}x{}, fullscreen {}", s.windowWidth, s.windowHeight, s.fullscreen); };
-        hooks.saveProfile = [](const mb::Profile& p) { mb::logInfo("profile saved ({} scores)", p.highScores.size()); };
+        hooks.applyVideo = [](const mb::Settings& s) { mb::logInfo("video: {}x{}, fullscreen {}", s.windowWidth, s.windowHeight, s.fullscreen); };
         return hooks;
     }
 
     mb::UiAssets& assets_;
     std::vector<std::string> names_;
     mb::Campaign campaign_;
+    mb::SaveData save_;
     mb::Menu menu_;
     std::size_t index_ = 0;
 };

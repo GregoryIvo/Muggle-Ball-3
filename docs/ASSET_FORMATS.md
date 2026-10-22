@@ -116,6 +116,109 @@ Written by `tools/x2glb.py` (parser: `tools/xfile.py`):
   material has several `<Sounds>` elements, their attributes are merged and
   later ones override.
 
+## Objects and particles: `assets/Data/Objects/**/*.json`, `assets/Data/Particles/*.json`
+
+Every `.xml` / `.XML` under `Data/Objects/` (348 files: bricks, prizes, bullets,
+the bat and ball, interactive objects...) and `Data/Particles/` (20 files) is
+converted by `tools/objects.py` into a `.json` file with the same name beside it.
+What the definitions mean for gameplay is in [OBJECTS.md](OBJECTS.md); this
+section only describes the JSON.
+
+The JSON is a *generic element tree*, not a schema. The XML was written by hand
+and by 3ds Max scripts and has no fixed grammar, so nothing is interpreted
+beyond typing the attribute values:
+
+```json
+{
+  "version": 1,
+  "source": "Objects/Prizes/speedup.xml",
+  "encoding": "utf-8",
+  "repairs":  [{"line": 9, "kind": "missing-whitespace", "detail": "..."}],
+  "suspects": [{"line": 6, "kind": "tag-typo", "detail": "..."}],
+  "comments": ["<object name=\"GeoSphere01\" ...>"],
+  "root": {"tag": "root", "children": [
+    {"tag": "objects", "children": [
+      {"tag": "object", "attrs": {"name": "speedup", "type": "Prize"}, "children": [
+        {"tag": "shapes", "attrs": {"id": "1968554979773748886"}, "children": [
+          {"tag": "box", "attrs": {"name": "Fast-1_ph_Box01", "dimensions": [2.3, 2.0, 2.0],
+                                   "rotation": [-0.0, -0.0, -0.0, 1.0], "translation": [0.0, 1.0, 0.0]}}]},
+        {"tag": "mesh", "attrs": {"name": "Prizes/speedup.x"}},
+        {"tag": "extra", "attrs": {"description": "SpeedUp", "oreol": "oreolred"}}]}]}]}
+}
+```
+
+- `version` is `OBJECTS_JSON_VERSION` in `tools/objects.py`. `source` is the
+  XML's path relative to `Data/`, with its original spelling. `encoding` is how
+  the bytes were decoded. `repairs`, `suspects` and `comments` are present only
+  when non-empty.
+- `root` is the document element, whatever it is (`root`, `particles`, or
+  `object` in `Exploses/explose.xml`). An element is
+  `{"tag", "attrs"?, "raw"?, "text"?, "typoOf"?, "attrTypoOf"?, "children"?}`,
+  children in document order. Order matters in the compound files (see
+  OBJECTS.md, `file`).
+- **Tags are lower-cased** (`<Object>`, `<object>` and `<OBJECT>` are one tag;
+  the shipped files mix them, and the game must have read them alike).
+  **Attribute names keep their case** (`disableGravity`, `Diffuse`, `frameNode`):
+  look them up case-insensitively. Text is kept in `text`, stripped, only when
+  an element has any (no shipped file does). Comments are not part of the tree;
+  they are listed in `comments` because `yadro.XML` hides a whole disabled
+  object in one.
+- **Attribute values are typed where that cannot be wrong**, otherwise they stay
+  strings, byte for byte (entities decoded, tabs and newlines turned into
+  spaces):
+  - a number, `"3"` becomes `3`, `".6"` becomes `0.6`, `"12."` becomes `12.0`;
+    text with a leading zero (`"007"`) or more than 15 digits stays a string;
+  - two or more numbers separated by spaces become a list, `"0 0 -10"` becomes
+    `[0, 0, -10]`;
+  - `rotation` (a quaternion, stored `[x, y, z, w]`), `translation`, `dimensions`,
+    `velocity`, `axis`, `anchor`, `direction`, `shadow_plane` and
+    `shadow_position` are always lists of floats when they hold the right count
+    of numbers (4 for `rotation`, 3 for the others). Otherwise they are typed
+    like any value and the converter lists a `vector-size` suspect;
+  - `yes` / `no` / `true` / `false` (any case) become booleans, and `0x...`
+    becomes an integer. These two are the lossy cases: the original text goes in
+    the element's `raw` map, `{"modulate_colour": "no", "colour1": "0x00e2e2ff"}`.
+    `0` and `1` flags stay numbers;
+  - the names `name`, `id`, `type`, `texture`, `data`, `frameNode`, `description`,
+    `oreol`, `explose`, `shadowType`, `particles1`, `particles2`, `shootSound`,
+    `object1`, `object2`, `lu`, `ld`, `ru` and `rd` always stay strings. `id` on
+    `<shapes>` is a 64-bit number that does not fit a JSON double.
+- `-0.0` appears in rotations (the XML writes `-0.00000`). It is a zero.
+
+**Repairs** are things the parser had to fix to read the file. Every shipped
+file converts; there are five repairs in all:
+
+| Kind | Where | What was done |
+|---|---|---|
+| `encoding` | the four `Sea/Ships` files with a Russian comment (`boat-water`, `pirateship`, `-green`, `-white`) | not UTF-8; decoded as code page 866 (the comments say "Флаги", "Низ корабля", "Нос корабля"). Only comments hold the non-ASCII bytes |
+| `missing-whitespace` | `Prizes/speedup.xml` line 9, `description="SpeedUp"oreol="oreolred"` | a space is assumed between the attributes |
+
+The parser also copes with unquoted or valueless attributes, duplicate
+attributes (the last wins), mismatched, stray or missing end tags (open
+children are closed, a stray end tag is ignored), unterminated tags, comments
+and quotes, text outside the root, several top-level elements (wrapped in a
+`document` element), BOMs, declared encodings and `&amp;`-style entities. Each
+case is reported under `repairs` with its line; the unit tests
+(`tests/test_objects.py`) cover them with synthetic XML.
+
+**Suspects** are things that look wrong but are *kept as written*, because
+fixing them would change behaviour the original most likely had:
+
+- `tag-typo` / `attribute-typo`: a name that becomes a known one when one
+  character is deleted: `<b1ox>`, `<spher1e>`, `<m1esh>`, `<mesfh>`,
+  `rotat1ion`. The element keeps its tag and gets `"typoOf": "box"` (or
+  `"attrTypoOf": {"rotat1ion": "rotation"}`) so a loader can tell. In every case
+  the shipped data is more consistent when the original ignored the element
+  (OBJECTS.md, "Data quirks"), so a loader that only reads known tags behaves
+  like the game.
+- `unresolved-file`: a `<file name="...">` that matches no shipped file. The
+  four `Village/Builds/fencelong*.XML` files point at `Data/Objects/Grass/Builds/`,
+  which is now `Village/Builds/`.
+- `vector-size`: a vector attribute without the right number of components.
+
+`python3 tools/objects.py DATA_DIR` runs the conversion on its own and prints
+every repair and suspect. `tools/convert_assets.py` runs it last.
+
 ## Sounds and music
 
 `assets/Sounds/*.ogg` and `assets/Musics/*.ogg` (the contents of `Sounds.dat` and

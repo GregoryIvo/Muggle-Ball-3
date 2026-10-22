@@ -55,13 +55,23 @@ target_link_libraries(mb_menu_smoke PRIVATE mb_game)
 add_test(NAME mb_menu_smoke COMMAND mb_menu_smoke)
 set_tests_properties(mb_menu_smoke PROPERTIES SKIP_RETURN_CODE 77)
 
-# The whole front end in a real window, driven by events pushed from a second thread, with the real game data. Exits 77
+# The whole front end in a real window, driven by events pushed from a second thread, with the real game data, the
+# game's sound on SDL's disk audio driver, and the player's files in a temporary folder (MB3_USER_DATA). Exits 77
 # (skipped) without MB3_ASSETS, a window system or a GPU.
-add_executable(mb_frontend_smoke frontend_smoke.cpp ${PROJECT_SOURCE_DIR}/app/FrontEnd.cpp)
+add_executable(mb_frontend_smoke frontend_smoke.cpp ${PROJECT_SOURCE_DIR}/app/FrontEnd.cpp
+               ${PROJECT_SOURCE_DIR}/app/FrontEndAudio.cpp ${PROJECT_SOURCE_DIR}/app/GameAudio.cpp)
 target_include_directories(mb_frontend_smoke PRIVATE ${PROJECT_SOURCE_DIR}/app)
 target_link_libraries(mb_frontend_smoke PRIVATE mb_game)
 add_test(NAME mb_frontend_smoke COMMAND mb_frontend_smoke)
 set_tests_properties(mb_frontend_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# The front end's sound (the game's GameAudio and connectAudio) on SDL's disk audio driver over a made-up sound list: the
+# menus' sounds, the music, the volumes and the pause. No game data, window or speakers.
+add_executable(mb_wiring_tests test_wiring.cpp ${PROJECT_SOURCE_DIR}/app/FrontEndAudio.cpp ${PROJECT_SOURCE_DIR}/app/GameAudio.cpp)
+target_include_directories(mb_wiring_tests PRIVATE ${PROJECT_SOURCE_DIR}/app)
+target_link_libraries(mb_wiring_tests PRIVATE mb_game)
+target_compile_definitions(mb_wiring_tests PRIVATE "MB3_TEST_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/data\"")
+add_test(NAME mb_wiring_tests COMMAND mb_wiring_tests)
 
 # File helpers and save data, in a temporary folder.
 add_executable(mb_save_tests test_save.cpp)

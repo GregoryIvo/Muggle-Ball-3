@@ -66,9 +66,11 @@ name through an `AudioPlayer` (so the tests use a recorder instead of a device).
 
 ## In the app (`app/GameAudio.*`)
 
-`GameAudio` owns the `Audio` and the `SoundLibrary`, plays the world's music when a
-level is shown and ticks the clock. Game code reaches the library through
-`GameAudio::sounds()`, which is null if the sound data is missing.
+`GameAudio` owns the `Audio` and the `SoundLibrary`, plays the menus' and each world's music, sets
+the volumes, pauses and ticks the clock. Game code reaches the library through
+`GameAudio::sounds()`, which is null if the sound data is missing (the volumes and the pause
+then still answer, and everything else is silent). `Music: <name>` is logged each time a track
+is asked for.
 
 ```cpp
 // From a contact event (physics): a brick is hit, broken, dropped
@@ -76,13 +78,35 @@ sounds->play(brick.material, mb::MaterialSound::Hit, gain, pan);
 // When an object with a periodSound / loopSound appears and when it goes
 id = sounds->startPeriodic(material, 0.8f, pan);   sounds->stopPeriodic(id);
 voice = sounds->startLoop(material);               sounds->stopLoop(voice);
-// Options and pause menus
-audio.device().mixer().setMasterVolume(v);   // also setSfxVolume, setMusicVolume
-audio.device().mixer().setPaused(true);      // pause menu; false resumes
+// Options and pause menus (the game does these through connectAudio, below)
+audio.setVolumes(music, sound);   // 0 to 1; the mixer's master volume stays 1
+audio.setPaused(true);            // pause screen; false resumes
 ```
 
 `gain` is a linear amplitude (1 is the file's own level) and `pan` runs from -1
 (left) to 1 (right), for example from the contact's x position.
+
+### The game
+
+`runGame` creates the `GameAudio` right after the window (the device closes before SDL quits) and
+`mb_app::connectAudio` (`app/FrontEndAudio.cpp`) hooks it to the front end:
+
+| From | To |
+|---|---|
+| `MenuHooks::playSound(name)`: the `sound_mouse_in` / `sound_mouse_down` names of the forms (`menustonein`, `menustonedown`, ...) | `SoundLibrary::play(name)` |
+| `MenuHooks::settingsChanged(settings)`: once at the start with the saved settings, then at every change in Options | the mixer's music volume (`musicVolume`) and effects volume (`soundVolume`), both 0 to 1 as saved; the master volume stays 1. The menus' own sounds are effects, so the sound slider is theirs too |
+| `FrontEndEvents::menuShown`: at the start, and on coming back from a level | the `Menu` track |
+| `FrontEndEvents::levelStarted(name)`: the Loading form has gone and play begins | `playMusicForLevel(name)`, crossfading from the menu music |
+| `FrontEndEvents::paused(bool)` | `Mixer::setPaused` |
+| `FrontEndEvents::frame` | `GameAudio::update()` |
+
+**Pause.** The mixer's pause is for everything: it fades all effects and the music out and freezes them, and a sound
+asked for while it lasts starts frozen, so it is heard only after the resume. That fits the pause screen, which has
+no sounds of its own and no widgets, so nothing asks for one meanwhile. What has to hold is that the pause ends before
+the menus come back, or their first hover sound would wait: the front end announces `paused(false)` before
+`menuShown()` when Escape leaves the pause screen for the main menu. `tests/test_wiring.cpp` checks that order and that
+the menus' sounds play after it, and `tests/frontend_smoke.cpp` checks the sequence through the real front end. A
+sound that must play during a pause would need a mixer that pauses only the game's voices; this one cannot.
 
 ## Trying it without speakers
 
@@ -93,6 +117,10 @@ $MuggleBall3 --play-music Pirates --seconds 20
 # Write what would reach the speakers to a file (raw float32 stereo, 44.1 kHz):
 SDL_AUDIO_DRIVER=disk SDL_AUDIO_DISK_OUTPUT_FILE=out.raw $MuggleBall3 --play-sound pirat_hit
 ```
+
+`tests/mb_wiring_tests` runs the game's `GameAudio` over a made-up sound list on the disk driver and checks the menus'
+sounds, the music, the volumes and the pause; `tests/mb_frontend_smoke` does the same through the real front end and
+the real data, with clicks on buttons and on the Options slider.
 
 `tests/mb_audio_smoke` does this against the real data and compares the file with
 the decoded samples. The disk driver runs in real time, so a test takes as long as

@@ -5,6 +5,7 @@
 #include "mb/game/Campaign.h"
 #include "mb/game/Hud.h"
 #include "mb/game/Menu.h"
+#include "mb/game/SaveData.h"
 #include "mb/game/UiAssets.h"
 #include "mb/game/UiInput.h"
 
@@ -37,16 +38,35 @@ public:
     virtual void render(mb::Renderer& renderer, std::span<const mb::Sprite> overlay) = 0;
 };
 
+// What the front end tells the rest of the program as the game moves between the menus, a level and the pause
+// screen (the app plays the music and pauses the sound from it). All are optional.
+struct FrontEndEvents {
+    // The menus are up: at the start, and again when the player comes back from a level or a level cannot be built.
+    std::function<void()> menuShown;
+    // A level is ready and play begins; `levelName` is the campaign's name for it (any case).
+    std::function<void(std::string_view levelName)> levelStarted;
+    // The pause screen came up (true) or went away (false, before the menus or the level go on).
+    std::function<void(bool paused)> paused;
+    // Once per frame, for clocks.
+    std::function<void()> frame;
+};
+
 struct FrontEndOptions {
     std::string language;  // a language of the string table; empty keeps the game's default
-    // The hooks other parts of the program set: sound for playSound, saving for loadProfile and saveProfile.
-    // runFrontEnd adds the window ones (applyVideo) to what is set here.
+    // The hooks other parts of the program set: sound for playSound, the volume for settingsChanged (called once at
+    // the start with the saved settings, too). runFrontEnd adds the window ones (applyVideo) to what is set here.
     mb::MenuHooks hooks;
+    FrontEndEvents events;
+    // Whether the stage screens lock the levels the saved progress has not opened (Menu::setLevelsLocked).
+    bool lockLevels = true;
 };
 
 // The game as the player meets it: the main menu on the window, from which levels are started, played with the
-// HUD, paused and left. Returns when the player quits or closes the window.
-int runFrontEnd(mb::Window& window, mb::Renderer& renderer, LevelSession& session, const FrontEndOptions& options);
+// HUD, paused and left. The menus show and change `save` (options, bat, high scores) and write it. Open the window
+// with its video settings: from then on the settings follow the window as the player resizes it or goes fullscreen,
+// and Options moves the window to the choices made there. Returns when the player quits or closes the window.
+int runFrontEnd(mb::Window& window, mb::Renderer& renderer, LevelSession& session, mb::SaveData& save,
+                const FrontEndOptions& options);
 
 // One frame of the window's input as the menus take it.
 mb::UiInput toUiInput(const mb::InputEvents& input);

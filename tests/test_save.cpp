@@ -113,8 +113,9 @@ void testMissingFilesGiveDefaults() {
     const mb::SaveData save(dir.path / "not-created-yet");
     const mb::Settings defaults;
     check(save.settings.musicVolume == defaults.musicVolume && save.settings.windowWidth == 1024 &&
-              save.settings.windowHeight == 768 && !save.settings.fullscreen && save.settings.mirrors && save.settings.shadows,
-          "default settings");
+              save.settings.windowHeight == 768 && !save.settings.fullscreen && save.settings.mirrors && save.settings.shadows &&
+              save.settings.bat == 0,
+          "default settings, with the red bat");
     check(save.progress.stages.empty() && save.progress.bestScores.empty() && save.highScores.entries.empty(),
           "empty progress and scores");
     check(warnings.count == 0, "a first run is not worth a warning");
@@ -141,16 +142,17 @@ void testSettingsRoundTrip() {
         save.settings.fullscreen = true;
         save.settings.windowWidth = 1280;
         save.settings.windowHeight = 720;
+        save.settings.bat = 2;
         check(save.saveSettings(), "settings save");
     }
     const std::string text = readText(dir.path / "settings.json");
     check(text.find("\"version\": 1") != std::string::npos && text.find("\"musicVolume\": 0.35") != std::string::npos &&
-              text.back() == '\n',
+              text.find("\"bat\": 2") != std::string::npos && text.back() == '\n',
           "settings file is readable JSON with a version and short decimals");
     const mb::SaveData loaded(dir.path);
     const mb::Settings& s = loaded.settings;
     check(s.musicVolume == 0.35f && s.soundVolume == 0.0f && s.smartCamera && s.freezeSky && !s.mirrors && !s.shadows &&
-              s.fullscreen && s.windowWidth == 1280 && s.windowHeight == 720,
+              s.fullscreen && s.windowWidth == 1280 && s.windowHeight == 720 && s.bat == 2,
           "settings round trip");
     check(!fs::exists(dir.path / "progress.json") && !fs::exists(dir.path / "highscores.json"),
           "saving settings leaves the other files alone");
@@ -267,6 +269,38 @@ void testBadFieldsFallBackOneByOne() {
     check(fs::exists(dir.path / "settings.json") && !fs::exists(dir.path / "settings.json.bak"), "the file stays in place");
 }
 
+void testBatField() {
+    TempDir dir;
+    // A file written before the bat was kept: still version 1, and the bat is the default.
+    writeText(dir.path / "settings.json", R"({"version": 1, "musicVolume": 0.2, "windowWidth": 1280})");
+    {
+        WarningCapture warnings;
+        mb::SaveData save(dir.path);
+        check(save.settings.bat == 0 && save.settings.musicVolume == 0.2f && save.settings.windowWidth == 1280 && warnings.count == 0,
+              "a settings file without a bat loads quietly, with the red bat");
+        save.settings.bat = 1;
+        check(save.saveSettings() && mb::SaveData(dir.path).settings.bat == 1, "and keeps the bat chosen after that");
+    }
+    const struct {
+        const char* json;
+        int bat;
+        int warnings;
+        const char* what;
+    } cases[] = {
+        {R"({"version": 1, "bat": 2})", 2, 0, "the last bat is read"},
+        {R"({"version": 1, "bat": 3})", 2, 1, "a bat past the last is clamped to it, with a warning"},
+        {R"({"version": 1, "bat": -4})", 0, 1, "a negative bat is clamped to the first"},
+        {R"({"version": 1, "bat": "blue"})", 0, 1, "a bat that is text keeps the default"},
+        {R"({"version": 1, "bat": 1.5})", 0, 1, "a bat that is not a whole number keeps the default"},
+    };
+    for (const auto& c : cases) {
+        writeText(dir.path / "settings.json", c.json);
+        WarningCapture warnings;
+        const mb::SaveData save(dir.path);
+        check(save.settings.bat == c.bat && warnings.count == c.warnings, c.what);
+    }
+}
+
 void testBadProgressAndScoreEntries() {
     TempDir dir;
     writeText(dir.path / "progress.json", R"({
@@ -300,14 +334,15 @@ void testBadProgressAndScoreEntries() {
 
 void testOverlongHighScoreFileIsCut() {
     TempDir dir;
+    const int count = static_cast<int>(mb::kMaxHighScores) + 5;
     std::string entries;
-    for (int i = 1; i <= 15; ++i) {
+    for (int i = 1; i <= count; ++i) {
         entries += std::string(i > 1 ? "," : "") + R"({"name": "n)" + std::to_string(i) + R"(", "score": )" + std::to_string(i * 10) + "}";
     }
     writeText(dir.path / "highscores.json", R"({"version": 1, "entries": [)" + entries + "]}");
     const mb::SaveData save(dir.path);
     const auto& e = save.highScores.entries;
-    check(e.size() == mb::kMaxHighScores && e.front().score == 150 && e.back().score == 60, "ten best, best first");
+    check(e.size() == mb::kMaxHighScores && e.front().score == count * 10 && e.back().score == 60, "the best forty, best first");
 }
 
 // --- Rules --------------------------------------------------------------------
@@ -341,12 +376,13 @@ void testHighScoreRules() {
     check(place("b", 200) == 0 && place("a", 300) == 0 && place("c", 100) == 2, "places");
     check(place("b2", 200) == 2, "a tie ranks below the earlier entry");
     check(t.entries[1].name == "b" && t.entries[2].name == "b2" && t.entries[3].name == "c", "order after the tie");
-    for (int i = 0; i < 6; ++i) {
-        t.add("fill", 50 + i, "l");
+    for (std::size_t i = 0, free = mb::kMaxHighScores - t.entries.size(); i < free; ++i) {
+        t.add("fill", 50 + static_cast<std::int64_t>(i), "l");  // 50 up, all below the 100 of "c"
     }
-    check(t.entries.size() == mb::kMaxHighScores, "the table is full");
+    const int last = static_cast<int>(mb::kMaxHighScores) - 1;
+    check(t.entries.size() == mb::kMaxHighScores && t.entries.back().score == 50, "the table is full");
     check(!t.qualifies(50) && place("late", 50) == -1, "equal to the last place does not qualify");
-    check(t.qualifies(51) && place("new", 51) == 9 && t.entries.size() == mb::kMaxHighScores && t.entries.back().name == "new",
+    check(t.qualifies(51) && place("new", 51) == last && t.entries.size() == mb::kMaxHighScores && t.entries.back().name == "new",
           "a better score pushes the last one out");
     check(place("top", 1000) == 0 && t.entries.size() == mb::kMaxHighScores && t.entries.back().score == 51, "the worst falls off");
 }
@@ -361,11 +397,19 @@ void testNameCleaning() {
     check(name("  Greg  ") == "Greg", "spaces are trimmed");
     check(name("Gr\neg\t\x7f") == "Greg", "control characters are dropped");
     check(name("") == "Player" && name("   ") == "Player" && name("\n\n") == "Player", "an empty name becomes Player");
-    check(name(std::string(40, 'x')) == std::string(mb::kMaxNameBytes, 'x'), "long names are cut");
-    check(name(std::string(23, 'x') + "\xC3\xA9tail") == std::string(23, 'x'), "a two-byte character is not split");
-    check(name(std::string(21, 'x') + "\xE2\x82\xAC!") == std::string(21, 'x') + "\xE2\x82\xAC", "a character that fits is kept whole");
-    check(name(std::string(22, 'x') + "\xE2\x82\xAC!") == std::string(22, 'x'), "a three-byte character is not split");
-    check(name(std::string(20, 'x') + "    " + "yyyy") == std::string(20, 'x'), "spaces left at the cut are trimmed");
+    const std::size_t limit = mb::kMaxNameChars;
+    check(name(std::string(40, 'x')) == std::string(limit, 'x'), "long names are cut to the characters the name entry accepts");
+    check(name(std::string(limit - 1, 'x') + "\xC3\xA9tail") == std::string(limit - 1, 'x') + "\xC3\xA9", "a two-byte character that fits is kept whole");
+    std::string cyrillic, chinese, emoji;
+    for (std::size_t i = 0; i < limit + 3; ++i) {
+        cyrillic += "\xD0\x96";          // two bytes each
+        chinese += "\xE4\xB8\xAD";      // three
+        emoji += "\xF0\x9F\x98\x80";  // four
+    }
+    check(name(cyrillic) == cyrillic.substr(0, 2 * limit) && name(chinese) == chinese.substr(0, 3 * limit) &&
+              name(emoji) == emoji.substr(0, 4 * limit),
+          "the limit counts characters, not bytes, and never splits one");
+    check(name(std::string(limit - 4, 'x') + "    " + "yyyy") == std::string(limit - 4, 'x'), "spaces left at the cut are trimmed");
     check(name("Ren\xC3\xA9") == "Ren\xC3\xA9", "UTF-8 passes through");
 
     // A name that is not valid UTF-8 must not stop the file from being written.
@@ -388,6 +432,7 @@ int main() {
     testUnusableFilesAreKeptAsBackup();
     testEachFileIsIndependent();
     testBadFieldsFallBackOneByOne();
+    testBatField();
     testBadProgressAndScoreEntries();
     testOverlongHighScoreFileIsCut();
     testProgressRules();

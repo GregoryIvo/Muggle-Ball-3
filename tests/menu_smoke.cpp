@@ -10,6 +10,8 @@
 #include "mb/game/Hud.h"
 #include "mb/game/LevelCatalog.h"
 #include "mb/game/Menu.h"
+#include "mb/game/SaveData.h"
+#include "mb/game/SoundLibrary.h"
 #include "mb/game/UiAssets.h"
 
 #include <algorithm>
@@ -45,7 +47,8 @@ struct Game {
         : strings(mb::StringTable::load(root / "Data" / "xml" / "languages.json")),
           campaign(mb::Campaign::load(root / "Data" / "xml" / "levels.json")),
           sizes(root),
-          menu([this, root](std::string_view name) { return realdata::loadForm(root, strings, name); }, campaign) {
+          save{fs::path()},  // in memory: the walk must not touch the player's files
+          menu([this, root](std::string_view name) { return realdata::loadForm(root, strings, name); }, campaign, save) {
         menu.setVideoModes({{800, 600}, {1024, 768}, {1280, 960}});
     }
 
@@ -61,6 +64,7 @@ struct Game {
     mb::Campaign campaign;
     realdata::ImageSizes sizes;
     mb::UiLayout layout = mb::UiLayout::fit(1024, 768);
+    mb::SaveData save;
     mb::Menu menu;
 };
 
@@ -130,6 +134,25 @@ void checkButtons(const fs::path& root, Game& game) {
     }
     check(buttons > 100, "the forms have well over a hundred interactive widgets (levels, bats, menus)");
     check(intents.size() >= 15, "all kinds of intent occur in the data");
+}
+
+// The sounds the forms ask for are in the sound list, and some of them have a file in the game's data.
+void checkSounds(const fs::path& root) {
+    const mb::SoundCatalog catalog = mb::SoundCatalog::load(root);
+    std::set<std::string> names;
+    for (const std::string& name : formNames(root)) {
+        mb::UiForm form = mb::UiForm::load(root / "Data" / "Menu" / (name + ".json"), mb::StringTable::load(root / "Data" / "xml" / "languages.json"));
+        for (const mb::UiWidget& w : form.widgets()) {
+            for (const std::string& sound : {w.soundMouseIn, w.soundMouseDown}) {
+                if (!sound.empty() && names.insert(lower(sound)).second) {
+                    const mb::SoundDef* def = catalog.findSound(sound);
+                    check(def != nullptr, name + ": the sound \"" + sound + "\" of the " + w.name + " widget is in the sound list");
+                    check(!def || !def->samples.empty(), "the sound \"" + sound + "\" has a file");
+                }
+            }
+        }
+    }
+    check(!names.empty(), "the forms ask for sounds");
 }
 
 // Follows every Navigate button from the main menu by clicking it, and checks which forms that reaches and that
@@ -207,7 +230,11 @@ void checkWalk(Game& game) {
     check(game.menu.formName() == "selectstage", "walk: Start Game leads to the stage selection");
     click("StageCowboys");
     check(game.menu.formName() == "stagecowboys", "walk: a stage button leads to its levels");
-    check(game.widget("46")->enabled && game.widget("62")->enabled && game.widget("45") == nullptr, "walk: the cowboys have levels 46 to 62, all open");
+    check(game.widget("46")->enabled && !game.widget("47")->enabled && !game.widget("62")->enabled && game.widget("45") == nullptr,
+          "walk: the cowboys have levels 46 to 62, and a new player can start the first only");
+    game.menu.setLevelsLocked(false);  // as the game has them while nothing finishes a level
+    game.menu.open("stagecowboys");
+    check(game.widget("46")->enabled && game.widget("62")->enabled, "walk: with the locks off all of them are open");
     mb::GameFlow::Step s = click("50");
     check(flow.mode() == mb::GameFlow::Mode::Loading && game.menu.formName() == "loading" && flow.level() == 50, "walk: a level button shows Loading");
     s = step();
@@ -230,21 +257,23 @@ void checkWalk(Game& game) {
     mb::UiInput drag;
     drag.pointer = {{{music->rect.x + music->knobSize.x / 2 + music->rect.w * 0.25f, y}, false}, {{music->rect.x + music->knobSize.x / 2 + music->rect.w * 0.25f, y}, true}};
     step(drag);
-    check(std::fabs(game.widget("MusicVolume")->value - 25) < 1e-3f && game.menu.settings().musicVolume == 25, "walk: pressing the music slider's track sets 25");
+    check(std::fabs(game.widget("MusicVolume")->value - 25) < 1e-3f && std::fabs(game.menu.settings().musicVolume - 0.25f) < 1e-6f,
+          "walk: pressing the music slider's track sets 25, which is a volume of 0.25");
     mb::UiInput up;
     up.pointer = {{{music->rect.x, y}, false}};
     step(up);
     const mb::UiWidget* camera = game.widget("Camera");
-    check(camera->checked, "walk: Smart Camera starts on");
+    check(!camera->checked, "walk: Smart Camera starts off");
     click("Camera");
-    check(!game.widget("Camera")->checked && !game.menu.settings().smartCamera, "walk: and a click turns it off");
+    check(game.widget("Camera")->checked && game.menu.settings().smartCamera, "walk: and a click turns it on");
     click("Fullscreen");
     check(game.widget("Fullscreen")->checked && game.menu.settings().fullscreen, "walk: the Fullscreen box, a checkbox despite its tag");
     click("ApplyVideo");
     check(game.menu.formName() == "mainmenu", "walk: Main Menu leaves Options");
 
     // High scores and the name entry.
-    game.menu.profile().highScores = {{"Ann", 900}, {"Bob", 500}};
+    game.save.highScores.add("Ann", 900, "piratos-ostrovok");
+    game.save.highScores.add("Bob", 500, "piratos-ostrovok");
     click("HighScores");
     check(game.menu.formName() == "highscores" && !game.widget("86400")->visible, "walk: the high scores, without the online buttons");
     click("MainMenu");
@@ -254,7 +283,8 @@ void checkWalk(Game& game) {
     typing.text = "Zed";
     game.frame(typing, 0);
     click("ApplyRecord");
-    check(game.menu.formName() == "highscores" && game.menu.profile().highScores[1].name == "Zed", "walk: the name is in the table at its place");
+    check(game.menu.formName() == "highscores" && game.save.highScores.entries[1].name == "Zed",
+          "walk: the name is in the table at its place");
     game.menu.open("MainMenu");
     check(click("Exit").quit, "walk: Exit quits");
 }
@@ -309,10 +339,10 @@ void checkDrawing(const fs::path& root, Game& game) {
     const float after = skyOffset();
     check(before >= 0 && std::fabs(std::fmod(after - before + 1.0f, 1.0f) - 0.3f) < 1e-3f,
           "draw: ten seconds of the background's img_translation 3 move the sky by 30% of its width");
-    game.menu.profile().settings.freezeSky = true;
+    game.save.settings.freezeSky = true;
     game.frame({}, 10.0);
     check(std::fabs(skyOffset() - after) < 1e-6f, "draw: with Freeze Sky on, the sky stands still");
-    game.menu.profile().settings.freezeSky = false;
+    game.save.settings.freezeSky = false;
 
     // Every form, with the Menu's own state: something is drawn, and every sprite is sound.
     for (const std::string& name : formNames(root)) {
@@ -329,15 +359,14 @@ void checkDrawing(const fs::path& root, Game& game) {
     }
 
     // The high-score table: eight lines on a page, the text on the map.
-    mb::Profile& profile = game.menu.profile();
-    profile.highScores.clear();
+    game.save.highScores.entries.clear();
     for (int i = 0; i < 12; ++i) {
-        profile.highScores.push_back({"Player" + std::to_string(i), 1000 - i});
+        game.save.highScores.add("Player" + std::to_string(i), 1000 - i, "piratos-ostrovok");
     }
     game.menu.open("highscores");
     game.frame({}, 1.0);
     const std::size_t withTable = draw().size();
-    profile.highScores.clear();
+    game.save.highScores.entries.clear();
     game.menu.open("highscores");
     game.frame({}, 1.0);
     check(withTable > draw().size() + 8 * 8, "draw: the high-score table adds the text of eight lines to the form");
@@ -431,6 +460,7 @@ int main() {
         Game game(root);
         checkCampaign(root, game);
         checkButtons(root, game);
+        checkSounds(root);
         checkCrawl(root, game);
         checkWalk(game);
         checkDrawing(root, game);
