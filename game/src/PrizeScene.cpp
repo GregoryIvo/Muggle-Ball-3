@@ -344,8 +344,12 @@ DirectionalLight nightLight(const DirectionalLight& day, float night) {
     return light;
 }
 
+float unlitNightShare(float night) {
+    return 1 + (kNightSky - 1) * night;
+}
+
 void dimUnlit(std::span<DrawItem> items, float night) {
-    const float share = 1 + (kNightSky - 1) * night;
+    const float share = unlitNightShare(night);
     for (DrawItem& item : items) {
         if (!item.material.lit) {
             Color& colour = item.material.diffuse;

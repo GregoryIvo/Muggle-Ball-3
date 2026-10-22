@@ -158,7 +158,7 @@ Total about 2.6 s from loss to ready.
 **Behaviour:**
 1. **Hits.** A hit costs 1 energy. Energy-1 bricks die on the first hit [M]. The shark (E1, S91) was hit at V1 54.13 and its score arrived at 54.4 (V1 54.4).
 2. **Delay.** After the last hit the object explodes after **`exploseDelay` ms**, then it is removed and the score is added at that moment. The shark: exploseDelay 250, score +91 at 54.3-54.4 and flash at 54.40. The island: exploseDelay 50, score +66 at 55.2-55.3 (V1 55.2, 55.3).
-3. **Effect.** The effect is a short orange flash with particles and the material's "dead" sound (shark, V1 54.4-54.5). `exploseType` selects it: 3, 5, 6, 8 (dynamite), 9 (fire rocket). Exact looks per type were not catalogued [?]. `explosePower` is 6.789 for live/people/prize objects and 1.0 for the rest; it is probably a blast impulse [I].
+3. **Effect.** The effect is a short orange flash with particles and the material's "dead" sound (shark, V1 54.4-54.5). `exploseType` selects it: 3, 5, 6, 8 (dynamite), 9 (fire rocket). Exact looks per type were not catalogued [?]; the game's choice for each, from the particle files, is in 19.5. `explosePower` is 6.789 for live/people/prize objects and 1.0 for the rest; it is probably a blast impulse [I].
 4. **Damage textures [D + M].** Materials with `brickType` 4 list one texture per energy level, worst first: `Box.jpg` (E4: Box-1D, -1C, -1B, -1A), `Skala.jpg` rock (E4: Skala--3 to --0), `Ground-2*`/`trava*` (E3: Ground-2-2, -1, -0). The last file is the intact look (see `data-damage-stage-textures-Box_Skala_Ground.png`). In footage black crack decals appear on ground and rock blocks as they are hit: V2 478-542 (a green tile with a black crack) and V2 566-598 (rock and ground blocks darkening). Which collisions count as hits for E > 1 was not isolated [?].
 5. **Hit counting.** Bricks have `brickEnergy` hits; E3 bricks like the pirates and prizes were not shown being hit repeatedly [?].
 6. **Score.** The score added is exactly the material's `brickScore` [M]: shark +91, island +66, then +132 at 55.4-55.5 and +360 at 55.7-55.8 (compound objects). **No combo or multiplier was seen** in about 10 events.
@@ -757,7 +757,7 @@ The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, on
 - **Goes off [M, D].** A ball hit takes the charge's one energy, and 0.1 s later (the material's `exploseDelay`; the footage's hit at 8192.76 and flash at 8192.83) it is destroyed: its 120 points, its `dynamite_dead` sound (two samples), and the blast.
 - **The blast [I for the law, M for the numbers it must meet].** Every damageable object whose box is within the radius of the charge's centre of mass is struck `blastDamage` times; a charge it reaches goes off one fixed step (1/60 s) later, so a chain runs one link a step (the footage's five charges flashed over 0.07 s, V1 8192.83 to 8192.90: four links of 17 ms; its "20 to 30 ms" are frames of 33 ms). The reach, box to centre, comes to about 5.9 units centre to centre for a charge 1.8 wide, inside the bracket 4.0 to 6.9 (14.2); it stops at the gap of 6.9 in level 67. A loose body in reach is pushed away from the centre and up: a change of velocity of `blastSpeed` 14 units/s times the material's `explosePower` (1.0 for the dynamite [D]) times the nearness (1 at the centre, 0 at the edge), up to half as much again upward, and less for a heavy body (by the square root of 100 over its mass, so that a building is not thrown). The balls are not pushed (the rules set their speed).
 - **Checked [M].** Replaying level 67: a hit to the charge at x = 18.2 sets off the five on the right, 17 ms apart, and not the five on the left; nine pieces of metal (450 points), ten stones (250), a dragon (360), the cauldron (70), a pointer (101), a flower (42), a log (50) and the five charges (600) make **1,923 points** within 0.32 s, against the footage's **+1,933** (+1,187 and +746 at V1 8192.80 and 8192.90, the other 1,333 "beyond the charges" of 14.7). The footage has the two steps 0.04 and 0.14 s after the touch at 8192.76 (frames of 33 ms); here the payments come between 0.10 s (the charge's own `exploseDelay`) and 0.32 s, the metal and stones after their own delays of 100 to 250 ms [?]. The same total comes out for a blast of 1, 2, 3 or 5 energy, since the neighbouring charges' blasts overlap and the damage adds: the footage does not say how much one blast does, only that it takes this.
-- **The look.** A flash of `Oreols/02.png`, five times the radius across (explosebig's `size` 25 for the radius 5 [D]), swelling in 0.08 s and fading over 0.5 s [D], and twenty sparks. The ordinary orange flash of a brick goes off with it.
+- **The look.** The explosion file the level names (`explosebig` for the radius 5, `explosesmall` for 3: a flash of `Oreols/02.png` 25 and 15 across, [D]), swelling at its `speed` and fading over 0.5 s [D]; the particle system draws it (19.6). The sparks of the first version are gone: the footage has none (the orange fog and a bright core for each charge, `special-V1-t8192.76-8192.97`), and the data names none. The dynamite's own brick goes off with no flash of its own (19.5).
 - **Not required [M].** A level ends with its dynamite standing (second study, "Settled", 3).
 
 ### 17.3 Interactive cannon
@@ -765,10 +765,10 @@ The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, on
 - **What fires it [M for the ball, I for the rest].** The ball touching it at any speed (the footage's cannons fired for a ball 1.5 to 2 units off, which is a graze), a loose body that hits it as hard as the ball's blow (V1 6446.85, F18), and a cannonball. At most one shot in 0.5 s. It never fires on a timer (none in 28 s).
 - **What leaves it [D, M].** A cannonball of radius 0.59 [D, `yadro.XML`] from the muzzle, (1.99, 1.69, 0) in the cannon's frame, with the velocity (30, 3, 0) in that frame [D; measured 29.4 to 33.3 units/s]: along the cannon's own +x, whatever way the level turned it (the three of level 51 face +z).
 - **Its flight [I].** A lob under the level's gravity: it falls 0.87 s after leaving a cannon on the floor and lands about 26 units on (the footage's tracked flights, 0.3 to 0.7 s, show no arc over 20 units, which this does not show either). It is swept by five rays (the middle and the rim) and bursts on the first actor it meets; balls and the bat it goes through; after 3 s it is gone.
-- **What it does [M for the destroyed, I for the rest].** On impact the target is struck `cannonballDamage` (2) times, so what has one or two energy goes, a cannon of two included (a cannon is "not consumed" by the ball, 17.1), a charge it hits goes off at the next link (V1 6446.8: the chain went off, F17); a loose target is pushed (the two leave together: momentum is kept, the ball's mass 8.65 is its volume times `Telega1.jpg`'s density 10); a cannon it hits and does not destroy fires. A burst of `Oreols/11.png` 10 units across for 0.5 s [D, `exploseyadro`].
+- **What it does [M for the destroyed, I for the rest].** On impact the target is struck `cannonballDamage` (2) times, so what has one or two energy goes, a cannon of two included (a cannon is "not consumed" by the ball, 17.1), a charge it hits goes off at the next link (V1 6446.8: the chain went off, F17); a loose target is pushed (the two leave together: momentum is kept, the ball's mass 8.65 is its volume times `Telega1.jpg`'s density 10); a cannon it hits and does not destroy fires. A burst of `Oreols/11.png` 10 units across for 0.5 s [D, `exploseyadro`: the particle system's].
 - **Hits to destroy [I].** The ball never does. A cannonball or a blast does at once (damage 2 against its energy 2), and a weapon takes two bullets, or a rocket or a kernel (18.4).
 - **Not required [M].** `canBeDamaged` yes, a target no (second study, "Settled", 3).
-- **Sound.** `brick_cannon_shoot` (`br_cannon.ogg`), at the muzzle; the flash and a puff of smoke there.
+- **Sound.** `brick_cannon_shoot` (`br_cannon.ogg`), at the muzzle; a short flare there and a puff of `Smoke` along the barrel (19.6).
 
 ### 17.4 Teleports
 
@@ -786,7 +786,7 @@ The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, on
 - **No score for the rocket [M].** The launch scores nothing and the rocket and the burst hurt nothing.
 - **A touch that is no blow leaves the crate standing [M]; a blow destroys it [I].** The footage's crate stayed after a brush (V1 1013.33). In the game that is a ball whose edge goes no deeper than about 0.05 units into the crate's side: its closing speed along the contact is under a blow's (`hitFraction`, section 5). Any other hit is a blow and takes the crate's one energy as it does a brick's: after the material's 100 ms it is destroyed for its 120 points (a person's `exploseType` 5: it shrinks away). The footage does not say whether a harder hit kills a crate [?]; the first version of this section said never, and `village-apple` could not be won (17.1).
 - **A lit crate fires [I].** The rocket is lit by the touch, so a blow that destroys the crate does not stop it: the rocket comes 0.7 s later from where the crate stood, and so does one whose crate a blast took in those 0.7 s. A crate that a blast, a cannonball or a weapon destroys without the ball having touched it gives no rocket.
-- **The look.** The rocket (`Fire-rocket.x`) with a trail of eight sprites and a shadow on the floor; the burst, 30 sparks flying out at speed 30 and slowing, in one of the six colour pairs of `Fireworks.xml` [D], for 0.6 s [M], mostly above the picture's top edge for a crate at the back, as in the footage. The sound is `firerocket_dead` at the burst.
+- **The look.** The rocket (`Fire-rocket.x`) with the `TrailOrange` trail from its tail and a shadow on the floor; the burst, 30 sparks flying out and slowing in one of the six of `Fireworks.xml` [D], for about 0.7 s [M], mostly above the picture's top edge for a crate at the back, as in the footage. The particle system draws the trail and the burst (19.6). The sound is `firerocket_dead` at the burst.
 
 ### 17.6 Springs, volcanoes, generators and metal
 
@@ -797,7 +797,7 @@ The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, on
 ### 17.7 Vibros and flickers
 
 - **Vibro [M].** The barrels and rings (kinematic, 23) bob and tilt in place: the body goes up and down by 0.1 unit and tilts 6 degrees [I] about its own origin with a period of 2.4 s, each with a phase of its own, so that the ball is pushed by what it sees. The ball destroys one like a brick (14 to 24 points); it is not required.
-- **Flicker [M, I].** The cauldron and the torches (14) are bricks of the ball's kind (70 points for the cauldron, `exploseDelay` 150). The light "around them changes by 1.4 %" (F13) and the renderer has one directional light, so the point light is left out; each gets a warm glow sprite that wavers (two sines of unrelated rates, a phase of its own), and goes with it.
+- **Flicker [M, I].** The cauldron and the torches (14) are bricks of the ball's kind (70 points for the cauldron, `exploseDelay` 150). The light "around them changes by 1.4 %" (F13) and the renderer has one directional light, so the point light is left out; each gets a warm glow sprite that wavers (two sines of unrelated rates, a phase of its own), and goes with it. The particle files they name burn too: sparks (`Spark` for a torch, `SparkKoster` for the cauldron) and `Smoke` rise from the top of the fire (19.6).
 
 ### 17.8 The open questions of 14.7
 
@@ -810,7 +810,7 @@ The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, on
 | Firework: launch by a touch, a timer or a delay; rockets a crate; does a harder hit destroy it | by a touch, 0.7 s later; one a touch, one at a time; yes: a blow does (120 points) and the rocket it lit comes anyway, a brush does not; so do blasts, cannonballs and weapons | I |
 | Volcano and generators: any eruption; can the ball destroy them | none and no; blasts do | M, I |
 | Metal: how the ball bounces; can it destroy it | by its material; no | D, I |
-| Cloth and trees | unchanged: not built here | |
+| Cloth and trees | cloth unchanged: not built here; a tree that is hit sheds its leaves (`LeafFall`, 19.6) | I |
 
 ### 17.9 The numbers (`SpecialObjectRules`)
 
@@ -962,3 +962,111 @@ Every projectile ends with exactly one of `ProjectileHit`, `BoltStruck`, `Meteor
 | `offscreen` | 2 units | I |
 
 What is tested: `mb_weapon_tests` (made-up levels: the engine's kinds of body and `raycastAll`; the top edge against the camera; the click with no weapon, with a held ball, while the bat swoops in, with the Magnet, in the Lost phase and after the level is won; the shot count, the interval, a weapon running out and replacing another; each weapon's spawn point, velocity and gravity, and the barrels of a wider bat; a projectile that leaves the board; the damage of each projectile against bricks of one to four energy, the burst's reach and push, what is spent on steel and walls; the laser's piercing, width, stop, one hit a body, teleports and balls, fading and range; dynamite set off by a bullet and its chain, a cannon, a firework crate, metal, springs, volcanoes, generators and teleports; the prizes a kill may leave; the Thunderbolt's burst, spread, targets, top edge, metal spared and seeds; the meteors' count, timing, slant, aim and damage; the strikes' damage; that nothing is thrown once the level is won; the autopilot's look ahead; two identical games) and `mb_weapon_smoke` (the 83 levels, every weapon and both strikes given at once, the click held down, 24 s each: nothing not finite or off the board, shots counted, every projectile accounted for, the strikes all thrown, the balls' speed and plane, the time of a step).
+
+## 19. Particles as built (step 5, fx)
+
+The particle files of `Data/Particles` as the game draws them: the explosions' flashes, the firework bursts and the rocket's trail, the smoke and sparks of the flickers, the leaves of a tree that is hit, and the beams and bolts the weapons will need. What the files say is `OBJECTS.md` section 8 (**data**); what they mean is **inferred**, since the original's code is not at hand, and every reading below is tagged **[I]** where it is a choice, **[M]** where a frame of the footage (`reference/gameplay`) bears it out, **[D]** where it is the data's own number. The code is `game/ParticleDef.h` (the files), `game/ParticleSystem.h` (the simulation), `game/ParticleDraw.h` (the batches), `game/BrickEffects.h` (the table of 19.5) and, in the engine, `EffectBatch` (`Renderer.h`, `ARCHITECTURE.md` "Particles"). `PlayScene` owns the one system and steps and draws it; `ObjectEffects` and the weapons ask it for effects.
+
+### 19.1 The model
+
+| rule | in the game |
+|---|---|
+| definitions | `ParticleLibrary::load` reads every `*.json` of `Data/Particles` (20 files, 28 definitions); a definition is named `file/name` (`Fireworks/red`) or by its file alone (`explosebig`, the file's first), any case. It reports what it cannot read (`problems()`) and each attribute it does not know (`unknownAttributes()`): none, for the real files |
+| one effect, many particles | a particle's whole state is a function of its age, its start and a few fixed random numbers (no integration), so a run repeats from its seed (`EffectOptions::seed`, else the system's own sequence) and the tests can ask for any moment |
+| how long a particle lives | Flash, Trail, Laser, Lightning: `fade_time_msec`; Smoke, LeafFall, Tornado: `height` / `speed`; Firework: 2 x its reach / `speed`; WaterBubble: 1.5 s (no file gives a height) [I] |
+| emitters | Trail, Smoke, WaterBubble and Tornado keep `num` particles alive: `num` / life of them are put out each second. `attach()` runs until `stop()` (`moveTo()` says where it is, and the particles of a frame are spread along the way it moved, so that a rocket at 15.6 units/s leaves an even line however long the frame); `spawn()` with `seconds` runs that long, and with none puts all `num` out at once |
+| bursts | Flash (one sprite), Firework (`num` sparks) and LeafFall (`num` leaves) go off at once |
+| scale | `EffectOptions::scale` multiplies the sizes and the distances a definition gives, not the times (a Tornado at a tenth of its 160 units fits a board) |
+| beams | `beam()` makes a Laser or a Lightning between two points; it stays at full strength for `seconds` after it is made and after each `aim()` (so one aimed every frame never fades) and then fades over `fade_time_msec` |
+| the halos | the Oreol files are the prizes' halos, which `PrizeScene` draws (16.1): the system parses them and does not draw them (`spawn` gives no effect) |
+| drawing | every particle is a quad (a camera-facing sprite, a flat mark on the floor, or a strip) in world space; the quads go to the renderer in a handful of batches, one for each texture and way of blending, drawn after the meshes with no depth write (`ParticleBatches`). The night dims them like the other things with no light (0.49 at full night, 14.3) |
+
+### 19.2 The ten types
+
+| type | what the file gives | what is drawn [I unless marked] |
+|---|---|---|
+| Flash | `size`, `speed`, `fade_time_msec`, a `direction` on `explosemeteor` | one sprite turned at random about the line of sight that swells at `speed` (units a second) to `size` and fades in a straight line over `fade_time_msec`. 25 for the dynamite's radius 5 is 0.1 s of swelling at 250: the 0.08 s of 17.2 [D, M]. With a `direction` it lies flat across it, 0.1 up, tested against the depth: `explosemeteor`'s ring on the floor spreads at 50 units/s and is gone in 0.2 s, as the white rings of `special-V2-t858-865` [M] |
+| Firework | 30 sparks, `radius` 10, `speed` 30, `size` 3.5, 500 ms, `direction` down, two colours | each spark flies out along a direction evenly over the sphere to a reach between half and all of `radius`, fast at first and at rest at its reach (it leaves at `speed`, so it lives 2 x reach / `speed`, 0.33 to 0.67 s: the footage's burst is gone by 0.6 s [M]), droops along `direction` at 5 units/s^2, shrinks to half and fades over the last 500 ms, and runs from `colour1` to `colour2` |
+| Trail | 30, 500 ms, `size` 2.5 or 5, `radius` 0 or 1, two colours | sprites left where the emitter was (scattered in a sphere of `radius`), standing still: they shrink to 0.4 of their size and fade in a straight line, running from `colour1` (hot) to `colour2` |
+| Laser | `speed` 150 or 0, `size` 1, 1.5 s or 1 s, two colours | a strip `size` wide between the points, the middle tile of `ParticleLaser1.png` with a round end at each end, the front running out from the first point at `speed` (0: all at once), `colour1` at the first end to `colour2` at the far end, fading over `fade_time_msec` |
+| Lightning | 10 pieces, `shift_coeff` 0.5, `shake_coeff` 0.75, `size` 1, one colour | ten strips from point to point, the nine points between them thrown aside by up to half a piece; three quarters of the throw is drawn anew 30 times a second (the bolt crackles), a quarter is fixed; a round end at each point |
+| Smoke | 50, `angle` 10.5, `speed` 2, `height` 3, `width` 0.1, `size` 1.5, 500 ms | puffs from a source 0.1 wide rise in a cone of 10.5 degrees at 0.7 to 1 times `speed`, for `height` / `speed` = 1.5 s, swelling from 0.4 of their size to the whole, at 0.4 opacity, fading over the last 500 ms |
+| WaterBubble | 10, `speed` 1 or 2, `radius` 0.5, 2 or 8, `size` 1 or 1.5, `direction` up | sprites rise from a disc of `radius` at `speed` for 1.5 s, swaying 0.15 to either side; `fade_time_msec` (50 or 500 ms) is how long they fade in and out |
+| LeafFall | 15, `dimension` 3 x 2 x 3, `height` 6, `speed` 2, `radius` 5, `angle` 25, `size` 1.5 | the leaves start in the box; each falls at 0.7 to 1.3 times `speed` (3 s for the whole `height`), drifts up to `radius` aside, rocks by up to `angle` degrees about the line of sight, never goes below 0.15, and fades over the last 0.5 s |
+| Tornado | 1,500, `radius_small` 5, `radius_big` 50, `height` 160, `speed` 25, `speed_angular` 4.5, `size` 20, 1.5 s | particles rise up the column at `speed` (6.4 s) while they turn about it at `speed_angular`, on a radius that grows from `radius_small` to `radius_big`; they fade in and out over 1.5 s at 0.35 opacity. Its texture is missing (`Particles/PARTICLE.PNG`, a soft dot, stands in) and nothing names it |
+| Oreol | `speed_angular`, `radius`, `radius_offset`, `speed`, `shadow_plane` | the halo of a prize: `PrizeScene`'s (16.1) |
+
+### 19.3 Colours, blending and the textures
+
+- **Colour is the texture's alpha and the file's colour.** A definition with colours (Firework, Laser, Lightning, Trail) draws its colour in place of the texture's, whose alpha shapes the sprite (`EffectBatch::colourOnly`). The files that say so say `modulate_colour="no"`; Fireworks say nothing and are read the same way, because they use the orange dot of `ParticleTrail(orange).png` for all six colours, which a blue spark cannot be if the dot's orange is multiplied in, and the footage's burst is pink [I, M: `special-V1-t1014.20-1015.52`]. The alpha byte of a colour (`0x00...` on the trails and the bolt) is left out: it is not "invisible" [I].
+- **`colour1` is where it begins, `colour2` where it ends** (a trail ages from one to the other, a spark too, a beam runs from its first point to its far end): the yo-yo's string is green at the bat and blue at the ball in the footage [M, 16.3], and a flame cools from white to orange [I].
+- **Additive** for the sparks and the glows that are light on a dark ground: Firework, Trail, Laser, Lightning. **Alpha blended** for Flash, Smoke, LeafFall, WaterBubble and Tornado [I]. The flash is the one that matters: the dynamite's fog is solid orange over green grass in the footage (`special-V1-t8192.76-8192.97`, frames 3 to 6), which an additive flash cannot make (it saturates to white where five overlap), and the shark's small flash is an orange that stays orange on the blue water [M].
+- **The textures are drawn as they are.** Five (`ParticleTrail(orange)`, `Particlered`, `PARTICLE`, `ParticleBubble`, `Bubble2`) have their dot below and right of the middle, by up to a fifth of the sprite: it shows as a slight shift of the rocket's trail to the right, and nowhere else [I: the original's art and, we suppose, its look].
+
+### 19.4 Sizes the footage checks
+
+The dynamite's blast: five flashes of `explosebig` overlap into an orange fog with a bright core each, as in the six frames of `special-V1-t8192.76-8192.97` [M]. The shark's explosion (`exploseType` 3, `exploseball`: 10 across) is a small orange flash on the dark fish [M: `chillcalex-...-t54.1-54.5`]; a crate's (6) is the same size or a little more [M: `rules-V1-t3580.7-3581.4-L30`]. The firework's burst (`special-V1-t1014.20-1015.52`): pink sparks that spread over about 0.3 s and are gone by 0.6 s, mostly above the picture's top edge for a crate at the back [M]. The cauldron's smoke (`special-V1-t3011-3015.8`) is a thin grey wisp over the pot [M, weak].
+
+### 19.5 What breaks in what (the material's `exploseType`)
+
+The data links no explosion file to a type (`OBJECTS.md` 6 and 9); this is the game's table (`explosionEffects`, `game/BrickEffects.h`), a choice [I]:
+
+| `exploseType` | what it is | effect |
+|---|---|---|
+| 0, 2 | system, board, light, Default, ball, bullets | none |
+| 3 | prizes, the bat's bullets, the ships' hulls and sails, the shark, a few more | `exploseball`: the small flash, 10 across |
+| 5 | people, animals, trees, fruit, the interactive objects | none: they shrink away, and the footage has no flash on a pirate (section 5, 8) [M] |
+| 6 | what has splinters: buildings, ground, crates, metal | `explosesmall`: 15 across, a little larger, for the heavier stuff |
+| 8 | dynamite | none of its own: the blast is the level's `explosebig` or `explosesmall` (17.2) |
+| 9 | the fire rocket, the meteor, the thunderbolt | `explosemeteor`, the ring on the floor: none of them is a brick the ball breaks, so only the weapons ask for it |
+
+A destroyed object has its flash where its centre of mass was (`BrickDestroyed`). The first version's flash for every brick (7 to 15 across over 0.4 s, and 12 sparks) is gone with its sparks: no file gives a brick sparks, and the shark's frames show none.
+
+### 19.6 Where the game uses them
+
+| effect | what | from |
+|---|---|---|
+| a brick that breaks | the table above | `BrickDestroyed` (`PlayScene`) |
+| dynamite | the explosion its level names (`target`: `explosebig` 25 across for the radius 5, `explosesmall` 15 for 3), at the charge's centre; a level that names none gets the one its radius fits | `DynamiteBlast` (`ObjectEffects`) |
+| a cannonball bursts | `exploseyadro`, 10 across, 0.5 s [D] | `ShotHit` |
+| the muzzle | a short flare (the first version's, not in a file) and `Smoke` along the barrel for 0.15 s [I] | `CannonFired` |
+| a firework's rocket | `Trail/TrailOrange` from its tail while it flies (the variant with a scatter and a flame's colours; `TrailBlue` is for the bat's rocket [I]); the burst is one of the six of `Fireworks`, chosen by where and when it goes off | `objects().rockets()`, `RocketBurst` |
+| a flicker | the two files its level names (`sparkKoster` and `smoke` for the cauldron, `spark` and `smoke` for the torch) attached to the top of its box, so that the fire is at the top of the post and over the logs, and they go when it is destroyed | `objects().flickers()`, the level's `names` |
+| a tree that is hit | `LeafFall` from the crown, 3 above the trunk's centre of mass (the trunk is a capsule 10 tall, the foliage round its top [I]); every hit sheds 15 leaves, the last one too | `BrickHit` on a `Tree` |
+
+Not used, because nothing in the data places them: `WaterBubbles` (the sea levels are inferred, no object or level names it; its type is used by the sparks), `Tornado` (the Wind prize is inferred, and the footage shows no tornado: section 15.3), `Flash` (size 30, 0.2 s; for the Thunderbolt's strike, if the weapons want it), `TrailBlue`, `TrailMeteor`, `Laser`, `Lightning`, `explosemeteor` (the weapons'; `mb_particle_smoke` runs every definition through the system all the same).
+
+**Left as it was**, because the data does not define it: the prizes' halos and the Yo-Yo's string (16, which already read `Oreol` and `rubber`), the Explosive Ball's blast, the missed prize's sparkle, the teleports' ring and glow, the flicker's wavering light, the muzzle's flare, the shadows.
+
+### 19.7 The numbers
+
+Constants of `ParticleSystem.cpp` and `ObjectEffects.cpp`; the files' numbers are not repeated.
+
+| constant | value | tag |
+|---|---|---|
+| default fade of a definition with none; shortest life of a particle | 0.5 s; 0.01 s | I |
+| flat flash lift | 0.1 | I (the prizes' marks) |
+| firework: slowest spark's share of `radius`, droop, shrink | 0.5, 5 units/s^2, 0.5 | I |
+| trail: shrink over its life | 0.6 | I |
+| smoke: slowest share of `speed`, smallest share of `size`, opacity | 0.7, 0.4, 0.4 | I |
+| water bubble: life, sway, sway rate | 1.5 s, 0.15, 0.8 turns/s | I |
+| leaf: fall speed range, floor, flutter rate | 0.7 to 1.3 x `speed`, 0.15, 1.5 turns/s | I |
+| tornado: opacity | 0.35 | I |
+| bolt: shakes a second | 30 | I |
+| muzzle smoke, flare | 0.15 s, 0.5 s | I |
+| tree crown above the trunk's centre | 3 | I |
+
+### 19.8 Tested, and looked at
+
+`mb_render_test` (the batches: blending, colour only, depth, order, whole triangles, thousands of quads), `mb_particle_tests` (the parser and what it reports; each type's behaviour, beams and bolts, the system's handles, the batches, the table of explosions; made-up files with the real numbers), `mb_particle_smoke` (the 20 real files read with nothing unknown, what OBJECTS.md says of them, every texture but the Tornado's, the halos' numbers `PrizeScene` uses, every file the objects and levels name, every definition run to its end), `mb_effects_smoke` (a flicker's fire, blasts, each kind of brick, leaves, the night, a rocket's trail and burst, on the GPU) and the cues of `--effect`. To look at a file without waiting for the game to need it: `MuggleBall3 --autoplay --level piratos-ostrovok --effect Fireworks/magenta@1,0,6,4 --screenshot out.png --simulate 1.25` (`name[@seconds[,x,y,z[,x2,y2,z2]]]`: the second point is a beam's other end).
+
+The cost, on the dynamite chain of `knight-fruktovie-derevia` 0.2 s after the first charge (`--catch-prize bigball@0.5 --simulate 52.7`, then 15 steps): before, 627 draw items for 5 blasts with their sparks, 0.18 ms to update and 1.16 ms to draw and read back a 1024x768 frame; now 314 items and a few batches (with the cauldron's fire as well), 0.17 ms and 1.0 ms. A windowed run with a Tornado of 1,500 particles, smoke, a trail and a burst at once holds the display's 120 frames a second with the Metal validation layer on and nothing reported.
+
+### 19.9 Still open
+
+- **[?]** The flashes' opacity curve (a straight fade) and whether they are alpha blended in the original: the frames say alpha for the dynamite's fog, but one frame is not the whole.
+- **[?]** The trail's colours: pale blue to orange as the particle ages, or the other way; the footage's rocket has an orange flame at its tail that the mesh may carry.
+- **[?]** Whether `exploseball` and `explosesmall` are what the original gives bricks of type 3 and 6; the footage shows a small orange flash for both.
+- **[?]** What `radius_offset` of the Oreol is, and the pulse (`speed`) of the halos; `PrizeScene`'s 4 units stand.
+- **[?]** `Tornado`: how the original draws 1,500 particles of a missing texture over a column 160 tall, and what uses it.
+

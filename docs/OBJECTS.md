@@ -346,8 +346,8 @@ damages or pushes whatever it touches.
   `explosebig` radius 5, `explosesmall` radius 3 (the flash `size` is 5 times the
   radius: 25 and 15, **data**). Three more explosion flashes are named by nothing:
   `exploseball` (size 10), `exploseyadro` (size 10, the cannonball) and
-  `explosemeteor` (size 10, texture `boom.png`): chosen by the executable
-  (**inferred**: ExplosiveBall, cannon ball, meteor).
+  `explosemeteor` (size 10, texture `boom.png`, `direction` up: a ring on the floor): chosen by the executable
+  (**inferred**: ExplosiveBall, cannon ball, meteor). The game gives them these jobs, and a brick's `exploseType` its flash (`GAMEPLAY.md` 19.5).
 - A material's `exploseType` is **not** linked to any explosion definition by the
   data; it is an enumeration the code reads (section 9 has the observed classes).
   Only `exploseType` 8 (dynamite) and 9 (fire rocket, meteor, thunderbolt) look
@@ -407,28 +407,61 @@ level holds the sail as width x height - 1 nested actors.
 ## 8. Particle systems (`Particles/*`)
 
 Each file is `<particles>` with one or more `<particle name texture type ...>`
-(spaces around `=` are legal). Ten `type`s. 11 files are named by nothing in the
+(spaces around `=` are legal): 20 files, 28 definitions, ten `type`s. 11 files are named by nothing in the
 object XML, so the executable chooses them (**inferred** users in the last
 column). All textures exist except `Particles/ParticleRoket.png` (`Tornado`);
-names are case-insensitive references (`Particlered.png` is `PARTICLEred.png`).
+names are case-insensitive references (`Particlered.png` is `PARTICLEred.png`). Which file an object uses is `particles1` and
+`particles2` of its `<extra>` (a file stem, any case: `trail`, `sparkKoster`; the file alone is its first definition), baked into the level as
+`names` for a flicker and `target` for dynamite (section 2).
 
 | File | `type`, key parameters | Used by |
 |---|---|---|
-| `Oreolblue`, `Oreolred` | two `Oreol` sprites: a halo spinning at `speed_angular` 3.5, and `OreolShadow` (`shadow_plane` y 1, 0.1 above the floor) at -1.5; textures `Oreols/02`+`07` (blue), `11`+`09` (red) | the prize halos (`oreol`) |
-| `Trail` | `Trail`, 30 particles, fade 500 ms, size 2.5, colours `0x00e2e2ff` to `0x007070ff` (`TrailBlue`) or `0x00ff8040` (`TrailOrange`) | `fire-rocket` (`particles1="trail"`); which variant, and any other use, is by code |
+| `Oreolblue`, `Oreolred` | two `Oreol` sprites: a halo spinning at `speed_angular` 3.5, and `OreolShadow` (`shadow_plane` y 1, 0.1 above the floor) at -1.5; textures `Oreols/02`+`07` (blue), `11`+`09` (red) | the prize halos (`oreol`); `PrizeScene` draws them from these numbers |
+| `Trail` | `Trail`, 30 particles, fade 500 ms, size 2.5, colours `0x00e2e2ff` to `0x007070ff` (`TrailBlue`) or `0x00ff8040` (`TrailOrange`) | `fire-rocket` (`particles1="trail"`); the game takes `TrailOrange` (variant and any other use are by code) |
 | `TrailMeteor` | `Trail`, size 5, red | `meteor` |
 | `explosebig`, `explosesmall` | `Flash`, size 25 and 15, fade 500 ms, speed 250 | dynamite |
-| `exploseball`, `exploseyadro`, `explosemeteor` | `Flash`, size 10, speed 250, 150, 50 | by code: explosive ball, cannonball, meteor |
+| `exploseball`, `exploseyadro`, `explosemeteor` | `Flash`, size 10, speed 250, 150, 50 | by code: the game uses `exploseyadro` for a cannonball, `explosemeteor` (flat on the floor) for the meteor's class, `exploseball` for the lighter bricks (`GAMEPLAY.md` 19.5) |
 | `Flash` | `Flash`, size 30, fade 200 ms | by code |
 | `Fireworks` | `Firework`, 6 variants (`SimpleFirework`, `red`, `yellow`, `green`, `blue`, `magenta`), 30 particles, radius 10, speed 30, fade 500 ms | fire-rocket bursts, firework objects |
 | `Laser` | `Laser`, yellow to red, speed 150, fade 1500 ms | the laser bolt |
 | `Lightning` | `Lightning`, 10 segments, `shift_coeff` 0.5, `shake_coeff` 0.75, colour `0x00eeeeFF` | Thunderbolt |
 | `rubber` | `Laser`, green to blue, speed 0, fade 1000 ms | the YoYo string |
 | `LeafFall` | `LeafFall`, 15 leaves, `Leaf.png`, spread 3 x 2 x 3, height 6 | trees when hit |
-| `Smoke` | `Smoke`, 50 particles, height 3, `ParticleBubble.png` | flickers (`particles2`) |
+| `Smoke` | `Smoke`, 50 particles, height 3, `ParticleBubble.png` | flickers (`particles2`) and the cannon's muzzle |
 | `Spark`, `SparkKoster` | `WaterBubble`, 10 particles, radius 0.5 / 2, `Particlered.png` | torch, cauldron (`particles1`) |
-| `WaterBubbles` | `WaterBubble`, radius 8, `Bubble2.png` | sea levels (**inferred**) |
-| `Tornado` | `Tornado`, **1,500** particles, radii 5 to 50, height 160, size 20, `ParticleRoket.png` (missing) | Wind prize |
+| `WaterBubbles` | `WaterBubble`, radius 8, `Bubble2.png` | sea levels (**inferred**; no object or level names it) |
+| `Tornado` | `Tornado`, **1,500** particles, radii 5 to 50, height 160, size 20, `ParticleRoket.png` (missing) | Wind prize (**inferred**; nothing names it, and the footage shows no tornado) |
+
+**The attributes.** 26 names are used (**data**); a file gives only the ones its type reads. What each means is **inferred**: the
+original's code is not at hand, so each reading was chosen to fit the values, the file names and the footage, and `GAMEPLAY.md`
+section 19 says by which. `ParticleLibrary` (`game/ParticleDef.h`) reads them all, and reports an attribute it does not know
+(`unknownAttributes()`) and a definition it cannot read (`problems()`); `mb_particle_smoke` checks that the 20 files give neither.
+
+| Attribute | Given by | Reading |
+|---|---|---|
+| `name`, `texture`, `type` | all | the definition's name; the image below `Textures`; one of the ten types (any case) |
+| `num` | all but Flash and Laser | the particles alive at once: a Firework's burst, a Smoke's, Trail's, WaterBubble's and Tornado's pool (put out at `num` / life a second), a LeafFall's leaves, a Lightning's pieces. Oreol: 1 |
+| `size` | all but Oreol | the sprite across, in world units; the width of a beam or a bolt; a Flash's largest size |
+| `radius` | Firework, Trail, WaterBubble, LeafFall, Oreol | Firework: the farthest a spark flies; Trail: the sphere round the emitter that the sprites are put in; WaterBubble: the disc they rise from; LeafFall: how far a leaf drifts sideways. Oreol: not read |
+| `radius_small`, `radius_big` | Tornado | the funnel's radius at its foot and at its top |
+| `radius_offset` | Oreol | not read: what it offsets is not known |
+| `speed` | Flash, Firework, Laser, LeafFall, Oreol, Smoke, Tornado, WaterBubble | Flash: how fast it swells to its size (units a second); Firework: the speed a spark leaves at; Laser: how fast the front runs along the beam (0: all of it at once); Smoke, WaterBubble, LeafFall, Tornado: how fast they rise (a leaf: fall, a Tornado: up the funnel). Oreol: not read |
+| `speed_angular` | Oreol, Tornado | radians a second: the halo's spin (negative: the other way), the funnel's turn |
+| `inverse_rotation` | Oreol (`no` in both) | turns the other way; the system reads it for a Tornado too |
+| `angle` | Smoke, LeafFall | degrees: a puff's cone about `direction` (half-angle); how far a leaf rocks to either side |
+| `height`, `width` | Smoke, LeafFall, Tornado | `height` / `speed` is how long a puff, a leaf or a funnel particle lives; Smoke's `width` is the source's width |
+| `dimension` | LeafFall | the box the leaves start in (the crown), x y z |
+| `direction` | Flash (`explosemeteor`), Firework, Smoke, WaterBubble, Tornado | a vector: a Flash lies flat across it (none: it faces the camera); a Firework droops along it (`0 -1 0`: down); smoke and bubbles rise along it |
+| `fade_time_msec` | all but Oreol, LeafFall | milliseconds. Flash, Trail, Lightning, Laser: how long it lasts or fades; Firework, Smoke, LeafFall: the last part of a life that fades out; WaterBubble and Tornado: the fade in and out at each end of a life |
+| `colour1`, `colour2`, `colour` | Firework, Laser, Trail; Lightning | `0xAARRGGBB`: the colour at birth and at death (a beam's two ends); a bolt's one colour. The alpha byte (`0x00...` on the trails and the bolt) is not "invisible" and is ignored |
+| `modulate_colour` | Laser, Lightning, Trail | `no`: the colour replaces the texture's, whose alpha only shapes the sprite. No file says `yes`; a Firework, which says nothing, is read the same way |
+| `shift_coeff`, `shake_coeff` | Lightning | how far the bolt's points are thrown sideways (a share of a piece's length), and how much of that throw is drawn anew each time the bolt shakes |
+| `shadow_plane`, `shadow_position` | OreolShadow | the mark lies in the plane with this normal, 0.1 up from the floor |
+
+Two things about the pictures. `ParticleLaser1.png` is three tiles side by side (a round end, the body, a round end): a beam is the
+body stretched along its length with an end at each point. And five of the textures have their dot below and right of the middle
+(`ParticleTrail(orange)`, `Particlered`, `PARTICLE`, `ParticleBubble`, `Bubble2`; the centre of their opacity is at 0.5 to 0.7 across and
+0.63 to 0.75 down): they are drawn as they are.
 
 ## 9. Materials: what the columns do
 

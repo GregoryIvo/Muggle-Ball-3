@@ -204,3 +204,26 @@ add_executable(mb_player_input_tests test_player_input.cpp ${PROJECT_SOURCE_DIR}
 target_include_directories(mb_player_input_tests PRIVATE ${PROJECT_SOURCE_DIR}/app)
 target_link_libraries(mb_player_input_tests PRIVATE mb_game)
 add_test(NAME mb_player_input_tests COMMAND mb_player_input_tests)
+
+# The particle definitions (the parser and what it reports) and the particle simulation, on made-up files with the real numbers: each
+# type's behaviour, beams and bolts, the system's handles and the batches. CPU only.
+add_executable(mb_particle_tests test_particles.cpp)
+target_link_libraries(mb_particle_tests PRIVATE mb_game)
+add_test(NAME mb_particle_tests COMMAND mb_particle_tests)
+
+# Every file of Data/Particles against the docs and the data that names them, and each definition run through the system, when
+# MB3_ASSETS points at the data; exits 77 (skipped) otherwise.
+add_executable(mb_particle_smoke particle_smoke.cpp)
+target_link_libraries(mb_particle_smoke PRIVATE mb_game nlohmann_json::nlohmann_json)
+add_test(NAME mb_particle_smoke COMMAND mb_particle_smoke)
+set_tests_properties(mb_particle_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# The particle effects in the game's scene, from the rules' events, on the real data and the GPU without a window: a flicker's fire, blasts,
+# the flash of each kind of brick, a tree's leaves, the night, and a firework's rocket with its trail and burst. Exits 77 (skipped) without
+# MB3_ASSETS or a GPU.
+add_executable(mb_effects_smoke effects_smoke.cpp ${PROJECT_SOURCE_DIR}/app/PlaySession.cpp ${PROJECT_SOURCE_DIR}/app/PlayerInput.cpp
+               ${PROJECT_SOURCE_DIR}/app/GameAudio.cpp)
+target_include_directories(mb_effects_smoke PRIVATE ${PROJECT_SOURCE_DIR}/app)
+target_link_libraries(mb_effects_smoke PRIVATE mb_game)
+add_test(NAME mb_effects_smoke COMMAND mb_effects_smoke)
+set_tests_properties(mb_effects_smoke PROPERTIES SKIP_RETURN_CODE 77)

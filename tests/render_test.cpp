@@ -163,6 +163,10 @@ std::span<const DebugLine> one(const DebugLine& l) {
     return {&l, 1};
 }
 
+std::span<const EffectBatch> one(const EffectBatch& b) {
+    return {&b, 1};
+}
+
 DrawItem item(MeshHandle mesh, const MaterialParams& material, Vec3 position, float scale = 1.0f) {
     DrawItem d;
     d.mesh = mesh;
@@ -899,6 +903,115 @@ void testSpriteEdgeCases(Scene& s) {
     expectPixel("4900 sprites: the gap between squares", many, 2, 2, clear, 0);
 }
 
+// Two triangles making a square of half-size `half` in the z = `z` plane, one colour, UV over the whole of it.
+std::vector<EffectVertex> effectSquare(float half, float z, Color colour) {
+    const EffectVertex tl{{-half, half, z}, {0, 0}, colour}, tr{{half, half, z}, {1, 0}, colour},
+        br{{half, -half, z}, {1, 1}, colour}, bl{{-half, -half, z}, {0, 1}, colour};
+    return {tl, tr, br, tl, br, bl};
+}
+
+void testEffects(Scene& s) {
+    std::printf("effect batches: blending, colour only, depth, order, bad input\n");
+    const Rgb clear = rgb8(0.2f, 0.4f, 0.6f);
+    const int mid = kSize / 2;
+    const auto draw = [&](std::span<const EffectBatch> batches, std::span<const DrawItem> items = {}) {
+        return s.renderer.renderToImage(kSize, kSize, s.frame, items, {}, {}, batches);
+    };
+
+    // Additive adds the colour times its alpha to what is there; alpha blending mixes it in.
+    const std::vector<EffectVertex> glow = effectSquare(0.5f, 0, {0.3f, 0.3f, 0.1f, 1});
+    EffectBatch batch;
+    batch.vertices = glow;
+    batch.blend = BlendMode::Additive;
+    const Image additive = draw(one(batch));
+    save(additive, "12a_effect_additive.png");
+    expectPixel("additive adds to the clear colour", additive, mid, mid, rgb8(0.5f, 0.7f, 0.7f));
+    expectPixel("and leaves what it does not cover", additive, 4, 4, clear);
+
+    const std::vector<EffectVertex> half = effectSquare(0.5f, 0, {1, 0, 0, 0.5f});
+    batch.vertices = half;
+    batch.blend = BlendMode::Additive;
+    expectPixel("additive scales by alpha", draw(one(batch)), mid, mid, rgb8(0.7f, 0.4f, 0.6f));
+    batch.blend = BlendMode::AlphaBlend;
+    expectPixel("alpha blend mixes", draw(one(batch)), mid, mid, rgb8(0.6f, 0.2f, 0.3f));
+
+    // The texture multiplies the colour, or only shapes the sprite when the colour replaces it.
+    const Rgba8 green{0, 255, 0, 255}, nothing{0, 255, 0, 0};
+    const TextureHandle greenLeft = s.renderer.createTexture(makeImage(16, 1, [&](int x, int) { return x < 8 ? green : nothing; }), false);
+    const std::vector<EffectVertex> red = effectSquare(0.5f, 0, {1, 0, 0, 1});
+    batch.vertices = red;
+    batch.texture = greenLeft;
+    batch.blend = BlendMode::AlphaBlend;
+    const Image modulated = draw(one(batch));
+    expectPixel("a green texture times a red colour is black", modulated, mid - 20, mid, {0, 0, 0});
+    expectPixel("where the texture is clear nothing is drawn", modulated, mid + 20, mid, clear);
+    batch.colourOnly = true;
+    const Image replaced = draw(one(batch));
+    save(replaced, "12b_effect_colour_only.png");
+    expectPixel("colour only: the colour, not the texture's", replaced, mid - 20, mid, {255, 0, 0});
+    expectPixel("colour only: the texture's alpha still cuts the shape", replaced, mid + 20, mid, clear);
+
+    // Depth: with the test on, a mesh in front hides the effect; with it off the effect is drawn over it. Neither writes depth.
+    const DrawItem wall[] = {item(s.quad, unlitColor({0, 0, 1, 1}), {0, 0, -1}, 0.3f)};
+    batch.texture = 0;
+    batch.colourOnly = false;
+    batch.blend = BlendMode::Additive;
+    batch.vertices = glow;
+    batch.depthTest = true;
+    expectPixel("depth test on: hidden by what is in front", draw(one(batch), wall), mid, mid, {0, 0, 255});
+    batch.depthTest = false;
+    expectPixel("depth test off: drawn over it", draw(one(batch), wall), mid, mid, {77, 77, 255});
+    batch.depthTest = true;
+    const std::vector<EffectVertex> behind = effectSquare(0.5f, 1, {0.3f, 0.3f, 0.1f, 1});
+    batch.vertices = behind;
+    expectPixel("depth test on: an effect in front of nothing is drawn", draw(one(batch)), mid, mid, rgb8(0.5f, 0.7f, 0.7f));
+
+    // Batches draw in the order given; a sprite and the debug lines go over them.
+    const std::vector<EffectVertex> blue = effectSquare(0.5f, 0, {0, 0, 1, 1});
+    EffectBatch both[2];
+    both[0].vertices = red;
+    both[0].blend = BlendMode::AlphaBlend;
+    both[1].vertices = blue;
+    both[1].blend = BlendMode::AlphaBlend;
+    expectPixel("the later batch is on top", draw(both), mid, mid, {0, 0, 255});
+    std::swap(both[0], both[1]);
+    expectPixel("and the earlier one under it", draw(both), mid, mid, {255, 0, 0});
+    const Sprite cover = solid(mid - 5, mid - 5, 10, 10, {0, 1, 0, 1});
+    expectPixel("a sprite is over an effect",
+                s.renderer.renderToImage(kSize, kSize, s.frame, {}, {}, std::span(&cover, 1), both), mid, mid, {0, 255, 0}, 0);
+
+    // Whole triangles only; a missing texture skips its batch and not the others; empty input is fine.
+    std::vector<EffectVertex> ragged = effectSquare(0.5f, 0, {1, 0, 0, 1});
+    ragged.push_back(ragged.front());  // a seventh vertex, no triangle
+    EffectBatch odd;
+    odd.vertices = ragged;
+    odd.blend = BlendMode::AlphaBlend;
+    EffectBatch lost = odd;
+    lost.texture = 9999;
+    const EffectBatch mixed[] = {lost, odd, EffectBatch{}};
+    expectPixel("a batch with a missing texture is skipped, the next drawn", draw(mixed), mid, mid, {255, 0, 0});
+    check(!draw({}).empty() && !draw(std::span<const EffectBatch>(mixed + 2, 1)).empty(), "no batch, or an empty one, is no trouble");
+
+    // Thousands of quads in a handful of batches: the stream grows and stays right frame after frame.
+    std::vector<EffectVertex> many;
+    for (int i = 0; i < 4000; ++i) {
+        const std::vector<EffectVertex> quad = effectSquare(0.01f, 0, {0, 1, 0, 1});
+        for (EffectVertex v : quad) {
+            v.position.x += 0.9f * std::sin(static_cast<float>(i));
+            v.position.y += 0.9f * std::cos(static_cast<float>(i) * 1.3f);
+            many.push_back(v);
+        }
+    }
+    EffectBatch crowd;
+    crowd.vertices = many;
+    crowd.blend = BlendMode::Additive;
+    for (int frame = 0; frame < 3; ++frame) {
+        const Image image = draw(one(crowd));
+        check(!image.empty() && pixelAt(image, 0, 0).g == clear.g, "4000 quads in one batch, frame " + std::to_string(frame));
+    }
+    save(draw(one(crowd)), "12c_effect_crowd.png");
+}
+
 void testNoGrowth(Scene& s) {
     std::printf("repeated renders do not grow the process\n");
     if (footprintBytes() == 0) {
@@ -1003,6 +1116,7 @@ int main() {
     testSpriteOrder(scene);
     testSpriteRotation(scene);
     testSpriteEdgeCases(scene);
+    testEffects(scene);
     testMipmaps(scene);
     testNoGrowth(scene);
     testHandles(scene);

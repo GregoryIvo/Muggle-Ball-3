@@ -18,6 +18,10 @@ add_library(mb_game
   src/Autopilot.cpp
   src/ModelCache.cpp
   src/LevelScene.cpp
+  src/ParticleDef.cpp
+  src/ParticleSystem.cpp
+  src/ParticleDraw.cpp
+  src/BrickEffects.cpp
   src/ObjectEffects.cpp
   src/Billboard.cpp
   src/PrizeScene.cpp

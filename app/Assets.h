@@ -4,6 +4,7 @@
 #include "mb/engine/Paths.h"
 #include "mb/game/LevelCatalog.h"
 #include "mb/game/MaterialLibrary.h"
+#include "mb/game/ParticleDef.h"
 #include "mb/game/SceneBuilder.h"
 #include "mb/game/TextureIndex.h"
 
@@ -18,6 +19,7 @@ struct Assets {
     mb::MaterialLibrary materials = mb::MaterialLibrary::load(root / "Data" / "Materials" / "materials.json");
     mb::TextureIndex textures{root / "Textures"};
     mb::LevelCatalog catalog{root / "Data" / "Levels"};
+    mb::ParticleLibrary particles = mb::ParticleLibrary::load(root / "Data" / "Particles");
 };
 
 // Warns of what a level's scene could not find: meshes, frames and textures.

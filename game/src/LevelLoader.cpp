@@ -199,6 +199,7 @@ GameObject object(const json& j) {
     o.frame = j.value("frame", "");
     o.prize = j.value("prize", "");
     o.target = j.value("target", "");
+    if (j.contains("names")) o.names = j["names"].get<std::vector<std::string>>();
     o.param = j.value("param", 0u);
     if (j.contains("extra")) o.extra = hexBytes(j["extra"].get<std::string>());
     if (j.contains("cloth")) {

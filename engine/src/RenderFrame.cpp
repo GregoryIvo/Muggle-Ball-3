@@ -34,6 +34,11 @@ struct FragmentUniforms {
 };
 static_assert(sizeof(FragmentUniforms) == 112);
 
+// The block in engine/shaders/effect.frag.
+struct EffectFragmentUniforms {
+    Vec4 flags;  // x: colourOnly
+};
+
 }  // namespace
 
 SDL_GPUTexture* Renderer::Impl::createDepthTexture(Uint32 width, Uint32 height) {
@@ -306,6 +311,66 @@ Uint32 Renderer::Impl::uploadSprites(SDL_GPUCommandBuffer* cmd, std::span<const 
     return vertexCount;
 }
 
+// Writes every batch's triangles into one stream, in order, and notes where each batch begins. Returns the vertex
+// count; the runs are left in effectRuns.
+Uint32 Renderer::Impl::uploadEffects(SDL_GPUCommandBuffer* cmd, std::span<const EffectBatch> effects) {
+    effectRuns.clear();
+    std::size_t total = 0;
+    for (const EffectBatch& batch : effects) {
+        total += batch.vertices.size() / 3 * 3;  // whole triangles only
+    }
+    EffectVertex* const first = static_cast<EffectVertex*>(mapStream(effectBuffer, total * sizeof(EffectVertex), "effect"));
+    if (!first) {
+        return 0;
+    }
+    EffectVertex* out = first;
+    for (const EffectBatch& batch : effects) {
+        const std::size_t count = batch.vertices.size() / 3 * 3;
+        if (count == 0) {
+            continue;
+        }
+        SDL_GPUTexture* texture = whiteTexture;
+        if (batch.texture != 0) {
+            const auto found = textures.find(batch.texture);
+            if (found == textures.end()) {
+                warnMissing("texture", batch.texture);
+                continue;
+            }
+            texture = found->second;
+        }
+        effectRuns.push_back({texture, batch.blend, batch.depthTest, batch.colourOnly, static_cast<Uint32>(out - first),
+                              static_cast<Uint32>(count)});
+        std::memcpy(out, batch.vertices.data(), count * sizeof(EffectVertex));
+        out += count;
+    }
+    const auto vertexCount = static_cast<Uint32>(out - first);
+    uploadStream(cmd, effectBuffer, vertexCount * static_cast<Uint32>(sizeof(EffectVertex)));
+    return vertexCount;
+}
+
+void Renderer::Impl::drawEffects(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, SDL_GPUTextureFormat colorFormat,
+                                 const Mat4& viewProj) {
+    const SDL_GPUBufferBinding binding{effectBuffer.vertices, 0};
+    SDL_GPUGraphicsPipeline* bound = nullptr;
+    for (const EffectRun& run : effectRuns) {
+        SDL_GPUGraphicsPipeline* pipeline = pipelines->get(PipelineKey::forEffects(colorFormat, run.blend, run.depthTest));
+        if (!pipeline) {
+            continue;
+        }
+        if (pipeline != bound) {
+            SDL_BindGPUGraphicsPipeline(pass, pipeline);
+            SDL_PushGPUVertexUniformData(cmd, 0, &viewProj, sizeof(viewProj));
+            SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);  // everything is rebound after a pipeline change, as for the meshes
+            bound = pipeline;
+        }
+        const SDL_GPUTextureSamplerBinding textureBinding{run.texture, sampler};
+        SDL_BindGPUFragmentSamplers(pass, 0, &textureBinding, 1);
+        const EffectFragmentUniforms uniforms{{run.colourOnly ? 1.0f : 0.0f, 0, 0, 0}};
+        SDL_PushGPUFragmentUniformData(cmd, 0, &uniforms, sizeof(uniforms));
+        SDL_DrawGPUPrimitives(pass, run.vertexCount, 1, run.firstVertex, 0);
+    }
+}
+
 void Renderer::Impl::drawMeshes(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, const Mat4& viewProj,
                                 const FrameParams& frame) {
     VertexUniforms vertexUniforms;
@@ -397,10 +462,11 @@ void Renderer::Impl::drawSprites(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* 
 void Renderer::Impl::drawFrame(SDL_GPUCommandBuffer* cmd, SDL_GPUTexture* color, SDL_GPUTextureFormat colorFormat,
                                SDL_GPUTexture* depth, Uint32 width, Uint32 height, const FrameParams& frame,
                                std::span<const DrawItem> items, std::span<const DebugLine> lines,
-                               std::span<const Sprite> sprites) {
+                               std::span<const Sprite> sprites, std::span<const EffectBatch> effects) {
     collectDraws(colorFormat, frame, items);
     const Uint32 lineVertexCount = uploadLines(cmd, lines);  // copy passes cannot run inside the render pass
     const Uint32 spriteVertexCount = uploadSprites(cmd, sprites);
+    const Uint32 effectVertexCount = uploadEffects(cmd, effects);
 
     SDL_GPUColorTargetInfo colorTarget{};
     colorTarget.texture = color;
@@ -429,6 +495,9 @@ void Renderer::Impl::drawFrame(SDL_GPUCommandBuffer* cmd, SDL_GPUTexture* color,
 
     const Mat4 viewProj = frame.view * frame.projection;
     drawMeshes(pass, cmd, viewProj, frame);
+    if (effectVertexCount > 0) {
+        drawEffects(pass, cmd, colorFormat, viewProj);
+    }
 
     if (lineVertexCount > 0) {
         if (SDL_GPUGraphicsPipeline* pipeline = pipelines->get(PipelineKey::forLines(colorFormat))) {
@@ -446,7 +515,8 @@ void Renderer::Impl::drawFrame(SDL_GPUCommandBuffer* cmd, SDL_GPUTexture* color,
 }
 
 void Renderer::Impl::renderWindow(const FrameParams& frame, std::span<const DrawItem> items,
-                                  std::span<const DebugLine> lines, std::span<const Sprite> sprites) {
+                                  std::span<const DebugLine> lines, std::span<const Sprite> sprites,
+                                  std::span<const EffectBatch> effects) {
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
     if (!cmd) {
         logError("SDL_AcquireGPUCommandBuffer failed: {}", SDL_GetError());
@@ -472,14 +542,14 @@ void Renderer::Impl::renderWindow(const FrameParams& frame, std::span<const Draw
         return;
     }
     if (ensureWindowDepth(width, height)) {
-        drawFrame(cmd, swapchain, swapchainFormat, windowDepth.texture, width, height, frame, items, lines, sprites);
+        drawFrame(cmd, swapchain, swapchainFormat, windowDepth.texture, width, height, frame, items, lines, sprites, effects);
     }
     SDL_SubmitGPUCommandBuffer(cmd);
 }
 
 Image Renderer::Impl::renderOffscreen(int width, int height, const FrameParams& frame,
                                       std::span<const DrawItem> items, std::span<const DebugLine> lines,
-                                      std::span<const Sprite> sprites) {
+                                      std::span<const Sprite> sprites, std::span<const EffectBatch> effects) {
     if (width <= 0 || height <= 0) {
         logError("renderToImage: invalid size {}x{}", width, height);
         return {};
@@ -494,7 +564,7 @@ Image Renderer::Impl::renderOffscreen(int width, int height, const FrameParams& 
         logError("SDL_AcquireGPUCommandBuffer failed: {}", SDL_GetError());
         return {};
     }
-    drawFrame(cmd, offscreen.color, kColorFormat, offscreen.depth, w, h, frame, items, lines, sprites);
+    drawFrame(cmd, offscreen.color, kColorFormat, offscreen.depth, w, h, frame, items, lines, sprites, effects);
 
     SDL_GPUTextureRegion source{};
     source.texture = offscreen.color;

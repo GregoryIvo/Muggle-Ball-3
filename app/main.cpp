@@ -27,6 +27,9 @@
 //                                            caught at once (caption, sound, effect); `stem` is the prize's file in
 //                                            Data/Objects/Prizes ("bonus", "bazuka", "tripple"...), `seconds` the play time to wait,
 //                                            `x` where along the board a dropped one falls from (over the bat if not given)
+//                                            --effect sets a particle effect going at a time of play, at a point (default over the
+//                                            middle of the board), for looking at the files of Data/Particles: "explosebig@5",
+//                                            "Fireworks/red@2,0,10,10", "Lightning@1,-8,1,0,8,1,10" (a beam's second end)
 //   MuggleBall3 --check <level.json>         load a converted level JSON, print a summary, exit
 //   MuggleBall3 --form <name> [--screenshot out.png] [--size WxH] [--language L] [--hover W | --press W] [--no-background]
 //                                            show a menu form alone (FormViewer.h); Left/Right switch form in the window
@@ -120,6 +123,7 @@ struct Options {
     float simulate = 0;                          // --simulate: seconds of physics before the screenshot
     std::optional<BallShot> ball;                // --ball: a test ball at t = 0
     std::vector<mb_app::PrizeCue> prizes;        // --drop-prize, --catch-prize
+    std::vector<mb_app::EffectCue> effects;      // --effect
 };
 
 int checkLevel(const char* path) {
@@ -318,7 +322,7 @@ int runPlayScreenshot(const Options& options) {
     Assets assets;
     const mb::SaveData save = openSave(options);
     const std::string name = assets.catalog.levels()[startLevel(assets, options)].name;
-    mb_app::PlaySession session(renderer, assets, save, nullptr, {.autoplay = true, .prizes = options.prizes});
+    mb_app::PlaySession session(renderer, assets, save, nullptr, {.autoplay = true, .prizes = options.prizes, .effects = options.effects});
     mb::GameHud hud;
     hud.lives = mb::GameplayRules{}.startHearts;
     if (const std::optional<int> index = mb::Campaign::load(assets.root / "Data" / "xml" / "levels.json").indexOf(name)) {
@@ -336,7 +340,7 @@ int runPlayScreenshot(const Options& options) {
     mb_app::HudOverlay overlay(renderer, {true, hud});
     const mb::Image image = renderer.renderToImage(
         options.width, options.height, session.frame(static_cast<float>(options.width) / static_cast<float>(options.height)),
-        session.items(), {}, overlay.sprites(options.width, options.height, name));
+        session.items(), {}, overlay.sprites(options.width, options.height, name), session.effects());
     if (image.empty() || !mb::writePng(options.screenshot, image)) {
         mb::logError("cannot write screenshot {}", options.screenshot);
         return 1;
@@ -412,7 +416,8 @@ int runGame(const Options& options) {
     mb::logInfo("Asset root: {}", assets.root.string());
 
     mb::GameAudio audio(assets.root);  // after the window, so the device closes before SDL quits
-    mb_app::PlaySession session(renderer, assets, save, &audio, {.autoplay = options.autoplay, .prizes = options.prizes});
+    mb_app::PlaySession session(renderer, assets, save, &audio,
+                                {.autoplay = options.autoplay, .prizes = options.prizes, .effects = options.effects});
     mb_app::FrontEndOptions frontEnd;
     frontEnd.language = options.form.language;
     frontEnd.startLevel = options.level;
@@ -601,6 +606,7 @@ void printUsage() {
         "                   [--simulate seconds] [--ball [x,degrees]]\n"
         "       MuggleBall3 --screenshot out.png --level <name> --autoplay [--simulate seconds] [--size WxH]\n"
         "       MuggleBall3 --autoplay [--level <name>] [--drop-prize stem[@seconds[,x]]] [--catch-prize stem[@seconds]]\n"
+        "                   [--effect file[/name][@seconds[,x,y,z[,x2,y2,z2]]]]\n"
         "       MuggleBall3 [--level ...] [--hud] [--hud-state lives,score,level[,icon[:number]...]]\n"
         "       MuggleBall3 --check <level.json>\n"
         "       MuggleBall3 --form <name> [--screenshot out.png] [--size WxH] [--language L] [--hover W | --press W]"
@@ -633,6 +639,14 @@ int main(int argc, char** argv) {
                     return 2;
                 }
                 options.prizes.push_back(cue);
+                ++i;
+            } else if (arg == "--effect" && hasValue) {
+                mb_app::EffectCue cue;
+                if (!mb_app::parseEffectCue(argv[i + 1], cue)) {
+                    printUsage();
+                    return 2;
+                }
+                options.effects.push_back(cue);
                 ++i;
             } else if (arg == "--screenshot" && hasValue) {
                 options.screenshot = argv[++i];
@@ -725,8 +739,8 @@ int main(int argc, char** argv) {
             printUsage();  // the level viewer's options: the game has its own camera, HUD and ball
             return 2;
         }
-        if (!options.prizes.empty() && !options.autoplay) {
-            printUsage();  // the prizes are given to the Autopilot's level
+        if ((!options.prizes.empty() || !options.effects.empty()) && !options.autoplay) {
+            printUsage();  // the prizes and the effects are given to the Autopilot's level
             return 2;
         }
         if (!options.screenshot.empty()) {
