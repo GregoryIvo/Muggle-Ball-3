@@ -5,11 +5,14 @@
 #include "mb/game/LevelLoader.h"
 
 #include <algorithm>
-#include <charconv>
+#include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <exception>
 #include <random>
+#include <string>
+#include <type_traits>
 #include <utility>
 
 namespace mb_app {
@@ -37,9 +40,16 @@ double millisecondsSince(Clock::time_point start) {
 bool parsePrizeCue(std::string_view text, bool catchNow, PrizeCue& cue) {
     const std::size_t at = text.find('@'), comma = text.find(',');
     const std::optional<mb::PrizeKind> kind = mb::prizeByStem(text.substr(0, std::min(at, comma)));
+    // strtod, not std::from_chars: Apple clang 15's library has no floating-point from_chars.
     const auto number = [](std::string_view field, auto& value) {
-        const auto [end, error] = std::from_chars(field.data(), field.data() + field.size(), value);
-        return !field.empty() && error == std::errc() && end == field.data() + field.size();
+        const std::string text(field);
+        char* end = nullptr;
+        const double parsed = std::strtod(text.c_str(), &end);
+        if (text.empty() || std::isspace(static_cast<unsigned char>(text.front())) || end != text.c_str() + text.size()) {
+            return false;
+        }
+        value = static_cast<std::remove_reference_t<decltype(value)>>(parsed);
+        return true;
     };
     PrizeCue parsed;
     if (!kind || (at != std::string_view::npos && comma < at)) {
