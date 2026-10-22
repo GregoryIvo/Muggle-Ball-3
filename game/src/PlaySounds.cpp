@@ -43,6 +43,16 @@ void PlaySounds::play(const GameEvent& event) {
                 sounds_.play(*event.material, MaterialSound::Dead, 1, pan);
             }
             break;
+        case EventType::CannonFired:
+            sounds_.play("brick_cannon_shoot", 1, pan);
+            break;
+        case EventType::RocketBurst:
+            sounds_.play("firerocket_dead", 1, pan);
+            break;
+        case EventType::BallEntered:
+        case EventType::BallEmerged:
+            sounds_.play("teleport", 1, pan);
+            break;
         case EventType::PrizeCaught:
             // The star's sound is the level's, which LevelComplete plays in the same step.
             if (event.material && event.prize != PrizeKind::NextLevel) {
@@ -70,6 +80,9 @@ void PlaySounds::play(const GameEvent& event) {
         case EventType::LevelComplete:
             sounds_.play("endlevel");
             break;
+        case EventType::DynamiteBlast:  // (the charge makes its own sound as it is destroyed)
+        case EventType::ShotHit:
+        case EventType::RocketLaunched:
         case EventType::BallLost:
         case EventType::BallFreed:
         case EventType::LifeLost:

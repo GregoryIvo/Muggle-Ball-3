@@ -274,7 +274,7 @@ private:
     std::vector<std::size_t> broken_;
 
     bool isActor(std::uint64_t userData) const { return userData < plan_.actors.size(); }  // else a ball or the bat
-    float massOf(std::uint64_t userData) const;  // infinity for what a hit cannot move
+    float massOf(std::uint64_t userData, BodyId body) const;  // infinity for what a hit cannot move
     void breakByHit(const ContactEvent& contact);
     void breakJoint(std::size_t planJoint);
     void releaseJoint(std::size_t planJoint);  // the joint is gone: its bodies wake, or one asleep would hang

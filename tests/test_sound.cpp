@@ -326,6 +326,9 @@ void testPlaySounds() {
       {"name": "ballHitBall", "samples": [{"file": "balls.ogg"}]},
       {"name": "bat_dead", "samples": [{"file": "batdead.ogg"}]},
       {"name": "endlevel", "samples": [{"file": "end.ogg"}]},
+      {"name": "brick_cannon_shoot", "samples": [{"file": "cannon.ogg"}]},
+      {"name": "firerocket_dead", "samples": [{"file": "rocket.ogg"}]},
+      {"name": "teleport", "samples": [{"file": "teleport.ogg"}]},
       {"name": "box_hit", "samples": [{"file": "boxhit.ogg"}]},
       {"name": "box_dead", "samples": [{"file": "boxdead.ogg"}]},
       {"name": "night", "samples": [{"file": "night.ogg"}]},
@@ -378,7 +381,17 @@ void testPlaySounds() {
     check(heard() == "batdead.ogg", "the bat flies off after the last ball");
     play(EventType::LevelComplete);
     check(heard() == "end.ogg", "the level is won");
-    for (const EventType quiet : {EventType::BallLost, EventType::BallFreed, EventType::LifeLost, EventType::BatEntered, EventType::GameOver}) {
+    // The special objects: the cannon's shot, the rocket's burst and the teleport at both ends; the rest make their sounds as bricks.
+    play(EventType::CannonFired);
+    check(heard() == "cannon.ogg", "a cannon fires");
+    play(EventType::RocketBurst);
+    check(heard() == "rocket.ogg", "a rocket bursts");
+    play(EventType::BallEntered);
+    check(heard() == "teleport.ogg", "a ball goes into a teleport");
+    play(EventType::BallEmerged);
+    check(heard() == "teleport.ogg", "and comes out");
+    for (const EventType quiet : {EventType::BallLost, EventType::BallFreed, EventType::LifeLost, EventType::BatEntered, EventType::GameOver,
+                                  EventType::DynamiteBlast, EventType::ShotHit, EventType::RocketLaunched}) {
         play(quiet);
         check(audio.sounds.empty(), "these events make no sound");
     }

@@ -39,6 +39,13 @@ std::string_view eventName(EventType type) {
         case EventType::BrickHit: return "BrickHit";
         case EventType::BrickDestroyed: return "BrickDestroyed";
         case EventType::ActorFell: return "ActorFell";
+        case EventType::DynamiteBlast: return "DynamiteBlast";
+        case EventType::CannonFired: return "CannonFired";
+        case EventType::ShotHit: return "ShotHit";
+        case EventType::RocketLaunched: return "RocketLaunched";
+        case EventType::RocketBurst: return "RocketBurst";
+        case EventType::BallEntered: return "BallEntered";
+        case EventType::BallEmerged: return "BallEmerged";
         case EventType::BallLost: return "BallLost";
         case EventType::BallFreed: return "BallFreed";
         case EventType::PrizeDropped: return "PrizeDropped";
@@ -131,8 +138,6 @@ bool canBeDamaged(ObjectType type, const GameMaterial* material) {
         case ObjectType::Firework:
         case ObjectType::Spring:
         case ObjectType::Volcano:
-        case ObjectType::TeleportSrc:
-        case ObjectType::TeleportDest:
         case ObjectType::GeneratorGood:
         case ObjectType::GeneratorBad:
         case ObjectType::Vibro:
@@ -208,6 +213,7 @@ GameSession::GameSession(const Level& level, const MaterialLibrary& materials, c
     : rules_(options.rules),
       levelEnd_(options.levelEnd),
       scene_(level, materials, options.physics, options.physicsSettings),
+      objects_(level, scene_.plan(), options.rules.objects),
       fixedStep_(scene_.world().settings().fixedStep),
       score_(options.score),
       hearts_(options.hearts.value_or(options.rules.startHearts)),
@@ -363,6 +369,7 @@ void GameSession::tick() {
     scene_.step(static_cast<float>(fixedStep_));
     processContacts();
     keepBalls();
+    objects_.update(*this);
     stepPrizes();
     explodeDue();
     removeShrunk();
@@ -490,10 +497,14 @@ GameSession::Ball* GameSession::ballOf(BodyId body) {
 
 void GameSession::processContacts() {
     hitThisStep_.clear();
+    // The Explosive Ball's blasts go off after the last contact of the step: it hits "everything within reach but what the ball
+    // hit", and a brick the ball touches in this very step whose contact comes later in the list is not yet in hitThisStep_ when
+    // an earlier brick's blast looks, so it would take the blast and then its own blow as well.
+    std::vector<Vec3> blasts;
     for (const ContactEvent& contact : scene_.contacts()) {
         Ball* a = contact.userDataA == kGameBallData ? ballOf(contact.a) : nullptr;
         Ball* b = contact.userDataB == kGameBallData ? ballOf(contact.b) : nullptr;
-        const bool blow = contact.normalSpeed >= rules_.hitFraction * rules_.ballSpeed;
+        const bool blow = contact.normalSpeed >= rules_.hitFraction * ballSpeed();
         if (a != nullptr && b != nullptr) {
             if (blow) {
                 a->bounced = b->bounced = true;
@@ -531,11 +542,15 @@ void GameSession::processContacts() {
                 emit(event);
             } else if (bricks_[actor].damageable && std::ranges::find(hitThisStep_, actor) == hitThisStep_.end()) {
                 hitThisStep_.push_back(actor);
-                if (hitBrick(actor, contact.point, contact.normalSpeed, ball->id)) {
-                    ballHitBrick(contact.point);
+                if (!objects_.ballHit(*this, actor, contact, ball->id) &&
+                    hitBrick(actor, contact.point, contact.normalSpeed, ball->id)) {
+                    blasts.push_back(contact.point);
                 }
             }
         }
+    }
+    for (const Vec3 at : blasts) {
+        ballHitBrick(at);
     }
 }
 
@@ -599,7 +614,7 @@ void GameSession::keepBalls() {
     const float sinSteep = std::sin(radians(rules_.minVerticalAngleDegrees));
     for (std::size_t i = 0; i < balls_.size();) {
         Ball& ball = balls_[i];
-        if (ball.held || ball.stuck) {
+        if (ball.held || ball.away || ball.stuck) {
             ++i;
             continue;
         }
@@ -638,6 +653,16 @@ void GameSession::keepBalls() {
 }
 
 bool GameSession::freeBall(Ball& ball, Vec3 at) {
+    // Pinned again where it was freed a moment ago: the heading below points into whatever holds it, and freeing it once more
+    // would never end.
+    const bool again = time_ - ball.freedTime <= rules_.jamRepeatTime &&
+                       std::hypot(at.x - ball.freedAt.x, at.z - ball.freedAt.z) <= rules_.jamRepeatDistance;
+    ball.freedInARow = again ? ball.freedInARow + 1 : 1;
+    ball.freedAt = at;
+    ball.freedTime = time_;
+    if (ball.freedInARow > rules_.jamFreesInARow) {
+        return false;
+    }
     // Towards the middle of the board: away from the wall it was against, and from the end it was pinned at.
     ball.heading = normalize({at.x > 0 ? -kFreedSlant : kFreedSlant, 0, at.z > 0 ? -1.0f : 1.0f});
     scene_.world().removeBody(ball.body);
@@ -657,7 +682,7 @@ bool GameSession::freeBall(Ball& ball, Vec3 at) {
     return true;
 }
 
-// The ball's body is gone already when `ball.body` is 0 (freeBall() could not make a new one).
+// The ball's body is gone already when `ball.body` is 0 (freeBall() could not make a new one); it is still there when freeBall() gave up.
 void GameSession::loseBall(std::size_t index, Vec3 position, Vec3 velocity) {
     const Ball ball = balls_[index];
     GameEvent event;
@@ -750,6 +775,7 @@ void GameSession::explodeDue() {
         event.points = brick.material->brickScore;
         event.material = brick.material;
         emit(event);
+        objects_.destroyed(*this, actor, event.position);
         if (shrinksAway(brick.material)) {
             brick.exploding = false;
             brick.shrinking = true;
@@ -925,6 +951,11 @@ void GameSession::refreshViews() {
         if (ball.held) {
             view.position = {bat_.position.x + rules_.heldOffsetX, rules_.ballPlaneY,
                              bat_.position.z + heldDistance()};
+        } else if (ball.away) {
+            const SpecialObjects::Away away = objects_.away(ball.id, time_);
+            view.position = away.position;
+            view.appear = away.appear;
+            view.away = true;
         } else if (ball.stuck) {
             view.position = {bat_.position.x + ball.stuckOffset.x, rules_.ballPlaneY, bat_.position.z + ball.stuckOffset.z};
         } else {

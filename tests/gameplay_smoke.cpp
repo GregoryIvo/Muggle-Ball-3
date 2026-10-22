@@ -12,8 +12,10 @@
 //        level's own rule the summary counts the levels it finished and how many of those only the stall rule ended (a
 //        line under the level says how many targets it let go). Sanity is asserted, not the result: no pose may be not
 //        finite, no body may fly faster than a sane simulation, a ball's speed must be the rules' speed and its y the
-//        plane's after every frame, a ball may only leave past the bat, a ball in flight must move at least 0.3 units in 2 s
-//        (the speed the session reports is the one it sets, so a ball frozen by the solver shows only here), and none may
+//        plane's after every frame, a ball may only leave past the bat (or be given up on in a pocket it cannot leave: freed
+//        GameplayRules::jamFreesInARow times in a row, then lost), a ball in flight must move at least 0.3 units in 2 s, or
+//        be freed in that time (the speed the session reports is the one it sets, so a ball frozen by the solver shows only
+//        here; one the session frees is pinned, and dealt with), and none may
 //        be pinned against the bat (the session frees a ball that is pinned elsewhere, in a pocket of the board, and
 //        the table counts those). The prizes drop as in the game, the level's place in the campaign counting (the red ones
 //        come from level 10): the table has the prizes dropped and caught, and the summary how many levels the Next Level star
@@ -79,6 +81,7 @@ struct Outcome {
     float farthest = 0;  // and its greatest z
     double stepMs = 0;
     bool starDropped = false, starCaught = false;  // the Next Level star
+    int givenUp = 0;  // balls lost in a pocket they could not be freed from, see play()
     std::vector<GameEvent> events;
     std::vector<std::string> problems;
     std::vector<std::string> standing;  // the targets left, one line each
@@ -140,17 +143,20 @@ Outcome play(const Level& level, const MaterialLibrary& materials, double second
         }
         if (s.stats().ballsFreed > freed) {
             freed = s.stats().ballsFreed;
+            for (auto& entry : anchors) {  // the session has dealt with a pinned ball: it is not frozen, for the check below
+                entry.second.frame = frame;
+            }
             for (const BallView& ball : s.balls()) {
                 const Vec3 bat = s.bat().position;
-                if (!ball.held && std::hypot(ball.position.x - bat.x, ball.position.z - bat.z) <
-                                      s.batRadius() + ball.radius + kReachBeyond) {
+                if (!ball.held && !ball.away && !ball.stuck && std::hypot(ball.position.x - bat.x, ball.position.z - bat.z) <
+                                                     s.batRadius() + ball.radius + kReachBeyond) {
                     problem(std::format("ball {} was pinned against the bat at ({:.2f}, {:.2f})", ball.id,
                                         static_cast<double>(ball.position.x), static_cast<double>(ball.position.z)));
                 }
             }
         }
         for (const BallView& ball : s.balls()) {
-            if (ball.held || ball.stuck) {
+            if (ball.held || ball.away || ball.stuck) {  // (a ball in a teleport is gone for 0.4 s)
                 anchors.erase(ball.id);
                 continue;
             }
@@ -191,16 +197,35 @@ Outcome play(const Level& level, const MaterialLibrary& materials, double second
     out.stepMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count() /
                  static_cast<double>(std::max<std::uint64_t>(frame, 1));
 
+    // The frees of each ball that came one after the other where the one before was: a ball freed jamFreesInARow times like that
+    // and pinned again is lost where it is, not past the bat (GameSession::freeBall()).
+    struct Frees {
+        Vec3 at;
+        double time = -1e9;
+        int inARow = 0;
+    };
+    std::map<int, Frees> frees;
     for (const GameEvent& event : result.events) {
         if (event.type == EventType::BrickDestroyed || event.type == EventType::ActorFell) {
             out.lastProgress = event.time;
         }
+        if (event.type == EventType::BallFreed) {
+            Frees& last = frees[event.ball];
+            const bool again = event.time - last.time <= rules.jamRepeatTime + rules.jamTime &&
+                               std::hypot(event.position.x - last.at.x, event.position.z - last.at.z) <= rules.jamRepeatDistance;
+            last = {event.position, event.time, again ? last.inARow + 1 : 1};
+        }
+        const auto freed = frees.find(event.ball);
+        const bool givenUp = event.type == EventType::BallLost && freed != frees.end() &&
+                             freed->second.inARow >= rules.jamFreesInARow &&
+                             event.time - freed->second.time <= rules.jamRepeatTime + rules.jamTime;
+        out.givenUp += givenUp;
         if (event.prize == PrizeKind::NextLevel) {
             out.starDropped = out.starDropped || event.type == EventType::PrizeDropped;
             out.starCaught = out.starCaught || event.type == EventType::PrizeCaught;
         }
         // A ball may only leave past the bat.
-        if (event.type == EventType::BallLost &&
+        if (event.type == EventType::BallLost && !givenUp &&
             !(event.position.z < rules.ballLostZ && event.position.z > rules.ballLostZ - 1.0f &&
               std::fabs(event.position.x) < rules.escapeX)) {
             problem(std::format("ball {} left the board at ({:.1f}, {:.1f})", event.ball,
@@ -259,7 +284,7 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, const Cam
                 "", "", "", "", "", "all", "type", "all", "type", "", "drop/got");
     int failed = 0, levels = 0, finishedBy[2] = {0, 0}, withTargets[2] = {0, 0};
     int emptyLevels = 0, levelsLetGo = 0, standingHigh = 0, standingOutside = 0, standingOnField = 0, freed = 0, levelsWithFreed = 0;
-    int completed = 0, outOfPlay = 0, levelsOutOfPlay = 0;
+    int completed = 0, outOfPlay = 0, levelsOutOfPlay = 0, givenUp = 0;
     int prizesDropped = 0, prizesCaught = 0, prizesMissed = 0, levelsWithStar = 0, endedByStar = 0, starsCaught = 0;
     std::vector<std::string> notCompleted;
     double share[2] = {0, 0};  // summed over the levels: the part of the targets destroyed
@@ -305,6 +330,7 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, const Cam
             std::printf("  (%d targets were let go: the level stood still from %.1f s)\n", out.letGo, out.lastProgress);
         }
         freed += out.stats.ballsFreed;
+        givenUp += out.givenUp;
         levelsWithFreed += out.stats.ballsFreed > 0;
         standingHigh += out.standingHigh;
         standingOutside += out.standingOutside;
@@ -351,7 +377,8 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, const Cam
     std::printf("targets still standing at the end under either reading: %d on the field, %d higher than %.1f (out of "
                 "reach until they fall), %d beyond where any ball went (out of reach)\n",
                 standingOnField, standingHigh, static_cast<double>(kHigh), standingOutside);
-    std::printf("balls freed from a pin: %d, in %d levels\n", freed, levelsWithFreed);
+    std::printf("balls freed from a pin: %d, in %d levels; given up on in a pocket they could not be freed from: %d\n", freed,
+                levelsWithFreed, givenUp);
     std::printf("prizes: %d dropped, %d caught, %d missed; the Next Level star fell in %d levels (s in the table), was caught in %d and "
                 "ended %d of the %d levels completed (*)\n",
                 prizesDropped, prizesCaught, prizesMissed, levelsWithStar, starsCaught, endedByStar, completed);

@@ -6,6 +6,7 @@
 #include "mb/game/Level.h"
 #include "mb/game/MaterialLibrary.h"
 #include "mb/game/PhysicsScene.h"
+#include "mb/game/SpecialObjects.h"
 #include "mb/game/Prizes.h"
 
 #include <array>
@@ -95,6 +96,13 @@ struct GameplayRules {
     // (a body with none of the contact state that holds the old one) on a path towards the middle of the board.
     float jamDistance = 1.0f;
     double jamTime = 1.0;
+    // A pocket the ball cannot leave at all (a lane a little wider than itself between a piece that nothing hurts and the back
+    // wall, closed at its ends: village-apple's metal fences) frees it into the same pocket again and again. A ball freed
+    // jamFreesInARow times, each within jamRepeatDistance of the one before and jamRepeatTime after it, is lost instead of
+    // freed once more: the life it costs, if it is the last ball, is the way out of a level that would otherwise be shut [I].
+    int jamFreesInARow = 3;
+    float jamRepeatDistance = 3.0f;
+    double jamRepeatTime = 3.0;
 
     // ---- Targets the ball cannot get at (section 5.10; the end of the level, see GameSession)
     // The grid the ground of the ball's plane is cut into for the look at what it can reach, BallReach.
@@ -109,14 +117,14 @@ struct GameplayRules {
     float stallShare = 0.25f;
 
     // ---- Bricks (section 5)
-    // A hit is a contact that begins with the ball closing on the thing at more than this share of its speed along
-    // the contact normal (4.5 units/s of 15), and a ball laid on the floor or skimming past touches at none. A
+    // A hit is a contact that begins with the ball closing on the thing at more than this share of its speed (the session's
+    // ballSpeed(), which the speed prizes move) along the contact normal (4.5 units/s of 15), and a ball laid on the floor or skimming past touches at none. A
     // ball that slides along a row of tiles meets the edge of each next one at up to a quarter of its speed, which
     // must not hurt it [I]. (Joints break at 2 units/s, the bounce threshold; that is a different thing.)
     float hitFraction = 0.3f;
     // A dynamic body below this has left the board: it stops being a target and is taken out (ActorFell), with no
-    // explosion. It is not destroyed. Loose pieces are destroyed by weapons and blasts (the Laser beam, lightning bolts,
-    // dynamite chains: step 5), not by falling or sinking: nothing that fell, sank or drifted died in the footage
+    // explosion. It is not destroyed. Loose pieces are destroyed by weapons and blasts (the Laser beam, lightning bolts, dynamite
+    // chains), not by falling or sinking: nothing that fell, sank or drifted died in the footage
     // ("Rules settled by the second study" [M]). So it scores nothing; fallScores adds its brickScore, to try the other
     // reading.
     float fallLimitY = -5.0f;
@@ -128,6 +136,8 @@ struct GameplayRules {
     // second study", 8) [M].
     double shrinkTime = 0.35;
 
+    // ---- The level's special objects: dynamite, cannons, teleports, fireworks, springs, metal ... (docs/GAMEPLAY.md section 17)
+    SpecialObjectRules objects;
     // ---- Prizes (sections 7, 14 and 15)
     PrizeRules prizes;
 };
@@ -141,7 +151,8 @@ enum class TargetRule {
     // motion: dynamic, kinematic (floor tiles, sharks, birds) or bound to a path. Not required: every object of a type
     // other than brick and tree: metall, teleports and cannons (left on the board at natural ends), and, never seen to
     // decide a level's end, dynamite, fireworks, generators, springs, volcanoes, cloth and vibro. Those can still be
-    // destroyed for their points.
+    // destroyed for their points: dynamite and fireworks by the ball, the rest by a blast, a cannonball or a weapon (not by
+    // the ball: docs/GAMEPLAY.md section 17.1).
     Bricks,
     // Every brick whose material has brickType 0, moving or not; crates, rocks, animals, ground (type 4) and trees (5) do
     // not count. The footage refutes it: a level did not end before its type 4 gorilla was destroyed.
@@ -196,6 +207,15 @@ enum class EventType {
     // (shrinksAway()) is then still there for GameplayRules::shrinkTime, shrinking (ActorStatus::shrink): the others are gone.
     BrickDestroyed,  // actor, position (centre of mass), points (added to the score), material
     ActorFell,       // actor, position (centre of mass), points (only with fallScores), material: it left the board
+    // The special objects (SpecialObjects; docs/GAMEPLAY.md section 17). Dynamite that goes off also reports its
+    // BrickDestroyed, with the charge's points and sound.
+    DynamiteBlast,   // actor (the charge), position (its centre), speed (the blast's radius)
+    CannonFired,     // actor (the cannon), position (the muzzle), velocity (the cannonball's)
+    ShotHit,         // actor (what the cannonball struck: a brick, the board ...), position: it bursts
+    RocketLaunched,  // actor (the crate), position: a firework rocket leaves a crate
+    RocketBurst,     // position: and bursts
+    BallEntered,     // ball, actor (the source), position: it vanishes into a teleport
+    BallEmerged,     // ball, actor (the exit), position: and comes out
     BallLost,        // ball, position, velocity: behind the bat's line (or out of the world); it shrinks away
     BallFreed,       // ball, position: it was pinned and is put back in the world (see GameplayRules::jamTime)
     // ---- Prizes (section 15). `prize` is set on all of them but BallStuck, Blast and BallRubbered.
@@ -269,15 +289,19 @@ struct BatView {
 struct BallView {
     int id = 0;  // unique in the session
     Vec3 position{};
-    Vec3 velocity{};  // zero while held; the rules' own (always ballSpeed along the path), not what the solver left
+    Vec3 velocity{};  // zero while held; the rules' own (always the session's ballSpeed() along the path), not what the solver left
     bool held = false;  // on the bat, waiting for the click
+    bool away = false;  // in a teleport (velocity zero, not lost) until it leaves the exit
+    // How much of the ball there is, 0 to 1: none while it is in a teleport and until it comes out, then it grows to the
+    // whole.
+    float appear = 1;
     bool stuck = false;  // on the bat, caught by the Magnet; the click lets it go (position is where it sticks)
     float radius = kBallRadius;  // PrizeRules::bigBallRadius and smallBallRadius change it
 };
 
 // One actor of the level as the rules see it.
 struct ActorStatus {
-    bool damageable = false;  // a ball hurts it (canBeDamaged()) and it is still there
+    bool damageable = false;  // something can hurt it (canBeDamaged(); not always a ball: SpecialObjectRules) and it is still there
     bool exploding = false;   // out of energy, waiting out exploseDelay
     // After its score, a person or an animal shrinks away over GameplayRules::shrinkTime: 0 as it begins, up to 1 as it is
     // removed. It is a target until then, and no more to be hurt.
@@ -308,11 +332,13 @@ struct GameInput {
 
 // ---- Rules that stand on their own
 
-// Whether balls hurt an actor of this object type with this material: it has a brick material (brickType other than
-// 2, which the ball, bullets, board, water and the fallback have, and energy above 0). The board and markers never
-// do. A cloth is a placeholder for a sail the cloth simulation has yet to build (step 5), so a ball goes by it, though
-// the original scored sails (60 each: piratos-ostrovok's 62 bricks and 3 sails are the 65 bricks, 4,231 points of
-// docs/GAMEPLAY.md), and they are not targets here.
+// Whether something can hurt an actor of this object type with this material: it has a brick material (brickType other
+// than 2, which the ball, bullets, board, water and the fallback have, and energy above 0). The board and markers never
+// do, and neither do the teleports, which a charge of dynamite 3.8 units away left standing (docs/GAMEPLAY.md section
+// 17.1). The ball itself hurts only bricks, trees, dynamite, firework crates, vibros and flickers (SpecialObjects); the
+// rest of the objects are hurt by blasts, cannonballs and weapons. A cloth is a placeholder for a sail the cloth simulation has yet to build (step 5),
+// so a ball goes by it, though the original scored sails (60 each: piratos-ostrovok's 62 bricks and 3 sails are the 65
+// bricks, 4,231 points of docs/GAMEPLAY.md), and they are not targets here.
 bool canBeDamaged(ObjectType type, const GameMaterial* material);
 
 // Whether a destroyed object of this material shrinks away instead of being gone with its score: exploseType 5, the
@@ -353,7 +379,7 @@ public:
     //
     // Each step: the bat eases towards the target and the held ball follows it; the physics runs; then
     //  - a ball that touched the bat leaves along (ball - bat) in the plane (BatHit);
-    //  - every ball's speed goes back to GameplayRules::ballSpeed (it stays on its plane by itself), and after a
+    //  - every ball's speed goes back to ballSpeed(), the rules' 15 times what the speed prizes made of it (it stays on its plane by itself), and after a
     //    bounce a path too near an axis is turned out; one that cannot move is freed (BallFreed); one behind
     //    ballLostZ is lost (BallLost), and the last of them starts the life sequence: the bat leaves (BatLeft), a
     //    heart is spent (LifeLost) as the new bat comes (BatEntered) with the ball on it, and it can be launched
@@ -378,6 +404,8 @@ public:
     const SessionStats& stats() const { return stats_; }
     const GameplayRules& rules() const { return rules_; }
     TargetRule levelEnd() const { return levelEnd_; }
+    // The level's special objects: the cannonballs and rockets in flight, for the presentation.
+    const SpecialObjects& objects() const { return objects_; }
 
     ActorStatus actor(ActorIndex actor) const;
     // Whether an actor that is still in the level counts toward a rule (whatever rule the session ends by), and how
@@ -434,15 +462,21 @@ public:
     void givePrize(PrizeKind kind);
 
 private:
+    friend class SpecialObjects;
+
     struct Ball {
         int id = 0;
-        BodyId body = 0;  // none while held
+        BodyId body = 0;  // none while held, or in a teleport
         bool held = false;
+        bool away = false;      // in a teleport (SpecialObjects): no body, not lost
         bool onBat = false;     // touched the bat at the last step: one hit for a stay on it
         bool bounced = false;   // began to touch something besides the bat in this step
         Vec3 heading{0, 0, 1};  // unit, in the plane: where it goes, kept for the step in which it stands still
         Vec3 anchor{};          // where it was when jamDistance last was exceeded, and when
         double anchoredAt = 0;
+        Vec3 freedAt{};         // where freeBall() last freed it, when, and how many times in a row (GameplayRules::jamFreesInARow)
+        double freedTime = 0;
+        int freedInARow = 0;
         float radius = kBallRadius;
         bool stuck = false;     // the Magnet holds it: body 0 like a held ball's, at stuckOffset from the bat's centre
         Vec3 stuckOffset{};
@@ -470,6 +504,7 @@ private:
     GameplayRules rules_;
     TargetRule levelEnd_;
     PhysicsScene scene_;
+    SpecialObjects objects_;
     double fixedStep_;
     std::vector<Brick> bricks_;  // by ActorIndex
     std::vector<ActorIndex> dynamicActors_;

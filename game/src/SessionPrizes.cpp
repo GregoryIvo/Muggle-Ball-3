@@ -105,13 +105,15 @@ void GameSession::stepPrizes() {
     const PrizeRules& rules = rules_.prizes;
     const double epsilon = fixedStep_ * 1e-3;
 
-    // The bat can catch while it is there: not as it swoops in, flies off or after the last ball was lost.
-    const bool batHere = batBody_ != 0 && bat_.phase == BatPhase::Present && phase_ != SessionPhase::Lost;
-    const float reach = batRadius() + rules.halfSize;
     for (std::size_t i = 0; i < fallingPrizes_.size();) {
         FallingPrize& prize = fallingPrizes_[i];
         prize.position.z -= rules.fallSpeed * static_cast<float>(fixedStep_);
         prize.age += fixedStep_;
+        // The bat can catch while it is there: not as it swoops in, flies off or after the last ball was lost. Asked again for
+        // each prize, since one caught in this step may have killed the bat (the Skull: nothing after it is caught, and its
+        // effects would outlive the bat) or changed its size.
+        const bool batHere = batBody_ != 0 && bat_.phase == BatPhase::Present && phase_ != SessionPhase::Lost;
+        const float reach = batRadius() + rules.halfSize;
         if (batHere && std::hypot(prize.position.x - bat_.position.x, prize.position.z - bat_.position.z) <= reach) {
             const FallingPrize caught = prize;
             fallingPrizes_.erase(fallingPrizes_.begin() + static_cast<std::ptrdiff_t>(i));
@@ -154,6 +156,8 @@ void GameSession::stepPrizes() {
             if (ball.body != 0) {
                 at = scene_.world().pose(ball.body).translationPart();
                 velocity = scene_.world().linearVelocity(ball.body);
+            } else if (ball.away) {
+                at = objects_.away(ball.id, time_).position;
             }
             loseBall(0, at, velocity);
         }
@@ -551,7 +555,7 @@ void GameSession::addMultiballs() {
     const Ball* source = nullptr;
     float nearest = 0;
     for (const Ball& ball : balls_) {
-        if (ball.held || ball.stuck) {
+        if (ball.held || ball.stuck || ball.away) {  // (a ball in a teleport has no body)
             continue;
         }
         const Vec3 at = scene_.world().pose(ball.body).translationPart();

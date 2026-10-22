@@ -146,6 +146,17 @@ add_executable(mb_gameplay_tests test_gameplay.cpp)
 target_link_libraries(mb_gameplay_tests PRIVATE mb_game)
 add_test(NAME mb_gameplay_tests COMMAND mb_gameplay_tests)
 
+# The level's special objects (dynamite, cannons, teleports, fireworks, springs, metal ...) on made-up levels. CPU only.
+add_executable(mb_special_object_tests test_special_objects.cpp)
+target_link_libraries(mb_special_object_tests PRIVATE mb_game)
+add_test(NAME mb_special_object_tests COMMAND mb_special_object_tests)
+
+# The special objects of all converted levels, played by the autopilot and poked, when MB3_ASSETS points at the data; exits 77
+# (skipped) otherwise.
+add_executable(mb_special_object_smoke special_objects_smoke.cpp)
+target_link_libraries(mb_special_object_smoke PRIVATE mb_game)
+add_test(NAME mb_special_object_smoke COMMAND mb_special_object_smoke)
+set_tests_properties(mb_special_object_smoke PROPERTIES SKIP_RETURN_CODE 77)
 # The prizes: what drops, how it falls and is caught, and what each of the 28 does, on made-up levels. CPU only.
 add_executable(mb_prize_tests test_prizes.cpp)
 target_link_libraries(mb_prize_tests PRIVATE mb_game)

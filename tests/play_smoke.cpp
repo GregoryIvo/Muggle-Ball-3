@@ -184,12 +184,14 @@ void testWinning(mb::Renderer& renderer, mb_app::Assets& assets) {
     mb::InputEvents nobody;
     mb::LevelOutcome outcome = mb::LevelOutcome::Playing;
     double seconds = 0, completeAt = -1, darkAt = -1;
+    bool byStar = false;
     while (outcome == mb::LevelOutcome::Playing && seconds < 1500) {
         outcome = session.update(nobody, kFrame, hud);
         seconds += kFrame;
         if (completeAt < 0 && session.rules()->phase() == mb::SessionPhase::Complete) {
             completeAt = seconds;
-            check(session.ending(), "win: the session is ending as soon as the last target is gone");
+            byStar = hud.caption == "NextLevel";  // the Next Level star ends a level with targets left
+            check(session.ending(), "win: the session is ending as soon as the level is won (the last target is gone, or the star was caught)");
         } else if (completeAt >= 0 && darkAt < 0 && session.darkness() > 0) {
             darkAt = seconds;
         }
@@ -201,7 +203,7 @@ void testWinning(mb::Renderer& renderer, mb_app::Assets& assets) {
           "win: and it is reported 0.9 s after the last target (the hold, then the fade out)");
     check(session.darkness() == 1, "win: the picture is dark by then");
     check(hud.score > 1000 && hud.lives >= 0 && hud.lives <= 99, "win: the points were added to those brought in, and the hearts are the rules'");
-    check(session.rules()->targetsLeft(session.rules()->levelEnd()) == 0, "win: no target is left");
+    check(byStar || session.rules()->targetsLeft(session.rules()->levelEnd()) == 0, "win: no target is left, or the star was caught");
 }
 
 // The click that ends a pause is not the level's: the front end does not give the session its frame, and tells it the pause is

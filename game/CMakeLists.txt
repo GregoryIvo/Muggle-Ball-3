@@ -13,9 +13,11 @@ add_library(mb_game
   src/Gameplay.cpp
   src/Prizes.cpp
   src/SessionPrizes.cpp
+  src/SpecialObjects.cpp
   src/Autopilot.cpp
   src/ModelCache.cpp
   src/LevelScene.cpp
+  src/ObjectEffects.cpp
   src/Billboard.cpp
   src/PrizeScene.cpp
   src/PrizeHud.cpp

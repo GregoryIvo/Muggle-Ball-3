@@ -120,6 +120,13 @@ float heldBallScale(const BatView& bat) {
     }
 }
 
+float ballScale(const BallView& ball, const BatView& bat) {
+    if (ball.held) {
+        return heldBallScale(bat);
+    }
+    return ball.stuck ? 1.0f : ball.appear;
+}
+
 Vec3 ballPosition(const BallView& ball, const BatView& bat, float lead) {
     if (ball.held || ball.stuck) {
         return ball.position + Vec3{batCarry(bat, lead), 0, 0};
@@ -135,7 +142,8 @@ PlayScene::PlayScene(ModelCache& cache, const MaterialLibrary& materials, const 
       flashTexture_(cache.texture(textures.find("Oreols/02.png"))),
       sparkTexture_(cache.texture(textures.find("Particles/PARTICLE.PNG"))),
       facing_(facingGameCamera()),
-      prizes_(cache, materials, textures, batMaterial(bat)) {
+      prizes_(cache, materials, textures, batMaterial(bat)),
+      effects_(cache, materials, textures) {
     update(session, {}, 0);
 }
 
@@ -143,6 +151,7 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
     time_ += seconds;
     level_.update(time_);
     level_.follow(session.scene());
+    effects_.update(session, events, seconds, level_, lead);
     prizes_.update(events, seconds);
 
     for (const GameEvent& event : events) {
@@ -164,9 +173,12 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
                 level_.hide(event.actor);
                 break;
             case EventType::BallLost: {
-                // It carries on along its path while it shrinks, turning as it did.
+                // It carries on along its path while it shrinks, turning as it did, from the size it was drawn at: a ball lost in a
+                // teleport (the Skull) was not drawn at all, and does not pop into view at the source.
                 const Roll roll = rolls_[event.ball];
-                vanishing_.push_back({event.position, event.velocity, roll.turn, roll.size, roll.look, 0});
+                if (roll.shown > 0) {
+                    vanishing_.push_back({event.position, event.velocity, roll.turn, roll.size * roll.shown, roll.look, 0});
+                }
                 rolls_.erase(event.ball);
                 break;
             }
@@ -217,9 +229,9 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
         Roll& roll = rolls_[ball.id];
         roll.size = ball.radius / kBallRadius;
         roll.look = look;
-        float scale = 1;
+        const float scale = ballScale(ball, session.bat());
+        roll.shown = scale;
         if (ball.held || ball.stuck) {
-            scale = ball.held ? heldBallScale(session.bat()) : 1.0f;
             roll.placed = false;
         } else {
             if (roll.placed) {
@@ -232,7 +244,7 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
             }
             roll.at = at;
             roll.placed = true;
-            if (yoyo && bat.visible) {
+            if (yoyo && bat.visible && !ball.away) {
                 prizes_.appendString(bat.position, at, items_);
             }
         }
@@ -247,6 +259,7 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
     for (const Explosion& explosion : explosions_) {
         addExplosion(explosion);
     }
+    items_.insert(items_.end(), effects_.items().begin(), effects_.items().end());
     prizes_.appendPrizes(session, lead, items_);
 
     night_ = session.nightLevel();
