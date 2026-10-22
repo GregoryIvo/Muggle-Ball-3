@@ -89,7 +89,7 @@ std::string meshFileName(std::string_view levelMeshName);
 // data means): every actor whose object names a mesh, cloth segments included,
 // draws its `frame` subtree (all root frames when no frame is named) at
 // model.globalTransform(node) * actor pose (the rigid one, see rigidTransform()). The exception is a cloth object's own
-// mesh, which is only a placeholder for the sail the cloth simulation will build.
+// mesh (a watermelon, "arbuz.x"), which is only a placeholder: the sail is the surface that ClothDraw builds from the particles.
 //
 // Which texture a primitive gets, in order:
 //   1. If the subtree uses at most one .x texture and the object's game material has

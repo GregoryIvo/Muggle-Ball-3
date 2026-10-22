@@ -119,8 +119,8 @@ struct Builder {
             return;
         }
         // Shadow casters and lights name no mesh, so they draw nothing. A cloth's mesh is always the
-        // placeholder "arbuz.x" (a watermelon, in all 22 cloths): the sail itself is a surface built
-        // from the cloth's particles, which comes with the cloth simulation, so it is not drawn yet.
+        // placeholder "arbuz.x" (a watermelon, in all 22 cloths) and is never drawn: the sail itself is a
+        // surface of the cloth's particles, which ClothDraw builds (docs/GAMEPLAY.md 20.4).
         if (!a.object->mesh.empty() && a.object->type != ObjectType::Cloth) {
             object(ref, *a.object);
         }

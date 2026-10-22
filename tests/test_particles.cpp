@@ -867,6 +867,19 @@ void testBrickEffects() {
     check(names(8).empty(), "bricks: dynamite (8) has the blast the level names");
     check(names(9) == "explosemeteor", "bricks: the meteor's class (9) is the ring on the floor");
     check(names(0).empty() && names(2).empty() && names(7).empty() && names(-1).empty() && names(10).empty(), "bricks: and nothing for a type that breaks nothing or that the data does not have");
+    // By material: the type's flash, but not for the island, which the footage shows sinking (any case), and not for no material.
+    GameMaterial shark, island, shuttlecock;
+    shark.name = "shark.jpg";
+    shark.exploseType = 3;
+    island.name = "Ostrov.jpg";
+    island.exploseType = 3;
+    shuttlecock.name = "volan";
+    shuttlecock.exploseType = 0;
+    check(explosionEffects(&shark).size() == 1 && explosionEffects(&shark)[0] == "exploseball", "bricks: a material goes off in its type's flash");
+    check(explosionEffects(&island).empty(), "bricks: the island (Ostrov.jpg, type 3) has none, as in the footage");
+    island.name = "ostrov.JPG";
+    check(explosionEffects(&island).empty(), "bricks: in any case");
+    check(explosionEffects(&shuttlecock).empty() && explosionEffects(static_cast<const GameMaterial*>(nullptr)).empty(), "bricks: the shuttlecock (type 0) and no material have none");
 }
 
 }  // namespace

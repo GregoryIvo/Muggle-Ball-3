@@ -95,7 +95,8 @@ struct WeaponRules {
     ProjectileRules bolt{.velocity = {0, -50, 0}, .radius = 0.49178f, .density = 10, .friction = 0.9f, .restitution = 0.5f,
                          .damage = 1, .dropsPrize = false};
     // A catch gives a burst of 2 or 3 bolts within 0.7 s at different places [M]; each is thrown `boltGap` after the one before, so
-    // that they strike one after another (each was visible for about 0.25 s) within that time though they fall for 0.3 to 0.6 s [I]
+    // that they strike one after another within that time though they fall for 0.3 to 0.6 s [I]. (The footage's bolts are on show for
+    // about 0.3 s each and overlap: V2 408.0 to 408.7, GAMEPLAY.md 18.12.)
     int boltBurstLeast = 2, boltBurstMost = 3;
     double boltGap = 0.2;
     // and more strikes later, up to about 12 s after the catch (8 and 12 s in V2, 0.5 s and 7 s after the caption in V1 level 2) [M,

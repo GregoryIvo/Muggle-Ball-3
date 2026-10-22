@@ -28,8 +28,10 @@ constexpr std::string_view kMeteorRing = "explosemeteor";   // the white ring on
 // It is at full strength for this long after the shot and then fades out by the time the rules drop it (WeaponRules::laserLife,
 // 0.45 s): in the footage it is full at 0.26 s, dim at 0.4 s and gone by 0.54 [M, V1 58.88 to 59.3, the shot at about 58.76].
 constexpr float kBeamHold = 0.25f;
-// A bolt of lightning is shown about 0.1 s [M: each of the five of V2 408.0 to 408.7], at full strength, and drops out in a few frames.
-constexpr float kBoltHold = 0.1f;
+// A bolt of lightning is shown about 0.3 s [M: the first of V2 408.0 to 408.7 is there from the start of the sheet to 408.24 and gone at
+// 408.27, the second shows from 408.27 to 408.63, at full strength for most of it, and the strikes overlap]: full strength, then a few frames
+// of fading. (The third study's "about 0.1 s" was a first reading of the same frames, GAMEPLAY.md 14.3.)
+constexpr float kBoltHold = 0.25f;
 constexpr float kBoltFade = 0.05f;
 // The ring lies on the water, wherever the meteor came down (on a brick it still shows on the water under it): the floor is at y 0 in
 // every level, and the file lifts a flat flash a little above what it lies on. It swells to its 10 units at the file's 50 units a second

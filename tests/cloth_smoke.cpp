@@ -7,7 +7,8 @@
 //        particle must be where its holder has it. Then a ball is shot at the middle of each sail, and the sail's touch must
 //        be reported by the lead actor's id; a holder that is taken away lets its pins go, and a sail that is taken away
 //        leaves the world. The table has, per level, the sails, their particles and pins, the furthest a particle got from where
-//        it was saved, the most a spring stretched, and the time of a fixed step. --print lists the particles after the time.
+//        it was saved, the most a spring stretched, and the time of a fixed step; the summary says what the pins are tied to (the mass
+//        of the holders: GAMEPLAY.md 20.1). --print lists the particles after the time.
 
 #include "mb/game/LevelCatalog.h"
 #include "mb/game/LevelLoader.h"
@@ -23,6 +24,7 @@
 #include <exception>
 #include <filesystem>
 #include <format>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -39,6 +41,9 @@ constexpr float kPinSlack = 0.05f;      // how near a pinned particle is to the 
 constexpr float kLowSail = 5.0f;        // a sail whose middle hangs lower than this already lies on a deck or a boat
 // The sails of the shipped levels: 22 of them, with 431 segments besides their own actors (453 particles), held by 84 joints.
 constexpr std::size_t kSails = 22, kParticles = 453, kPins = 84;
+// What the 84 pins are tied to: yards, masts and boats that weigh 1.07 to 67.99 (GAMEPLAY.md 20.1), not the 100,000 of a ship's hull: so it
+// is not a ratio of masses that rules a joint out (Jolt has no constraint that reaches a soft body's particle).
+constexpr float kLightestHolder = 1.0f, kHeaviestHolder = 70.0f;
 
 bool finite(Vec3 p) {
     return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z);
@@ -66,8 +71,9 @@ float mostStretch(const ClothPlan& cloth, const std::vector<Vec3>& now) {
 }
 
 struct Report {
-    std::size_t sails = 0, particles = 0, pins = 0;
+    std::size_t sails = 0, particles = 0, pins = 0, onWorld = 0, onFixed = 0;
     float drift = 0, stretch = 0;
+    float lightest = std::numeric_limits<float>::infinity(), heaviest = 0;  // the mass of what the dynamic holders are
     double stepMs = 0;
 };
 
@@ -83,6 +89,16 @@ bool standAlone(const Level& level, const MaterialLibrary& materials, float seco
     for (std::size_t i = 0; i < cloths.size(); ++i) {
         report.particles += cloths.plan(i).actors.size();
         report.pins += cloths.plan(i).pins.size();
+        for (const ClothPin& pin : cloths.plan(i).pins) {
+            if (pin.holder == kNoActor) {
+                ++report.onWorld;
+            } else if (scene.plan().actors[pin.holder].motion != MotionType::Dynamic) {
+                ++report.onFixed;
+            } else if (const BodyId body = scene.body(pin.holder); body != 0) {
+                report.lightest = std::min(report.lightest, scene.world().mass(body));
+                report.heaviest = std::max(report.heaviest, scene.world().mass(body));
+            }
+        }
         if (!cloths.alive(i)) {
             why = std::format("sail {} has no body", i);
             return false;
@@ -211,9 +227,9 @@ bool letsGoAndLeaves(const Level& level, const MaterialLibrary& materials, std::
 
 int run(const MaterialLibrary& materials, const LevelCatalog& catalog, float seconds, bool print, const char* only) {
     int failed = 0;
-    std::size_t sails = 0, particles = 0, pins = 0, levels = 0;
+    std::size_t sails = 0, particles = 0, pins = 0, levels = 0, onWorld = 0, onFixed = 0;
     double stepMs = 0;
-    float drift = 0, stretch = 0;
+    float drift = 0, stretch = 0, lightest = std::numeric_limits<float>::infinity(), heaviest = 0;
     std::printf("%-26s %5s %9s %5s %7s %8s %8s\n", "level", "sails", "particles", "pins", "drift", "stretch", "ms/step");
     for (const LevelEntry& entry : catalog.levels()) {
         if (only && entry.name.find(only) == std::string::npos) {
@@ -238,6 +254,10 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, float sec
         sails += report.sails;
         particles += report.particles;
         pins += report.pins;
+        onWorld += report.onWorld;
+        onFixed += report.onFixed;
+        lightest = std::min(lightest, report.lightest);
+        heaviest = std::max(heaviest, report.heaviest);
         stepMs += report.stepMs;
         drift = std::max(drift, report.drift);
         stretch = std::max(stretch, report.stretch);
@@ -246,6 +266,13 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, float sec
                 "spring stretched is %.0f %% of its length; a fixed step took %.3f ms on average over the levels, with the sails in them\n",
                 sails, particles, pins, static_cast<double>(drift), static_cast<double>(stretch) * 100,
                 stepMs / static_cast<double>(std::max<std::size_t>(levels, 1)));
+    std::printf("the pins are on the world (%zu), on bodies that are not dynamic (%zu) and on dynamic ones of %.2f to %.2f in mass\n", onWorld,
+                onFixed, static_cast<double>(lightest), static_cast<double>(heaviest));
+    if (!only && !(lightest >= kLightestHolder && heaviest <= kHeaviestHolder)) {
+        std::printf("FAIL all: the pins' dynamic holders weigh %.2f to %.2f, not %.1f to %.1f\n", static_cast<double>(lightest),
+                    static_cast<double>(heaviest), static_cast<double>(kLightestHolder), static_cast<double>(kHeaviestHolder));
+        ++failed;
+    }
     if (!only && (sails != kSails || particles != kParticles || pins != kPins)) {
         std::printf("FAIL all: the shipped levels have %zu sails of %zu particles held by %zu pins, not %zu of %zu held by %zu\n",
                     kSails, kParticles, kPins, sails, particles, pins);

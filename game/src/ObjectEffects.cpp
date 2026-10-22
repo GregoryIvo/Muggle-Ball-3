@@ -35,7 +35,8 @@ constexpr float kPortalFloor = 0.05f;
 
 // A firework rocket: its trail is Trail.xml's TrailOrange (the one with a scatter and the colours of a flame; TrailBlue is for the
 // bat's rocket [I]), put out from the rocket's tail; its burst is one of the six of Fireworks.xml, chosen by where and when it
-// went off [D, I].
+// went off [D, I]. The rocket's `particles1="trail"` is the file alone, which the library reads as the file's first definition,
+// TrailBlue: the game overrides its own rule here (docs/GAMEPLAY.md 19.6) [I].
 constexpr std::string_view kRocketTrail = "Trail/TrailOrange";
 constexpr std::string_view kBurstFile = "Fireworks";
 

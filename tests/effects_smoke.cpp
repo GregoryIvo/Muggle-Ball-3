@@ -182,10 +182,12 @@ void testBricks(Renderer& renderer, mb_app::Assets& assets) {
         e.material = assets.materials.find(material);
         return e;
     };
+    // The island is exploseType 3 like the shark, and goes with no flash: the footage shows it sinking with bubbles (GAMEPLAY.md 19.5); the
+    // shuttlecock (volan) is type 0.
     const struct {
         const char* material;
         const char* file;  // empty: none
-    } cases[] = {{"shark.jpg", "exploseball"}, {"plitka.jpg", "explosesmall"}, {"Pirat1.jpg", ""}, {"Dinamit.jpg", ""}};
+    } cases[] = {{"shark.jpg", "exploseball"}, {"plitka.jpg", "explosesmall"}, {"Pirat1.jpg", ""}, {"Dinamit.jpg", ""}, {"Ostrov.jpg", ""}, {"volan", ""}};
     for (const auto& c : cases) {
         const GameMaterial* material = assets.materials.find(c.material);
         check(material != nullptr, std::string("bricks: the material ") + c.material + " exists");

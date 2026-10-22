@@ -320,8 +320,10 @@ void testBeamsAndBolts() {
           "bolt: between the target and the top edge of the screen above it");
     bolt.run(0.1);
     check(quadsOfFile(bolt.particles, "Lightning") > 0, "bolt: it is there at 0.1 s");
-    bolt.run(0.1);
-    check(quadsOf(bolt.particles).empty(), "bolt: and gone by 0.2 s (about 0.1 s full and a few frames of fading)");
+    bolt.run(0.15);
+    check(quadsOfFile(bolt.particles, "Lightning") > 10, "bolt: and at 0.25 s, still whole (the footage's bolts are on show about 0.3 s, GAMEPLAY.md 18.12)");
+    bolt.run(0.15);
+    check(quadsOf(bolt.particles).empty(), "bolt: and gone by 0.4 s (0.25 s full and a few frames of fading)");
     Show above;
     above.step({event(EventType::BoltStruck, PrizeKind::Thunderbolt, {3, 30, 4}, {3, 25, 4})});
     check(quadsOf(above.particles).empty(), "bolt: a target above the top edge of the screen has no lightning to see");

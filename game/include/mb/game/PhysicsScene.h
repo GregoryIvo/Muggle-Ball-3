@@ -165,9 +165,10 @@ inline constexpr float kSupportGap = 0.15f;
 class PhysicsScene {
 public:
     // The 84 joints that hold a cloth's corners (75 ball joints and 9 fixed ones, on ships, boats and plots) are not
-    // made as joints: a sail is one cloth body (ClothSet) whose pinned particles follow what the joints tied them to (a
-    // joint between a particle of 5 grams and a mast of 100,000 is a ratio of masses that no solver holds). Everything
-    // else of the plan is built. The actors that follow a path (docs/LEVEL_FORMAT.md, "Path motion") start on it.
+    // made as joints: a sail is one cloth body (ClothSet) whose pinned particles follow what the joints tied them to (Jolt
+    // has no constraint that reaches a soft body's particle: its own way is a particle of no mass that the game moves; the
+    // holders are yards and masts of 1 to 68 mass, so it is not the weight of a particle of 5 grams that rules a joint out,
+    // docs/GAMEPLAY.md 20.1). Everything else of the plan is built. The actors that follow a path (docs/LEVEL_FORMAT.md, "Path motion") start on it.
     PhysicsScene(const Level& level, const MaterialLibrary& materials, const PhysicsOptions& options = {},
                  const PhysicsSettings& settings = {});
 

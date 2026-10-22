@@ -622,6 +622,13 @@ void testSpawnsAndVelocities() {
               "kernel: half a second on it falls (a lob) and has lost none of its speed along the board");
         const std::optional<GameEvent> fired = g.first(EventType::ShotFired);
         check(fired && fired->material == materials().find("bat_kernel") && near(fired->velocity.z, 40), "kernel: the event says what was fired");
+        // It comes down on level ground 0.82 s after it left, about 35 units from the bat and 14 to 15 up the board (docs/GAMEPLAY.md 18.3).
+        check(g.runUntil([&] { return g.count(EventType::ProjectileHit) > 0; }, 2), "kernel: it comes down on the board");
+        if (const std::optional<GameEvent> hit = g.first(EventType::ProjectileHit)) {
+            const float reach = hit->position.z - bat.z;
+            check(reach > 34.0f && reach < 37.0f && hit->position.z > 13.0f && hit->position.z < 16.0f,
+                  "kernel: it lands about 35 units from the bat, at z " + std::to_string(hit->position.z) + " (" + std::to_string(reach) + " on)");
+        }
     }
     {  // the bazooka: (0.006, 1.406, 4.791), (0, 0, 52.5), straight
         Game g(levelOf({board()}));

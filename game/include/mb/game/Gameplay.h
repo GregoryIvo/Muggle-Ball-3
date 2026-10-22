@@ -111,8 +111,9 @@ struct GameplayRules {
     // What the look cannot tell: a piece that stays up where the physics left it (a mast held by joints that no longer
     // hold it, a cactus that came to rest 10 cm above the ball's reach) is a target nobody can hit. When balls have been in
     // flight this long without touching any brick and no more than stallMost targets, or stallShare of those the level
-    // began with, are left, they are let go and the level ends. The autopilot's runs that stood still (14 of the 60 levels
-    // it finished in 900 s, 8 of which it would not have finished without this) did so with 1 to 6 targets left [?].
+    // began with, are left, they are let go and the level ends. The autopilot's runs that stood still (9 of the 71 levels
+    // it finished in 900 s, 3 of which it would not have finished without this, docs/GAMEPLAY.md section 12) did so with 1 or 2
+    // targets left [?].
     double stallSeconds = 90;
     int stallMost = 12;
     float stallShare = 0.25f;
@@ -169,7 +170,7 @@ struct SessionOptions {
     // Bricks is the default: the rule the footage shows (a level ends when the last brick or tree is gone, moving or not,
     // with metal, portals and cannons still on the board). The autopilot's numbers for it are in docs/GAMEPLAY.md section
     // 12 (tests/gameplay_smoke.cpp counts them), but it cannot finish a level that has a target out of the ball's reach
-    // (above it on a support that stays, or beyond the walls: 43 of the 83 have, most of them knight boards), so a target
+    // (above it on a support that stays, or beyond the walls: 44 of the 83 had one by the end of a 900 s run, most of them knight boards), so a target
     // the ball cannot get at is not one: see ignoreUnreachable.
     TargetRule levelEnd = TargetRule::Bricks;
     // A target does not count once the ball cannot get at it, so that no level ends up impossible to finish. The ball

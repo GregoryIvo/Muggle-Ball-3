@@ -169,9 +169,10 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
                 } else {
                     level_.hide(event.actor);
                 }
-                // The flash is the material's exploseType's: none for a pirate [M], and none for what a bolt of lightning destroyed [M].
-                if (event.material != nullptr && event.prize != PrizeKind::Thunderbolt) {
-                    for (const std::string_view effect : explosionEffects(event.material->exploseType)) {
+                // The flash is the material's exploseType's: none for a pirate [M], for an island that sinks [M] (explosionEffects), and
+                // none for what a bolt of lightning destroyed [M].
+                if (event.prize != PrizeKind::Thunderbolt) {
+                    for (const std::string_view effect : explosionEffects(event.material)) {
                         particles_.spawn(effect, event.position);
                     }
                 }
