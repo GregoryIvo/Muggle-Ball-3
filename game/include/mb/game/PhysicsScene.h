@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <set>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace mb {
@@ -137,6 +138,16 @@ inline constexpr float kBallRadius = 0.6f;
 inline constexpr std::uint64_t kTestBallData = kNoActor;
 inline constexpr std::uint64_t kGameBallData = std::uint64_t{kNoActor} - 1;
 inline constexpr std::uint64_t kBatData = std::uint64_t{kNoActor} - 2;
+inline constexpr std::uint64_t kProjectileData = std::uint64_t{kNoActor} - 3;
+
+// The kinds of body (BodyDesc::group) that tell what touches what. A level's actors are the default kind and touch everything
+// that does not leave them out. A projectile touches the level's actors and nothing else (not the balls, the bat, other
+// projectiles or the teleports, which weapons ignore: docs/GAMEPLAY.md section 18.2).
+inline constexpr std::uint32_t kKindLevel = 1;
+inline constexpr std::uint32_t kKindBall = 2;
+inline constexpr std::uint32_t kKindBat = 4;
+inline constexpr std::uint32_t kKindProjectile = 8;
+inline constexpr std::uint32_t kKindPortal = 16;
 
 // How far under its lowest points a body may have the surface it rests on and still count as supported by it: the
 // levels were saved with bricks above what holds them (320 dynamic bodies, by 8 mm to 15 cm, 175 of them by more than
@@ -238,6 +249,16 @@ public:
     // its body (0 if the world refused).
     BodyId addBat(Vec3 position, float radius);
 
+    // A projectile (a bullet, a cannonball, a rocket, a thunderbolt, a meteor): a dynamic body of one shape in `pose` (the shape's own
+    // placement is `shape.localPose`) with continuous collision, `velocity`, no turning, and gravity if `gravity`. The material is
+    // the shape's; its mass its volume times `density`. It touches the level's actors only (kKindLevel; see kKindProjectile), and
+    // carries kProjectileData, so that its first contact shows in contacts() with the actor in the other slot; the caller takes it
+    // out at that contact with removeProjectile(). It pushes what it meets as its momentum says. Returns its body (0 if the world
+    // refused).
+    BodyId addProjectile(const Mat4& pose, const PhysicsShape& shape, Vec3 velocity, bool gravity, float density);
+    // Takes a projectile out of the world.
+    void removeProjectile(BodyId body);
+
     // Actors a test ball has touched, counting from the start.
     const std::set<ActorIndex>& touchedByBalls() const { return touched_; }
 
@@ -252,6 +273,7 @@ private:
     PhysicsMaterial ballMaterial_;
     float ballDensity_ = 1;
     std::vector<Ball> balls_;
+    std::vector<std::pair<BodyId, float>> projectileMasses_;  // the projectiles in the world, for what a hit of one breaks
     std::vector<ContactEvent> contacts_;
     std::set<ActorIndex> touched_;
     PathPlayer paths_;
@@ -274,7 +296,7 @@ private:
     std::vector<std::size_t> broken_;
 
     bool isActor(std::uint64_t userData) const { return userData < plan_.actors.size(); }  // else a ball or the bat
-    float massOf(std::uint64_t userData) const;  // infinity for what a hit cannot move
+    float massOf(std::uint64_t userData, BodyId body) const;  // infinity for what a hit cannot move
     void breakByHit(const ContactEvent& contact);
     void breakJoint(std::size_t planJoint);
     void releaseJoint(std::size_t planJoint);  // the joint is gone: its bodies wake, or one asleep would hang

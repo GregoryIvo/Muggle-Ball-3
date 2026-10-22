@@ -243,7 +243,7 @@ almost nothing on the walls. Against a typical brick (0.5) the pair gives 0.75.
 
 ## 4. Bullets (`Bullets/*`, three in `Interactive/`)
 
-Shapes, offsets, velocities and flags are **data**; readings are marked.
+What the game does with them is in `GAMEPLAY.md` section 18 (step 5). Shapes, offsets, velocities and flags are **data**; readings are marked.
 Positions are in the owner's space (the bat's, for the first four). The machine-gun, cannon and rocket offsets are all at z >= 3.07, in front
 of the paddle (z 3.0); the laser's capsule is at the origin (0, 1, 0), the
 mesh-less template of a bolt that the game places at the laser barrel

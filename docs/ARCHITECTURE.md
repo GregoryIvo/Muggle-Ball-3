@@ -157,7 +157,7 @@ for (const GameEvent& e : session.takeEvents()) { /* BrickHit, BrickDestroyed, B
 | What | Where |
 |---|---|
 | Every number the rules use, each with its source in `GAMEPLAY.md` and how well it is known | `GameplayRules` |
-| What happens, for the sound and the look | `GameEvent`: `BallLaunched`, `BatHit`, `BoardHit`, `BallsHit`, `BrickHit`, `BrickDestroyed`, `ActorFell`, the special objects' `DynamiteBlast`, `CannonFired`, `ShotHit`, `RocketLaunched`, `RocketBurst`, `BallEntered`, `BallEmerged`, then `BallLost`, `LifeLost`, `BatLeft`, `BatEntered`, `LevelComplete`, `GameOver` |
+| What happens, for the sound and the look | `GameEvent`: `BallLaunched`, `BatHit`, `BoardHit`, `BallsHit`, `BrickHit`, `BrickDestroyed`, `ActorFell`, the special objects' `DynamiteBlast`, `CannonFired`, `ShotHit`, `RocketLaunched`, `RocketBurst`, `BallEntered`, `BallEmerged`, the weapons' `ShotFired`, `ProjectileHit`, `LaserBeam`, `BoltStruck` and the like (section 18), then `BallLost`, `LifeLost`, `BatLeft`, `BatEntered`, `LevelComplete`, `GameOver` |
 | Which bricks are hurt, and which must go for the level to end | `canBeDamaged`, `isTarget`, `TargetRule` (the default `Bricks`, every brick and tree whatever its motion, is the rule of the footage, `GAMEPLAY.md` "Rules settled by the second study"; `BrickType`, H-type of `OBJECTS.md`, is refuted and kept for comparing and for tests; chosen in `SessionOptions::levelEnd`); targets out of the ball's reach do not count (below) |
 | The cursor as a bat position | `cursorOnPlane`, `batTargetX` |
 | A player that needs no hands | `Autopilot`, `autoplay()` (returns the events; `mb_gameplay_smoke --log <level>` prints them) |
@@ -190,6 +190,16 @@ the rockets, the balls in teleports, the vibros). It reports through the session
 (`BallView::away`, `appear`). Its numbers are `SpecialObjectRules` in `GameplayRules::objects`. `canBeDamaged` says which objects something can
 hurt (not the teleports), `SpecialObjects` which of them the ball does not (`GAMEPLAY.md` 17.1). It has its own tests: `mb_special_object_tests` on
 made-up levels and `mb_special_object_smoke` on the real ones.
+
+The four weapons and the two strike prizes are the rules of `Weapons` (`game/Weapons.h`, `GAMEPLAY.md` section 18), another member of `GameSession` that
+is its friend: a click that launches no ball and frees none fires one shot of `weapon()` (`fire`), the catch of a Thunderbolt or a Meteorite Rain
+schedules its strikes (`startStrike`) and once a fixed step it settles what the projectiles touched (`update`). A projectile is a body of the
+session's `PhysicsScene` (`addProjectile`, kind `kKindProjectile`, which touches the level's actors only: `BodyDesc::group` and `collidesWith`
+in the engine) that is taken out at its first contact; the laser is a line, resolved at the shot with `PhysicsWorld::raycastAll`. What a hit does to an object goes
+through `SpecialObjects::weaponHit` and `burst`, so the rules of 17.1 are in one place. The picture reads `GameSession::projectiles()` and
+`laserBeams()` and the events `ShotFired`, `ProjectileHit`, `ProjectileExploded`, `ProjectileGone`, `LaserBeam`, `BoltStruck`, `MeteorFalling` and
+`MeteorImpact`. Its numbers are `WeaponRules` in `GameplayRules::weapons`. Tests: `mb_weapon_tests` on made-up levels, `mb_weapon_smoke` on the real ones; the
+`Autopilot` fires its weapon at what stands ahead of the bat.
 
 What falls off the board stops being a target and is taken out (`ActorFell`), with no points and no explosion
 (`GameplayRules::fallLimitY`, `fallScores`): loose pieces are destroyed by weapons and blasts, not by falling.

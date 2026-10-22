@@ -165,16 +165,23 @@ void SpecialObjects::update(GameSession& session) {
 
 // ---- Damage
 
-bool SpecialObjects::strike(GameSession& session, ActorIndex actor, Vec3 at, int damage, double fuse) {
+bool SpecialObjects::strike(GameSession& session, ActorIndex actor, Vec3 at, int damage, double fuse, bool dropsPrize) {
     GameSession::Brick& brick = session.bricks_[actor];
     bool hurt = false;
-    for (int hit = 0; hit < damage && session.hitBrick(actor, at, 0, -1); ++hit) {
+    for (int hit = 0; hit < damage && session.hitBrick(actor, at, 0, -1, dropsPrize); ++hit) {
         hurt = true;
     }
-    if (kindOf(actor) == Kind::Dynamite && brick.exploding) {  // a charge a blast reaches goes off at the next link at the latest
+    if (fuse > 0 && kindOf(actor) == Kind::Dynamite && brick.exploding) {  // a charge a blast reaches goes off at the next link at the latest
         brick.explodeAt = std::min(brick.explodeAt, session.time_ + fuse);
     }
     return hurt;
+}
+
+bool SpecialObjects::weaponHit(GameSession& session, ActorIndex actor, Vec3 at, int damage, bool dropsPrize) {
+    if (actor >= kinds_.size() || !session.bricks_[actor].damageable || session.bricks_[actor].removed) {
+        return false;
+    }
+    return strike(session, actor, at, damage, 0, dropsPrize);
 }
 
 void SpecialObjects::blast(GameSession& session, ActorIndex source, Vec3 centre, float radius, float power) {
@@ -185,7 +192,11 @@ void SpecialObjects::blast(GameSession& session, ActorIndex source, Vec3 centre,
     event.position = centre;
     event.speed = radius;
     session.emit(event);
+    burst(session, source, centre, radius, power, rules_.blastDamage, true);
+}
 
+void SpecialObjects::burst(GameSession& session, ActorIndex source, Vec3 centre, float radius, float power, int damage,
+                           bool dropsPrize) {
     const PhysicsScene& scene = session.scene_;
     for (ActorIndex actor = 0; actor < kinds_.size(); ++actor) {
         const ActorPlan& plan = scene.plan().actors[actor];
@@ -206,7 +217,7 @@ void SpecialObjects::blast(GameSession& session, ActorIndex source, Vec3 centre,
             push(session, actor, centre, 1 - distance / radius, power);
         }
         if (session.bricks_[actor].damageable && !session.bricks_[actor].removed) {
-            strike(session, actor, centreOfBox(box), rules_.blastDamage, rules_.chainDelay);
+            strike(session, actor, centreOfBox(box), damage, rules_.chainDelay, dropsPrize);
         }
     }
 }

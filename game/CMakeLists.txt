@@ -14,6 +14,7 @@ add_library(mb_game
   src/Prizes.cpp
   src/SessionPrizes.cpp
   src/SpecialObjects.cpp
+  src/Weapons.cpp
   src/Autopilot.cpp
   src/ModelCache.cpp
   src/LevelScene.cpp

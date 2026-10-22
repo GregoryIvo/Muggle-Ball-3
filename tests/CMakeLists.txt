@@ -157,6 +157,19 @@ add_executable(mb_special_object_smoke special_objects_smoke.cpp)
 target_link_libraries(mb_special_object_smoke PRIVATE mb_game)
 add_test(NAME mb_special_object_smoke COMMAND mb_special_object_smoke)
 set_tests_properties(mb_special_object_smoke PROPERTIES SKIP_RETURN_CODE 77)
+# The weapons and the strikes of the prizes (the click that fires, the projectiles, the laser, the Thunderbolt and the Meteorite Rain) on made-up
+# levels. CPU only.
+add_executable(mb_weapon_tests test_weapons.cpp)
+target_link_libraries(mb_weapon_tests PRIVATE mb_game)
+add_test(NAME mb_weapon_tests COMMAND mb_weapon_tests)
+
+# The weapons and the strikes of all converted levels, played by the autopilot with the click held down, when MB3_ASSETS points at the data; exits
+# 77 (skipped) otherwise.
+add_executable(mb_weapon_smoke weapon_smoke.cpp)
+target_link_libraries(mb_weapon_smoke PRIVATE mb_game)
+add_test(NAME mb_weapon_smoke COMMAND mb_weapon_smoke)
+set_tests_properties(mb_weapon_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
 # The prizes: what drops, how it falls and is caught, and what each of the 28 does, on made-up levels. CPU only.
 add_executable(mb_prize_tests test_prizes.cpp)
 target_link_libraries(mb_prize_tests PRIVATE mb_game)

@@ -409,6 +409,13 @@ crate of `Box.jpg` and the firework crate that falls into the gap (17.1), is slo
 100 of 118 targets are left at 900 s; the rest vary with the paths the ball takes. With the prizes as well (section 15) the run finishes
 **68 of 83**, 53 by destroying every target and 15 by the stall rule; the Next Level star ended 22 of them. Of the 15 left open, 13 were boards with 8
 to 121 targets left and 2 (`knight-nazad-k-mame`, `Piratos-Ygoshenia`) had one.
+With the weapons as well (section 18: the autopilot clicks every frame while it holds a weapon and something it can hurt is the first thing in the line of a barrel, which the
+shot interval holds to four or five shots a second) the run finishes **75 of 83**, 60 by destroying every target and 15 by the stall rule (it was 68, 53 and 15); the Next Level
+star ended 31 of them (it was 22). The bat caught 135 weapon prizes and 27 of the Thunderbolt and the Meteorite Rain, and the autopilot fired 463 Machine Gun, 228 Cannon, 375 Bazooka
+and 15 Laser shots, so that 129 bolts and 5 meteors struck. 2,054 prizes dropped, 707 were caught, and the look at what the ball can reach put 160 targets out of play (it was 180). Of the 8 left open, 6 were boards with 44 to 91 targets left (`knight-fruktovie-derevia`,
+`knight-na-kacheli`, `Piratos-Logovo`, `Village-Basketball`, `Village-Cafe`, `village-domino`) and 2 had 3 and 6 (`village-school`, `knight-na-mostike`). The smoke's check that a
+ball in flight moves 0.3 units in a window was widened from 2 s to 4 s for it: in `Piratos-Ygoshenia` a ball in a pocket of ground blocks of three energy was freed twice, a second
+apart, into the same pocket before the blocks it hurt gave way.
 
 ## 13. Moving sharks and birds (step 5)
 
@@ -572,7 +579,7 @@ F1 `V1-t1013.20-1014.23-L10-firework-crate-ball-passes-rocket-leaves-0.7s-later`
 
 F26 and F49 are plots drawn from the tracked positions (not screenshots).
 
-### 14.7 Still open (answered for the game in 17.8)
+### 14.7 Still open (answered for the game in 17.8; the weapons' and strikes' items in 18.9)
 
 - Spring: does it kick the ball or just bounce it, and does one hit destroy it (energy 1, 10 points)? Only a graze at 2.6 u (V1 2634.0, level 24) was seen. A clean hit in one of the 21 levels (22, 25, 28, 33, 38, 46 and the cowboys levels have springs near walls or the near half) would settle it.
 - Interactive cannon: how many hits destroy it (energy 2), what damage the cannonball does and how far it flies (a lob with y velocity 3 under gravity would land at about 23 u), whether a very slow ball or a bat shot fires it, and whether a cannon ever fires on a timer (none in 28 s).
@@ -640,15 +647,15 @@ A **timed** effect starts over from its full time when the prize is caught again
 | Earthquake | 3 s. Every 0.1 s each dynamic body, asleep or not, gets a kick of up to 0.5 u/s sideways (x and z) and 1 u/s up [I]; nothing for the camera |
 | Wind | 5 s. Every dynamic body that is awake is accelerated 2.5 u/s^2 along x, to the left or the right (drawn when it is caught); resting pieces and the balls are left alone [I: the footage shows nothing] |
 | Surprise | an instant gift: a random **good** prize that is no Surprise and no Next Level, by the same weights, announced as a second `PrizeCaught` worth 0 [?] |
-| Machine Gun, Cannon, Bazooka, Laser | 12, 6, 7 and 5 shots (`weapon()`, `shotsLeft()`, `useShot()`). The weapons are for wave 3: a weapon is granted and counted, nothing fires. The weapon caught last is the one a click fires; the others keep their shots, as the footage's HUD shows two at once (V2 108-117); the effect ends with its last shot |
-| Thunderbolt, Meteorite Rain | `StrikeGranted` with the prize; the strikes are for wave 3 |
+| Machine Gun, Cannon, Bazooka, Laser | 12, 6, 7 and 5 shots (`weapon()`, `shotsLeft()`, `useShot()`). The weapon caught last is the one a click fires (section 18); the others keep their shots, as the footage's HUD shows two at once (V2 108-117); the effect ends with its last shot |
+| Thunderbolt, Meteorite Rain | `StrikeGranted` with the prize, and the strikes begin (18.5, 18.6) |
 
 When the **bat is lost** (the last ball, or the Skull) every effect of the bat and the ball ends (`EffectEnded`) and the next bat is plain; the night, the quake and the wind run on, and so does the speed. Timed effects end with the level, which is a new session.
 
 ### 15.4 What the presentation reads
 
 - `fallingPrizes()` (`FallingPrize`: kind, position of the orb, age, source), `activeEffects()` (`ActiveEffect`: kind, `timeLeft`, `duration`, `shots`; those with `prizeInfo(kind).icon` go on the HUD, oldest first, as the number `ceil(timeLeft)` or `shots`), `weapon()`, `ballRadius()`, `ballSpeed()`, `batRadius()`, `batScale()`, `nightLevel()`, `BallView::stuck` and `radius`.
-- Events: `PrizeDropped`, `PrizeCaught` (prize, points, material), `PrizeMissed`, `EffectStarted`, `EffectEnded`, `StrikeGranted`, `BallStuck`, `Blast`; `SessionStats::prizesDropped/Caught/Missed`.
+- Events: `PrizeDropped`, `PrizeCaught` (prize, points, material), `PrizeMissed`, `EffectStarted`, `EffectEnded`, `StrikeGranted`, `BallStuck`, `Blast` (the weapons' and strikes' own are 18.8); `SessionStats::prizesDropped/Caught/Missed`.
 - `GameSession::dropPrize(kind, from)` starts a prize falling and `givePrize(kind)` applies one, for tests and tools.
 
 ### 15.5 The autopilot with the prizes
@@ -656,7 +663,7 @@ When the **bat is lost** (the last ball, or the Skull) every effect of the bat a
 `mb_gameplay_smoke --seconds 900`, each level played as the n-th of the campaign, the prizes on, the autopilot as before (the bat under the ball, no aim, 99 hearts; it clicks to let go of the Magnet and catches prizes only when they fall on the bat by chance):
 
 **71 of 83** levels finished (60 without the prizes): 54 by destroying every target and 17 only because the stall rule let go of the last few (it was 46 and 14), 12 not finished (6 knights', 5 village's and 1 pirates' boards, 1 to 116 targets left; 11 were still destroying bricks in the last 40 s, the 12th, knight-nazad-k-mame, with one target left, stood still for 37 s: slow, not stuck, as before). 2,063 prizes dropped (25 a level, as 14.7 % of about 170 destroyed objects), 709 caught (a third: the bat is under the ball, not under the prize) and 1,339 missed. The Next Level star fell in 66 of the 83 levels, was caught in 25 and ended 25 of the 71 finished (a player who goes for it ends most, section 14.4); the other 46 ended as before. The look at what the ball can reach puts 194 targets out of play (it was 151): a quake or a wind that throws a piece out of reach takes it out of the count, which is the rule working as meant. Three balls were freed from a pin in as many levels. Nothing broke: the ball keeps its speed (the session's, which the speed prizes move) and its plane after every frame, in every level.
-These numbers are without the special objects of section 17; with them the run finishes 68 of 83 (section 12).
+These numbers are without the special objects of section 17; with them the run finishes 68 of 83, and with the weapons of section 18 as well 75 of 83 (section 12).
 
 ## 16. Prizes on screen and in sound (step 5, stage 2)
 
@@ -691,7 +698,7 @@ The icons (`Hud.cpp`, `PrizeHud.h`): one for each effect in force that has one (
 | Multiball, Drunken Ball | the extra balls and the wobbling path are the session's |
 | Night | the scene's light is dimmed to 0.38 of itself at full night (`nightLevel()`), and the sky, the halos and the flashes, which have no light, to 0.49 [M, section 14.3]; the HUD, drawn over it, is not dimmed |
 | Earthquake, Wind | the session throws the loose pieces about, and that is all there is to see; the camera does not shake [M] |
-| the weapons | **not drawn yet**: the barrels (`Pulemet-*`, `Pushka`, `Bazuka-*`, `lazer-*`) are frames of `bat.x` that the game moves: in its `Common` animation each grows from a tenth of its size to full size in 0.6 s, recoils and shrinks again, and the glTF files keep that animation in `extras.animations` (`ASSET_FORMATS.md`). The picture of a weapon comes with the firing, which needs it |
+| the weapons | **not drawn yet**: their firing is section 18 and their picture the next stage's. The barrels (`Pulemet-*`, `Pushka`, `Bazuka-*`, `lazer-*`) are frames of `bat.x` that the game moves: in its `Common` animation each grows from a tenth of its size to full size in 0.6 s, recoils and shrinks again, and the glTF files keep that animation in `extras.animations` (`ASSET_FORMATS.md`) |
 
 ### 16.4 Sounds
 
@@ -719,12 +726,12 @@ What the game does with section 14. The rules are `SpecialObjects` (`game/Specia
 
 ### 17.1 What hurts what
 
-The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, one energy a blow, as before (section 5). The other special objects (cannons, springs, volcanoes, generators and metal) react to it and are hurt by other things: a blast (17.2), a cannonball (17.3) and whatever a weapon does through `GameSession::hit()` (the prizes, one energy a hit).
+The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, one energy a blow, as before (section 5). The other special objects (cannons, springs, volcanoes, generators and metal) react to it and are hurt by other things: a blast (17.2), a cannonball (17.3) and what a weapon does (the prizes: `SpecialObjects::weaponHit` and `burst`, one to three energy a hit by the projectile, 18.4).
 
 | object (in the 83 levels) | the ball | a blast, a cannonball | a weapon |
 |---|---|---|---|
 | dynamite (116) | sets it off: 0.1 s later (its `exploseDelay`) it goes, 120 points | the same, one fixed step later | the same |
-| cannon (21) | fires it, any touch; no damage | 2 energy: destroyed, 100 points | 1 energy |
+| cannon (21) | fires it, any touch; no damage | 2 energy: destroyed, 100 points | a bullet 1, a rocket 2, a kernel 3 (18.4); it does not fire it |
 | firework crate (63) | launches a rocket, any touch; a blow destroys it too, 120 points (17.5) | destroyed, 120 points | destroyed |
 | spring (21) | kicks it away; no damage | destroyed, 10 points | destroyed |
 | volcano (13), generators (43), metal (452) | bounces off; they make their `hit` sound | destroyed, 10, 77 or 66 and 50 points | destroyed |
@@ -759,7 +766,7 @@ The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, on
 - **What leaves it [D, M].** A cannonball of radius 0.59 [D, `yadro.XML`] from the muzzle, (1.99, 1.69, 0) in the cannon's frame, with the velocity (30, 3, 0) in that frame [D; measured 29.4 to 33.3 units/s]: along the cannon's own +x, whatever way the level turned it (the three of level 51 face +z).
 - **Its flight [I].** A lob under the level's gravity: it falls 0.87 s after leaving a cannon on the floor and lands about 26 units on (the footage's tracked flights, 0.3 to 0.7 s, show no arc over 20 units, which this does not show either). It is swept by five rays (the middle and the rim) and bursts on the first actor it meets; balls and the bat it goes through; after 3 s it is gone.
 - **What it does [M for the destroyed, I for the rest].** On impact the target is struck `cannonballDamage` (2) times, so what has one or two energy goes, a cannon of two included (a cannon is "not consumed" by the ball, 17.1), a charge it hits goes off at the next link (V1 6446.8: the chain went off, F17); a loose target is pushed (the two leave together: momentum is kept, the ball's mass 8.65 is its volume times `Telega1.jpg`'s density 10); a cannon it hits and does not destroy fires. A burst of `Oreols/11.png` 10 units across for 0.5 s [D, `exploseyadro`].
-- **Hits to destroy [I].** The ball never does. A cannonball or a blast does at once (damage 2 against its energy 2), and a weapon takes it in two hits.
+- **Hits to destroy [I].** The ball never does. A cannonball or a blast does at once (damage 2 against its energy 2), and a weapon takes two bullets, or a rocket or a kernel (18.4).
 - **Not required [M].** `canBeDamaged` yes, a target no (second study, "Settled", 3).
 - **Sound.** `brick_cannon_shoot` (`br_cannon.ogg`), at the muzzle; the flash and a puff of smoke there.
 
@@ -820,3 +827,138 @@ The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, on
 | `vibroPeriod`, `vibroBob`, `vibroTiltDegrees` | 2.4 s, 0.1, 6 | M, M, I |
 
 What is tested: `mb_special_object_tests` (made-up levels: the blast, its reach and radius, a chain that stops at a gap, 25 charges in a block, what the ball does not hurt and a blast takes, the cannon in two orientations with its flight, cooldown and debris, the teleports with their timing, angle, seed and shared exit, the crate's rocket after a brush and after a blow, the crate that stands in a gap, the stall rule among metal, the spring's kick, the vibro's period, the end of a level with all of it standing) and `mb_special_object_smoke` (the 71 real levels with such objects, played by the autopilot and poked: every charge, cannon, crate, spring and source; no pose or ball that is not finite, a chain that ends, every ball that went into a teleport comes out, every rocket bursts).
+
+## 18. Weapons and strikes as built (step 5, weapons)
+
+What the game does with the four weapons and the two strike prizes of sections 7 and 14.3 where the footage and the data leave room: the rules, with no picture and no sound (the barrels, the bullets, the beam, the lightning, the meteors and their sounds are the next stage's). Tags as before; `[I]` is a choice made where both are silent. The rules are `Weapons` (`game/Weapons.h`, `game/src/Weapons.cpp`), a member of `GameSession` that is its friend, called at three places of `Gameplay.cpp` and `SessionPrizes.cpp`: a click that no ball takes (`fire`), the catch of a Thunderbolt or a Meteorite Rain (`startStrike`) and once a fixed step after the contacts (`update`). Its numbers are `WeaponRules`, `GameplayRules::weapons` (18.10). The projectiles are bodies of the session's `PhysicsScene` (`addProjectile`); what they do to an object goes through `SpecialObjects::weaponHit` and `burst`, so that 17.1 stands. Tests: `mb_weapon_tests` (made-up levels), `mb_weapon_smoke` (the 83 levels), `mb_gameplay_smoke` (the autopilot fires what it has caught).
+
+### 18.1 Firing
+
+| rule | in the game |
+|---|---|
+| the trigger | a click (`GameInput::launch`: the mouse button going down, or Space) fires **one shot** of `weapon()`, the weapon caught last that has shots left; no auto-repeat. The footage's counts fall at irregular moments, so a press is the guess [M, I] |
+| what else a click does | one thing, in this order: it launches the ball held on the bat; else lets go of the balls the Magnet holds; else fires. A ball held on the bat is waiting for the click (section 4), and the Magnet's release is a click (15.3), so each keeps it, and the weapon needs one more: with both, the first click frees the balls and the second shoots [I] |
+| when | only with balls in play (`SessionPhase::Playing`) and the bat there. Not while the bat swoops in with the ball on it (`Entering`) or the ball waits (`Ready`), not after the last ball is lost (`Lost`: a weapon caught in those seconds does not fire either) and not once the level is won or the game over [I] |
+| the shot count | falls by one at the shot (`ShotFired`, then `GameSession::useShot()`), and the weapon's effect ends with the last (`EffectEnded` follows) [M]. A click that fires nothing (too soon, nothing armed, the world refused the body) costs no shot |
+| the interval | at least `shotInterval` = 0.2 s between two shots, whatever the weapon: the Machine Gun's own quickest, 4 to 5 shots a second [M, weak]; the others showed none (their quickest were 0.55 s, the Cannon, and 0.5 s, the Laser), so they share it [I] |
+| a new weapon | `weapon()` is the one caught last. **The earlier ones are not lost**: they keep their shots and fire again when the later one is spent, as the footage's HUD shows (the Cannon with 1 shot beside the Bazooka's 7, 6, 5, 3: V2 108-117, `special-V2-t108-117-hud-cannon-1-left-drunken-30s-bazooka-7-6-5-3`); a second catch of the same weapon adds its shots and makes it the weapon again. That is what `startEffect` (15.3) already did; `mb_weapon_tests` checks it |
+| where from | the barrels are frames of the bat's model, whose origin is on the floor under the centre of the bat's sphere and which is drawn `batScale()` times its size (16.3): a shot starts at the data's spawn point in that frame (x across, y up from the floor, z up the board), scaled with the bat [D for the points, I for the scale]. The bat's own speed is not added to the shot's [I] |
+
+### 18.2 Projectiles
+
+- Each is a **dynamic body** in the session's `PhysicsScene` (`PhysicsScene::addProjectile`): one sphere or capsule, continuous collision, never asleep, not turning, with gravity only where the data has no `disableGravity`. A capsule lies along z, the way it flies (the data's rotations turn its axis to z). The material is the data's [D]: density 5, friction 0.7, restitution 0.3 for the four `bat_*` materials, and 10, 0.9, 0.5 for `thunderbolt` and `meteor`; the mass is the volume times the density (a bullet 2.5, a rocket 5.1, a kernel 13.7, a bolt or a meteor 5.0).
+- **What it touches [I]**: the level's actors, nothing else. Not the balls, the bat, other projectiles or the teleports, and the prizes are no bodies. In the engine that is `BodyDesc::group` and `collidesWith` (a body touches another only when each one's `collidesWith` has the other's `group`; the defaults touch everything): the kinds are `kKindLevel`, `kKindBall`, `kKindBat`, `kKindProjectile` and `kKindPortal` (`PhysicsScene.h`), and the teleports are made `kKindPortal` that leaves `kKindProjectile` out (17.8: "only balls").
+- **Its first touch of an actor ends it.** The projectile is taken out of the world in that step and reports `ProjectileHit` (`BoltStruck`, `MeteorImpact`) with the actor and the contact point; the impulse of the contact has by then pushed what it met as its momentum says (a bullet of 2.5 at 30 sends a loose block of 30 off at about 3 units/s). A projectile that touches nothing is gone after `projectileLife` = 5 s, or when it is beyond +-80 or below -20, with `ProjectileGone`; the board's walls and floor are actors, so every shot ends in a hit in a closed level. A hit that begins at more than a joint's `maxForce` breaks it as any impact does (`JointBreaking::Impact`), with the projectile's own mass.
+- What ends the level ends them: once `LevelComplete` or `GameOver` comes, every projectile in the air is taken out (`ProjectileGone`) and no strike is thrown.
+
+### 18.3 The four weapons
+
+| weapon | shots | what leaves the bat (the bat's frame) | flies |
+|---|---|---|---|
+| Machine Gun | 12 | **two bullets** at x +-2.156, y 1.198, z 3.411, capsules of radius 0.4 and length 0.44 [D] | (0, 0, 30), no gravity [D]: 30 to 37 units/s measured [M]; to the far wall in about 1.3 s |
+| Cannon | 6 | one kernel, a sphere of radius 0.868 at (0, 1.704, 3.067) [D] | (0, 3, 40) **with gravity** [D] (-9.8): a lob that comes down on level ground after 0.82 s, about 15 units up the board, so it cannot reach the last 7 units of a board unless it hits something tall on the way [I from D]; the footage's 42.6 units/s is the part along z [M] |
+| Bazooka | 7 | one rocket, a capsule of radius 0.452 and length 1.0 at (0.006, 1.406, 4.791) [D] | (0, 0, 52.5), no gravity [D]; 54.5 measured [M]; to the far wall in 0.75 s |
+| Laser | 5 | a beam, no body (below) from the barrel at (0, 1.0, 2.91) [D] | the beam is full length within 0.1 s [M] |
+
+**The Laser's rule [I].** The footage has a thin beam that is full length within 0.1 s and fades in about 0.45 s (V2 62.78-63.26), that killed planks with the ball far away (V1 59.25, 90.2 to 91.2) and two of them at once (+34 and +34, V1 59.2-59.37), and a pirate of three energy that survived one (V2 62.9). Hence:
+- the beam is **resolved at the shot**, a line along +z from the barrel, three rays 0.15 apart (the data's capsules have the radius 0.15), at the height of the barrel;
+- it **pierces**: every actor it crosses that something can hurt (`canBeDamaged`) takes `laserDamage` = 1 energy, **once**, however many shapes of it the beam crosses: planks (one energy) die, a pirate (three) is left with two;
+- it **stops at the first actor that nothing damages** (a wall, the board, a solid piece of scenery, steel), at the point where it meets it (`LaserBeam::to`); with nothing in the way it reaches `laserRange` = 60. In the real levels that is the far wall or a platform;
+- the balls and the bat are no actors, and the **teleports are not there**: it goes through them;
+- it pushes nothing.
+`beams()` has it on show for `laserLife` = 0.45 s, growing to its length within `laserGrow` = 0.1 s [M] (what the picture does with the numbers is the next stage's).
+
+### 18.4 What a hit does
+
+Per projectile, the energy it takes off what it hits and its burst (`WeaponRules`, 18.10). **Decided [I], from the footage where it speaks:**
+
+| projectile | takes off the actor it hits | burst on impact |
+|---|---|---|
+| Machine Gun bullet | 1 | none |
+| Cannon kernel | 3 | radius 2.0: 1 off everything else damageable within it, and a push |
+| Bazooka rocket | 2 | radius 2.25: 1 off the rest within it, and a push |
+| Laser beam | 1, to each actor it crosses | none |
+| Thunderbolt's bolt | 1 | none |
+| Meteor | 2 | radius 2.0: 1 off the rest, and a push |
+
+- The footage fixes the least: a beam leaves a pirate of three alive [M] and a bolt does not kill one either: the pirate of V2 83.6-86.4 lived through a bolt and a blast and died to the next bolt, which is 1 + 1 + 1 [M, weak]. The order bullet, rocket, kernel (1, 2, 3) is [I]: the Cannon has 6 shots and a lob, the Bazooka 7 and a straight shot, the Machine Gun 12 shots of two bullets; the meteor takes two as a heavy thing falling from the sky.
+- **Bursts.** The rocket's is the footage's white-orange star 4 to 5 units wide [M], radius 2.25. The kernel's flash is about 3 units wide in the footage (F48), and the data's `exploseyadro` is 10 across, which is a radius of 2 for the dynamite's five-times rule (17.2); the rule takes the data's. The meteor's `explosemeteor` is 10 across too. A burst takes `blastDamage` = 1 off every damageable actor within its radius, the distance to the box round it, as the Explosive Ball does (15.3), but the one the projectile hit; a charge of dynamite in reach goes off at the next link (17.2). It pushes the loose bodies in reach away from its centre and up, as dynamite does at `blastPower` = 0.5 of its strength (up to 7 units/s at the centre).
+- **Through `SpecialObjects` (17.1)**, so nothing is done twice: `weaponHit(actor, at, damage, dropsPrize)` takes `damage` energy one at a time, `burst(struck, centre, radius, power, damage, dropsPrize)` is a burst, the law of the dynamite's blast. So **dynamite is set off by any projectile**, 0.1 s later (its `exploseDelay`) as for the ball, and its chain runs as in 17.2; a **cannon** of two energy takes two bullets, a rocket or a kernel, and is not set off by them; a **firework crate** is destroyed (120 points) and gives no rocket, since the ball did not light it (17.5); **springs, volcanoes, generators and metal** are destroyed for their points; the **teleports** are not damageable and the projectiles pass them; bricks and trees take the energy and a person or an animal shrinks away as ever. An object that is already exploding, shrinking or gone is not hurt again, and a projectile that meets one is spent on it all the same.
+- **Prizes: the data decides [D].** `disablePrize` is on `thunderbolt.XML` and `meteor.XML` and on none of the four weapons' bullets, so what a bullet, a kernel, a rocket or a beam destroys leaves a prize at the usual chance (15.1), and what a bolt or a meteor destroys leaves none (`GameSession::hit(actor, at, false)`). V2 81.0-81.5 saw a prize orb where a bolt struck, which does not fit; it stays open (14.7). The score is the destroyed object's own `brickScore`, as for anything the ball destroys.
+
+### 18.5 Thunderbolt
+
+| rule | in the game |
+|---|---|
+| a catch | `StrikeGranted`, then a **burst of 2 or 3 bolts** (drawn), thrown `boltGap` = 0.2 s apart from the catch, so that they strike one after another within 0.7 s [M], and `boltsLater` = 2 **more**, each at a moment drawn evenly between 2 and 12 s after the catch [M, weak: bolts at 8 and 12 s in V2, at 0.5 s and 7 s after the caption in V1 level 2]. A second catch adds another set |
+| the target | picked at random, at the moment the bolt is thrown, among the **standing bricks and trees**: damageable, and not gone, exploding or shrinking; whatever the level's end rule, and out of the ball's reach or not. Metal, cannons and the rest are spared (the Metall wall of V1 level 31 stood through five bolts, 14.2). With none left, a point of the field drawn evenly [I] |
+| the bolt | a sphere of radius 0.492 that **falls at 50 units/s** [D], straight down, from the top edge of the screen above the target's centre (18.7), so it falls 15 to 30 units: 0.3 to 0.6 s. It strikes the first actor under it, in practice the top of the target or of what stands over it, and takes one energy. It is a physics body like the rest, so it strikes whatever is under it when it arrives, which is not the target if that has moved [I] |
+| what it reports | `BoltStruck`: the actor, where it struck, and `end`, the point of the screen's top edge above it, where the picture draws the lightning from. If what it struck reaches above the top edge (a tall tower), `end` is below `position`: draw nothing, it is out of the picture |
+| prizes | none (disablePrize [D]) |
+| the seeds | `SessionOptions::prizeSeed` turned by a constant, SplitMix64, so that a game repeats exactly |
+
+### 18.6 Meteorite Rain
+
+About five meteors over five seconds [M] (rings at V2 860.5, 861.3, 863.1, 864.3): `meteors` = 5, one in each fifth of `meteorSpan` = 5 s, at a moment drawn within it. Each one:
+- aims at a **point of the field drawn evenly** (x +-18, z -10 to 20), since the footage shows the rings on the water and no brick [M, I], so the ones that happen to fall on something hurt it. The aim is where the sphere touches the water; the meteor flies along the line through that point with the velocity (-10, -30, 10) [D] and no gravity;
+- starts where that line crosses the top edge of the screen (18.7), a little beyond it, so it falls 20 to 30 units, 0.7 to 1.0 s at 33 units/s;
+- hurts what it touches first: 2 energy, then the burst of radius 2 that takes 1 off the rest. `MeteorImpact` has the actor: the water is the board's own actor, and the ring on it is the picture's;
+- leaves no prize (disablePrize [D]).
+
+### 18.7 Where from: the top edge of the screen
+
+The camera never moves (section 8: eye (0, 42.7, -58.5), target (0, 0, 2.7), vertical FOV 32.8 degrees), and the vertical FOV is fixed whatever the window's shape, so the top edge of the picture does not depend on the aspect. `screenTopHeight(below)` is the height at which the vertical line through a point leaves the picture at the top: **28 units up over the near end of the field (z -15), 23 over the middle (z 0), 16 over the far end (z 20)**. `screenTopPoint(target, direction)` is the point on the line through `target` with a direction (a meteor's) that is on the top edge. A bolt starts `offscreen` = 2 units above its edge, a meteor 2 units along its line beyond it, so neither is ever seen to appear. `mb_weapon_tests` checks both against the camera's own view and projection (NDC y of 1).
+
+### 18.8 What the presentation reads
+
+**State** (`GameSession::weapons()`, `projectiles()`, `laserBeams()`; a span like `fallingPrizes()`):
+- `Projectile`: `id`, `kind` (`Bullet`, `Kernel`, `Rocket`, `Bolt`, `Meteor`), `prize` (the weapon, or Thunderbolt or Meteor), `position` (its centre), `velocity`, `bornAt`, `age`, `barrel` (the Machine Gun's: 0 left, 1 right), `body`. Positions and velocities are those of the last fixed step; the picture carries them on by the lead as it does the balls'. In the order they left; at most a few dozen at a time (the smoke bounds it at 128).
+- `LaserBeam`: `from`, `to`, `firedAt`, `hits` (the actors it reached, the one that stopped it included). Gone after `laserLife`.
+- `Weapons::strikesPending()`, `Weapons::stats()` (shots, projectiles, hits, gone, beams, bolts, meteors, hurt).
+- Already there: `weapon()`, `shotsLeft()`, `activeEffects()` (the HUD's shot numbers), `batScale()`.
+
+**Events** (`GameEvent`, with the two new fields `end` and `count`; `material` is the projectile's game material: its `periodSound` is the shot's sound and its `deadSound` the impact's, `bat_bullet`, `bat_kernel`, `bat_rocket`, `bat_lazer`, `thunderbolt`, `meteor`):
+
+| event | fields |
+|---|---|
+| `ShotFired` | `prize` (the weapon), `position` (the muzzle: the middle of the barrels), `velocity` (of a projectile; none for the laser), `count` (shots left), `material`. One a shot, so one sound for the Machine Gun's pair |
+| `ProjectileHit` | `prize`, `actor` (what it touched: the board and what nothing damages too), `position`, `velocity` (its own), `material`. The laser reports one for each actor it reached |
+| `ProjectileExploded` | `prize`, `position`, `speed` (the burst's radius). Kernel and rocket, after their hit |
+| `ProjectileGone` | `prize`, `position`: it left the world, ran out of time, or the level ended |
+| `LaserBeam` | `position` (the barrel), `end` (the tip), `count` (the actors it reached), `material`. Before its `ProjectileHit`s and the damage |
+| `BoltStruck` | `actor`, `position` (where), `end` (the top edge above), `material` |
+| `MeteorFalling` | `position` (where it starts), `velocity`, `end` (where it will come down, on the water), `material`: at its start |
+| `MeteorImpact` | `actor` (the board's for the water), `position`, `material`, then its `ProjectileExploded` |
+
+Every projectile ends with exactly one of `ProjectileHit`, `BoltStruck`, `MeteorImpact` or `ProjectileGone`. The damage is the usual `BrickHit` (`ball` -1) and `BrickDestroyed`, and the prize drops the usual `PrizeDropped`.
+
+### 18.9 The open questions of 14.7 that were about the weapons
+
+| question | what the game does | tag |
+|---|---|---|
+| hits needed against energy 2 to 4 for the cannonball, the rocket, the bullets, the laser | a bullet 1 (a brick of 4 takes 4), a rocket 2, a kernel 3, a beam 1 to each actor in line; bursts 1 more to what is within reach | I |
+| the blast radii of the cannonball and the rocket | 2.0 and 2.25 | D, M |
+| a minimum interval between shots | 0.2 s for all | M for the gun, I |
+| Thunderbolt: strikes per catch, their span, the target | 2 or 3 at once and 2 more up to 12 s later; a random standing brick or tree | M weak, I |
+| Meteor Rain: count, targets, damage | 5 over 5 s, random points of the field, 2 energy and a burst | M, I |
+| does a weapon push | by its momentum, bursts by 0.5 of dynamite's | I |
+| do weapon kills leave prizes | yes, but not the bolt's and the meteor's | D |
+| do teleports, balls and the bat stop projectiles | no | I |
+
+### 18.10 The numbers (`WeaponRules`)
+
+| constant | value | tag |
+|---|---|---|
+| `shotInterval` | 0.2 s | M (gun), I |
+| `bullet`, `kernel`, `rocket`: `spawn`, `velocity`, `gravity`, `radius`, `halfHeight`, material | the data of 18.3 | D |
+| damage: bullet, kernel, rocket, laser, bolt, meteor | 1, 3, 2, 1, 1, 2 | I |
+| burst: kernel, rocket, meteor (radius; damage 1, power 0.5) | 2.0, 2.25, 2.0 | D, M, D |
+| `laserSpawn`, `laserRadius`, `laserRange`, `laserGrow`, `laserLife` | (0, 1.0, 2.91), 0.15, 60, 0.1 s, 0.45 s | D, D, I, M, M |
+| `projectileLife`, `farLimit`, `lowLimit` | 5 s, 80, -20 | I |
+| `bolt`: velocity, radius | (0, -50, 0), 0.492 | D |
+| `boltBurstLeast`, `boltBurstMost`, `boltGap`, `boltsLater`, `boltLaterFrom`, `boltLaterUntil` | 2, 3, 0.2 s, 2, 2 s, 12 s | M, M, I, M weak, I, M weak |
+| `meteor`: velocity, radius | (-10, -30, 10), 0.492 | D |
+| `meteors`, `meteorSpan`, `meteorX`, `meteorZLow`, `meteorZHigh` | 5, 5 s, 18, -10, 20 | M, M, I |
+| `offscreen` | 2 units | I |
+
+What is tested: `mb_weapon_tests` (made-up levels: the engine's kinds of body and `raycastAll`; the top edge against the camera; the click with no weapon, with a held ball, while the bat swoops in, with the Magnet, in the Lost phase and after the level is won; the shot count, the interval, a weapon running out and replacing another; each weapon's spawn point, velocity and gravity, and the barrels of a wider bat; a projectile that leaves the board; the damage of each projectile against bricks of one to four energy, the burst's reach and push, what is spent on steel and walls; the laser's piercing, width, stop, one hit a body, teleports and balls, fading and range; dynamite set off by a bullet and its chain, a cannon, a firework crate, metal, springs, volcanoes, generators and teleports; the prizes a kill may leave; the Thunderbolt's burst, spread, targets, top edge, metal spared and seeds; the meteors' count, timing, slant, aim and damage; the strikes' damage; that nothing is thrown once the level is won; the autopilot's look ahead; two identical games) and `mb_weapon_smoke` (the 83 levels, every weapon and both strikes given at once, the click held down, 24 s each: nothing not finite or off the board, shots counted, every projectile accounted for, the strikes all thrown, the balls' speed and plane, the time of a step).

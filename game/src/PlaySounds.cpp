@@ -80,6 +80,15 @@ void PlaySounds::play(const GameEvent& event) {
         case EventType::LevelComplete:
             sounds_.play("endlevel");
             break;
+        case EventType::ShotFired:  // (the weapons' sounds, the `period` and `dead` of the projectile's material, are the next stage's)
+        case EventType::ProjectileHit:
+        case EventType::ProjectileExploded:
+        case EventType::ProjectileGone:
+        case EventType::LaserBeam:
+        case EventType::BoltStruck:
+        case EventType::MeteorFalling:
+        case EventType::MeteorImpact:
+            break;
         case EventType::DynamiteBlast:  // (the charge makes its own sound as it is destroyed)
         case EventType::ShotHit:
         case EventType::RocketLaunched:

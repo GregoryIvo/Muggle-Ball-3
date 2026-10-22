@@ -12,12 +12,13 @@
 //        level's own rule the summary counts the levels it finished and how many of those only the stall rule ended (a
 //        line under the level says how many targets it let go). Sanity is asserted, not the result: no pose may be not
 //        finite, no body may fly faster than a sane simulation, a ball's speed must be the rules' speed and its y the
-//        plane's after every frame, a ball may only leave past the bat, a ball in flight must move at least 0.3 units in 2 s
+//        plane's after every frame, a ball may only leave past the bat, a ball in flight must move at least 0.3 units in 4 s
 //        (the speed the session reports is the one it sets, so a ball frozen by the solver shows only here), and none may
 //        be pinned against the bat (the session frees a ball that is pinned elsewhere, in a pocket of the board, and
 //        the table counts those). The prizes drop as in the game, the level's place in the campaign counting (the red ones
 //        come from level 10): the table has the prizes dropped and caught, and the summary how many levels the Next Level star
-//        ended (--campaign-level N plays every level as the N-th). --strict switches the look at what the ball can reach and the
+//        ended, and how many shots the autopilot fired with the weapons it caught (section 18; --campaign-level N plays every level as
+//        the N-th). --strict switches the look at what the ball can reach and the
 //        stall rule off, --no-stall only the stall rule. With a level name, --log prints its event log.
 
 #include "mb/game/Autopilot.h"
@@ -28,6 +29,7 @@
 #include "mb/game/MaterialLibrary.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -51,7 +53,9 @@ constexpr float kSpeedTolerance = 0.01f;
 constexpr float kPlaneTolerance = 1e-3f;
 constexpr float kHigh = 2.5f, kReachBeyond = 1.5f;  // see play(): where a ball cannot reach
 constexpr float kMoves = 0.3f;                       // a ball in flight is at least this far from where it was ...
-constexpr std::uint64_t kMovesWithin = 120;          // ... two seconds (frames) ago
+// ... four seconds (frames) ago: the session frees a pinned ball every second, and a pocket of ground blocks of three energy, which the
+// ball hurts as it is put back against them, can take it a few tries to open (Piratos-Ygoshenia, with the weapons)
+constexpr std::uint64_t kMovesWithin = 240;
 
 bool finite(const Mat4& m) {
     for (const auto& row : m.m) {
@@ -79,6 +83,9 @@ struct Outcome {
     float farthest = 0;  // and its greatest z
     double stepMs = 0;
     bool starDropped = false, starCaught = false;  // the Next Level star
+    std::array<int, kWeaponTypeCount> shots{};     // fired, by weapon (section 18)
+    int weaponsCaught = 0, strikesCaught = 0;      // prizes of the four weapons, of the Thunderbolt and of the Meteorite Rain
+    int bolts = 0, meteors = 0;                    // that struck
     std::vector<GameEvent> events;
     std::vector<std::string> problems;
     std::vector<std::string> standing;  // the targets left, one line each
@@ -195,6 +202,15 @@ Outcome play(const Level& level, const MaterialLibrary& materials, double second
         if (event.type == EventType::BrickDestroyed || event.type == EventType::ActorFell) {
             out.lastProgress = event.time;
         }
+        if (event.type == EventType::ShotFired && event.prize) {
+            ++out.shots[static_cast<std::size_t>(*weaponOf(*event.prize))];
+        }
+        if (event.type == EventType::PrizeCaught && event.prize) {
+            out.weaponsCaught += weaponOf(*event.prize).has_value();
+            out.strikesCaught += *event.prize == PrizeKind::Thunderbolt || *event.prize == PrizeKind::Meteor;
+        }
+        out.bolts += event.type == EventType::BoltStruck;
+        out.meteors += event.type == EventType::MeteorImpact;
         if (event.prize == PrizeKind::NextLevel) {
             out.starDropped = out.starDropped || event.type == EventType::PrizeDropped;
             out.starCaught = out.starCaught || event.type == EventType::PrizeCaught;
@@ -261,6 +277,8 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, const Cam
     int emptyLevels = 0, levelsLetGo = 0, standingHigh = 0, standingOutside = 0, standingOnField = 0, freed = 0, levelsWithFreed = 0;
     int completed = 0, outOfPlay = 0, levelsOutOfPlay = 0;
     int prizesDropped = 0, prizesCaught = 0, prizesMissed = 0, levelsWithStar = 0, endedByStar = 0, starsCaught = 0;
+    std::array<int, kWeaponTypeCount> shots{};
+    int weaponsCaught = 0, strikesCaught = 0, bolts = 0, meteors = 0;
     std::vector<std::string> notCompleted;
     double share[2] = {0, 0};  // summed over the levels: the part of the targets destroyed
     double stepMs = 0, worstStepMs = 0, slowest = 0;
@@ -296,6 +314,13 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, const Cam
         levelsWithStar += out.starDropped;
         starsCaught += out.starCaught;
         endedByStar += out.starCaught && out.complete;
+        for (std::size_t type = 0; type < kWeaponTypeCount; ++type) {
+            shots[type] += out.shots[type];
+        }
+        weaponsCaught += out.weaponsCaught;
+        strikesCaught += out.strikesCaught;
+        bolts += out.bolts;
+        meteors += out.meteors;
         outOfPlay += out.stats.targetsOutOfPlay;
         levelsOutOfPlay += out.stats.targetsOutOfPlay > 0;
         if (!out.complete && gRule != TargetRule::Never) {
@@ -355,6 +380,9 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, const Cam
     std::printf("prizes: %d dropped, %d caught, %d missed; the Next Level star fell in %d levels (s in the table), was caught in %d and "
                 "ended %d of the %d levels completed (*)\n",
                 prizesDropped, prizesCaught, prizesMissed, levelsWithStar, starsCaught, endedByStar, completed);
+    std::printf("weapons: %d weapon prizes and %d strike prizes caught; the autopilot fired %d Machine Gun, %d Cannon, %d Bazooka and %d Laser shots at "
+                "what stood ahead of it, and %d bolts and %d meteors struck\n",
+                weaponsCaught, strikesCaught, shots[0], shots[1], shots[2], shots[3], bolts, meteors);
     if (emptyLevels > 0) {
         std::printf("%d levels have no target under one of the readings\n", emptyLevels);
     }

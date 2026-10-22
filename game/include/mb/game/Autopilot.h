@@ -7,7 +7,9 @@
 
 namespace mb {
 
-// A player that needs no hands: launches at once and keeps the bat where the ball that comes down first will meet it.
+// A player that needs no hands: launches at once and keeps the bat where the ball that comes down first will meet it, and fires its
+// weapon (a click every frame; the session lets one shot through in each shot interval) when something it can hurt is straight ahead
+// of the bat.
 // It varies where on the bat the ball is met from hit to hit, or every ball would go straight back up its own column.
 // For playing a level headless (tests, the smoke run, scripted visual checks); it is no model of a good player (aiming
 // at the nearest brick instead lost more balls and cleared fewer bricks).

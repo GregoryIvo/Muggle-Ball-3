@@ -13,6 +13,7 @@
 #include <Jolt/Physics/Body/BodyActivationListener.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Collision/ContactListener.h>
+#include <Jolt/Physics/Collision/GroupFilter.h>
 #include <Jolt/Physics/Collision/PhysicsMaterial.h>
 #include <Jolt/Physics/Constraints/TwoBodyConstraint.h>
 #include <Jolt/Physics/PhysicsSystem.h>
@@ -68,6 +69,14 @@ class ObjectLayerPairs final : public JPH::ObjectLayerPairFilter {
 public:
     bool ShouldCollide(JPH::ObjectLayer a, JPH::ObjectLayer b) const override {
         return a == layers::moving || b == layers::moving;
+    }
+};
+
+// BodyDesc::group and collidesWith: each body's group id is its kind and its sub group id the kinds it touches.
+class KindFilter final : public JPH::GroupFilter {
+public:
+    bool CanCollide(const JPH::CollisionGroup& a, const JPH::CollisionGroup& b) const override {
+        return (a.GetGroupID() & b.GetSubGroupID()) != 0 && (b.GetGroupID() & a.GetSubGroupID()) != 0;
     }
 };
 
@@ -135,6 +144,7 @@ struct PhysicsWorld::Impl final : JPH::ContactListener, JPH::BodyActivationListe
     std::unique_ptr<JPH::JobSystem> jobSystem;
     JPH::PhysicsSystem system;
     JPH::BodyInterface& bodies;  // the unlocked interface: everything here runs on one thread, outside step()
+    JPH::Ref<KindFilter> kinds = new KindFilter;  // on every body, see BodyDesc::group
 
     std::unordered_map<BodyId, BodyRecord> records;
     std::unordered_map<JointId, JointRecord> joints;

@@ -25,6 +25,34 @@ float foldIntoBoard(float x) {
     return (u > 2 * kWall ? period - u : u) - kWall;
 }
 
+// Whether the first object in the line of the weapon's shot is something it can hurt: a ray up the board from each barrel (the Machine Gun's
+// two, else the middle of the bat) at the height the shot leaves at. The balls and the bat are no actors: a shot goes through them.
+bool somethingAhead(const GameSession& session, WeaponType weapon) {
+    const PhysicsWorld& world = session.scene().world();
+    const WeaponRules& rules = session.rules().weapons;
+    const Vec3 bat = session.bat().position;
+    const float scale = session.batScale();
+    const Vec3 muzzle = weapon == WeaponType::Laser ? rules.laserSpawn
+                        : weapon == WeaponType::Gun ? rules.bullet.spawn
+                        : weapon == WeaponType::Cannon ? rules.kernel.spawn
+                                                       : rules.rocket.spawn;
+    const bool twin = weapon == WeaponType::Gun;
+    for (int barrel = 0; barrel < (twin ? 2 : 1); ++barrel) {
+        const float side = twin ? (barrel == 0 ? -muzzle.x : muzzle.x) : 0.0f;
+        const Vec3 origin{bat.x + side * scale, muzzle.y * scale, bat.z + muzzle.z * scale};
+        for (const RayHit& hit : world.raycastAll(origin, {0, 0, 1}, rules.laserRange)) {
+            const std::uint64_t data = world.userData(hit.body);
+            if (data < session.scene().plan().actors.size()) {
+                if (session.actor(static_cast<ActorIndex>(data)).damageable) {
+                    return true;
+                }
+                break;  // something it cannot hurt is in the way
+            }
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
 GameInput Autopilot::decide(const GameSession& session) const {
@@ -32,6 +60,11 @@ GameInput Autopilot::decide(const GameSession& session) const {
     // The click launches the ball held on the bat, and lets go of the balls the Magnet holds.
     input.launch = session.phase() == SessionPhase::Ready ||
                    std::ranges::any_of(session.balls(), [](const BallView& ball) { return ball.stuck; });
+    // With none of that to do, it fires the weapon when something it can hurt is straight ahead of it.
+    if (!input.launch) {
+        const std::optional<WeaponState> armed = session.weapon();
+        input.launch = armed && somethingAhead(session, armed->type);
+    }
     input.batTargetX = session.bat().position.x;
 
     const GameplayRules& rules = session.rules();

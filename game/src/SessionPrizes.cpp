@@ -237,6 +237,7 @@ void GameSession::givePrize(PrizeKind kind) {
             event.type = EventType::StrikeGranted;
             event.prize = kind;
             emit(event);
+            weapons_.startStrike(*this, kind);
             break;
         }
         case PrizeKind::Surprise: {

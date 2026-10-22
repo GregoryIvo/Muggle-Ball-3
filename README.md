@@ -36,7 +36,7 @@ bat's weapons, sails (cloth), cannons, reflections, particle systems, and model 
 | Path | What it is |
 |---|---|
 | `engine/` | Platform-neutral runtime: window and input, GPU renderer and shaders, model and image loading, physics (`PhysicsWorld` over Jolt), audio (Ogg Vorbis decoding, mixer, device), logging, paths |
-| `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, level physics (`PhysicsScene`), the rules of play (`GameSession`, `BallReach`), the level's special objects (`SpecialObjects`), objects that follow paths (`PathPlayer`), what a session looks and sounds like (`PlayScene`, `ObjectEffects`, `PlaySounds`), camera, sound library, save data; the 2D UI (bitmap fonts, string table, menu forms, the menu screens and their flow, the HUD) |
+| `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, level physics (`PhysicsScene`), the rules of play (`GameSession`, `BallReach`), the level's special objects (`SpecialObjects`), the weapons and the strikes of the prizes (`Weapons`), objects that follow paths (`PathPlayer`), what a session looks and sounds like (`PlayScene`, `ObjectEffects`, `PlaySounds`), camera, sound library, save data; the 2D UI (bitmap fonts, string table, menu forms, the menu screens and their flow, the HUD) |
 | `app/` | Executable entry point: the game's front end and its play session (`PlaySession`), the level viewer (with physics and music) and the menu form viewer |
 | `platform/macos/` | App bundle metadata (the only per-platform code so far) |
 | `scripts/` | `package_macos.sh`: universal build, ad-hoc signing, Developer ID signing and notarization |

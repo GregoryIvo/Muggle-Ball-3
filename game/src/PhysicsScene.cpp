@@ -111,7 +111,14 @@ PhysicsScene::PhysicsScene(const Level& level, const MaterialLibrary& materials,
             ++counts_.withoutBody;
             continue;
         }
-        bodies_[i] = world_.addBody(actor.body);
+        if (actor.type == ObjectType::TeleportSrc || actor.type == ObjectType::TeleportDest) {
+            BodyDesc portal = actor.body;  // weapons ignore teleports (docs/GAMEPLAY.md section 18.2)
+            portal.group = kKindPortal;
+            portal.collidesWith = ~kKindProjectile;
+            bodies_[i] = world_.addBody(portal);
+        } else {
+            bodies_[i] = world_.addBody(actor.body);
+        }
         if (bodies_[i] == 0) {
             ++counts_.withoutBody;
             continue;
@@ -235,13 +242,17 @@ void PhysicsScene::wakeUnsupported() {
     }
 }
 
-float PhysicsScene::massOf(std::uint64_t userData) const {
+float PhysicsScene::massOf(std::uint64_t userData, BodyId body) const {
     constexpr float kImmovable = std::numeric_limits<float>::infinity();
     if (userData == kBatData) {
         return kImmovable;
     }
     if (userData == kGameBallData) {
         return kBallVolume * ballDensity_;
+    }
+    if (userData == kProjectileData) {
+        const auto it = std::ranges::find(projectileMasses_, body, &std::pair<BodyId, float>::first);
+        return it != projectileMasses_.end() ? it->second : kBallMass;
     }
     if (!isActor(userData)) {
         return kBallMass;
@@ -276,7 +287,7 @@ void PhysicsScene::breakByHit(const ContactEvent& contact) {
         return;
     }
     constexpr float kImmovable = std::numeric_limits<float>::infinity();
-    const float a = massOf(contact.userDataA), b = massOf(contact.userDataB);
+    const float a = massOf(contact.userDataA, contact.a), b = massOf(contact.userDataB, contact.b);
     if (a == kImmovable && b == kImmovable) {
         return;
     }
@@ -410,6 +421,7 @@ BodyId PhysicsScene::addGameBall(Vec3 position, Vec3 velocity, float radius) {
     desc.lockRotation[0] = desc.lockRotation[2] = true;
     desc.sleepLinearVelocity = 0;  // never falls asleep
     desc.continuousCollision = true;
+    desc.group = kKindBall;
     desc.userData = kGameBallData;
     return world_.addBody(desc);
 }
@@ -428,8 +440,37 @@ BodyId PhysicsScene::addBat(Vec3 position, float radius) {
     desc.motion = MotionType::Kinematic;
     desc.shapes = {sphere};
     desc.density = 1;
+    desc.group = kKindBat;
     desc.userData = kBatData;
     return world_.addBody(desc);
+}
+
+BodyId PhysicsScene::addProjectile(const Mat4& pose, const PhysicsShape& shape, Vec3 velocity, bool gravity, float density) {
+    BodyDesc desc;
+    desc.pose = pose;
+    desc.shapes = {shape};
+    desc.density = density;
+    desc.linearVelocity = velocity;
+    desc.gravity = gravity;
+    desc.lockRotation[0] = desc.lockRotation[1] = desc.lockRotation[2] = true;
+    desc.sleepLinearVelocity = 0;  // never falls asleep
+    desc.continuousCollision = true;
+    desc.group = kKindProjectile;
+    desc.collidesWith = kKindLevel;
+    desc.userData = kProjectileData;
+    const BodyId body = world_.addBody(desc);
+    if (body != 0) {
+        const float r = shape.radius;
+        const float volume = 4.0f * kPi / 3.0f * r * r * r +
+                             (shape.type == PhysicsShapeType::Capsule ? kPi * r * r * 2.0f * shape.halfHeight : 0.0f);
+        projectileMasses_.emplace_back(body, std::max(volume * density, 1e-3f));
+    }
+    return body;
+}
+
+void PhysicsScene::removeProjectile(BodyId body) {
+    std::erase_if(projectileMasses_, [body](const std::pair<BodyId, float>& entry) { return entry.first == body; });
+    world_.removeBody(body);
 }
 
 }  // namespace mb

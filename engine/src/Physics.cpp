@@ -5,6 +5,7 @@
 #include <Jolt/Core/JobSystemThreadPool.h>
 #include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
 #include <Jolt/Physics/Collision/NarrowPhaseQuery.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/RegisterTypes.h>
@@ -468,6 +469,7 @@ BodyId PhysicsWorld::addBody(const BodyDesc& desc) {
     }
     const BodyId id = w.nextBody;
     settings.mUserData = id;  // Jolt's own user data holds our id; the caller's lives in the record
+    settings.mCollisionGroup = JPH::CollisionGroup(w.kinds, desc.group, desc.collidesWith);
     JPH::Body* body = w.bodies.CreateBody(settings);
     if (body == nullptr) {
         logWarn("PhysicsWorld::addBody: out of bodies (PhysicsSettings::maxBodies is {})", w.settings.maxBodies);
@@ -718,6 +720,41 @@ std::optional<RayHit> PhysicsWorld::raycast(Vec3 origin, Vec3 direction, float m
     result.normal = fromJolt(lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, point));
     result.distance = hit.mFraction * maxDistance;
     return result;
+}
+
+std::vector<RayHit> PhysicsWorld::raycastAll(Vec3 origin, Vec3 direction, float maxDistance) const {
+    const Impl& w = *impl_;
+    std::vector<RayHit> hits;
+    const float directionLength = length(direction);
+    if (!isFinite(origin) || !isFinite(direction) || !(directionLength > 0) || !(maxDistance > 0) ||
+        !std::isfinite(maxDistance)) {
+        return hits;
+    }
+    const JPH::RRayCast ray(JPH::RVec3(origin.x, origin.y, origin.z),
+                            toJolt(direction * (maxDistance / directionLength)));
+    JPH::RayCastSettings settings;
+    settings.mTreatConvexAsSolid = true;
+    JPH::AllHitCollisionCollector<JPH::CastRayCollector> collector;
+    w.system.GetNarrowPhaseQuery().CastRay(ray, settings, collector);
+    collector.Sort();
+    for (const JPH::RayCastResult& hit : collector.mHits) {
+        const JPH::BodyLockRead lock(w.system.GetBodyLockInterfaceNoLock(), hit.mBodyID);
+        if (!lock.Succeeded()) {
+            continue;
+        }
+        const BodyId body = static_cast<BodyId>(lock.GetBody().GetUserData());
+        if (std::ranges::any_of(hits, [body](const RayHit& seen) { return seen.body == body; })) {
+            continue;  // (a body of several shapes: the first of them the ray meets is the entry)
+        }
+        const JPH::RVec3 point = ray.GetPointOnRay(hit.mFraction);
+        RayHit result;
+        result.body = body;
+        result.point = toVec3(point);
+        result.normal = fromJolt(lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, point));
+        result.distance = hit.mFraction * maxDistance;
+        hits.push_back(result);
+    }
+    return hits;
 }
 
 const PhysicsSettings& PhysicsWorld::settings() const {

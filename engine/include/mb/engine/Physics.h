@@ -74,6 +74,11 @@ struct BodyDesc {
     float sleepLinearVelocity = 0.15f;
     float sleepAngularVelocity = 0.14f;
     bool continuousCollision = false;  // for small fast bodies such as the ball
+    // Which bodies touch which. `group` is the kind of body this is (one bit) and `collidesWith` the kinds it touches; two
+    // bodies touch only when each one's `collidesWith` has the other's `group`. The defaults touch everything, so only
+    // the bodies that must pass through some others (a bullet through the ball and the bat) set them.
+    std::uint32_t group = 1;
+    std::uint32_t collidesWith = ~std::uint32_t{0};
     std::uint64_t userData = 0;
 };
 
@@ -190,6 +195,9 @@ public:
     std::vector<JointId> takeBrokenJoints();
 
     std::optional<RayHit> raycast(Vec3 origin, Vec3 direction, float maxDistance) const;
+    // Every body the ray crosses within maxDistance, nearest first, each once, at the point where the ray enters it (a body
+    // that holds the origin is hit at distance 0). Ignores the kinds of body, as raycast() does.
+    std::vector<RayHit> raycastAll(Vec3 origin, Vec3 direction, float maxDistance) const;
 
     // The settings in use: the ones given, with values that cannot work replaced.
     const PhysicsSettings& settings() const;

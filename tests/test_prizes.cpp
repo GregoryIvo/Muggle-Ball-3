@@ -163,6 +163,9 @@ SessionOptions dropping(int level = 1, std::uint64_t seed = 1, TargetRule rule =
     o.rules.prizes.drops = true;
     o.campaignLevel = level;
     o.prizeSeed = seed;
+    // A Thunderbolt or a Meteorite Rain that the bat happens to catch would destroy bricks that the counts here are of (the strikes
+    // have their own tests, test_weapons.cpp).
+    o.rules.weapons.boltBurstLeast = o.rules.weapons.boltBurstMost = o.rules.weapons.boltsLater = o.rules.weapons.meteors = 0;
     return o;
 }
 

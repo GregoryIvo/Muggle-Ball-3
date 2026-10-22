@@ -8,6 +8,7 @@
 #include "mb/game/PhysicsScene.h"
 #include "mb/game/SpecialObjects.h"
 #include "mb/game/Prizes.h"
+#include "mb/game/Weapons.h"
 
 #include <array>
 #include <cstdint>
@@ -133,6 +134,8 @@ struct GameplayRules {
     SpecialObjectRules objects;
     // ---- Prizes (sections 7, 14 and 15)
     PrizeRules prizes;
+    // ---- The weapons and the strikes of the prizes (section 18)
+    WeaponRules weapons;
 };
 
 // Which objects must be destroyed to finish a level. The second study of the footage and its fact-check settled it
@@ -218,10 +221,21 @@ enum class EventType {
     PrizeMissed,     // prize, position: it fizzles at the near edge
     EffectStarted,   // prize: a timed effect, a weapon, the Explosive Ball, the Earthquake or the Wind began (a second catch: no)
     EffectEnded,     // prize: it ran out, or the bat was lost, or Normal Ball cancelled it
-    StrikeGranted,   // prize (Thunderbolt or Meteor): the strikes are for whoever implements them (step 5, wave 3)
+    StrikeGranted,   // prize (Thunderbolt or Meteor): its strikes are scheduled (Weapons::startStrike)
     BallStuck,       // ball, position: the Magnet caught it (the sound "ballMagnited")
     Blast,           // ball, position, speed (the radius): the Explosive Ball went off
     BallRubbered,    // ball, position: the Yo-Yo's string turned the ball back (the sound "ballRubbered")
+    // ---- The weapons and the strikes (section 18). `material` is the projectile's (bat_bullet, bat_kernel, bat_rocket, bat_lazer,
+    // thunderbolt, meteor): its `period` sound is the shot's and its `dead` sound the impact's. Every projectile ends with one
+    // of ProjectileHit, BoltStruck, MeteorImpact or ProjectileGone.
+    ShotFired,       // prize (the weapon), position (the muzzle: the middle of the barrels), velocity (of a projectile), count (shots left)
+    ProjectileHit,   // prize, actor (what it touched: the board and what nothing damages too), position (the contact), velocity (its own)
+    ProjectileExploded,  // prize, position, speed (the burst's radius): a cannonball or a rocket burst, after its ProjectileHit
+    ProjectileGone,  // prize, position: it left the world or ran out of time with no hit, or the level ended
+    LaserBeam,       // position (the barrel), end (the tip), count (the actors it reached, the one that stopped it included)
+    BoltStruck,      // prize (Thunderbolt), actor, position (where it struck), end (the top edge of the screen above, where it is drawn from)
+    MeteorFalling,   // prize (Meteor), position (where it starts, above the screen's top edge), velocity, end (where it will come down)
+    MeteorImpact,    // prize (Meteor), actor (the board's for the water), position (the contact)
     LifeLost,        // hearts (left): the heart is spent, 2.1 s after the last ball was lost
     BatLeft,         // the bat starts to fly off (after the last ball was lost)
     BatEntered,      // the bat swoops in with the ball on it (at the start of a level, and as the heart is spent)
@@ -241,6 +255,8 @@ struct GameEvent {
     int energy = 0;
     int points = 0;
     int hearts = 0;
+    int count = 0;  // how many: the shots left of a weapon, the actors a laser beam reached
+    Vec3 end{};     // a second point: a beam's tip, the top of a bolt, where a meteor will land
     std::optional<PrizeKind> prize;
     // The brick's game material, for the sounds (hitSound, deadSound), the explosion (exploseType) and the retexture;
     // it points into the MaterialLibrary the session was made with. Null where there is none.
@@ -320,7 +336,9 @@ struct GameInput {
     // Where the cursor is on the board (batTargetX(), which has none for a cursor above the horizon); the bat eases
     // towards it. None keeps the target of the frame before.
     std::optional<float> batTargetX;
-    bool launch = false;  // the click: lets the held ball go
+    // The click. One thing happens, in this order: it launches the ball held on the bat; else lets go of the balls the Magnet holds;
+    // else fires the weapon (section 18.1).
+    bool launch = false;
 };
 
 // ---- Rules that stand on their own
@@ -399,6 +417,10 @@ public:
     TargetRule levelEnd() const { return levelEnd_; }
     // The level's special objects: the cannonballs and rockets in flight, for the presentation.
     const SpecialObjects& objects() const { return objects_; }
+    // The weapons and the strikes: the projectiles in flight and the laser's beams, for the presentation (docs/GAMEPLAY.md section 18).
+    const Weapons& weapons() const { return weapons_; }
+    std::span<const Projectile> projectiles() const { return weapons_.projectiles(); }
+    std::span<const LaserBeam> laserBeams() const { return weapons_.beams(); }
 
     ActorStatus actor(ActorIndex actor) const;
     // Whether an actor that is still in the level counts toward a rule (whatever rule the session ends by), and how
@@ -435,11 +457,12 @@ public:
     // weapons with their shots, the Explosive Ball with its blasts. Those with prizeInfo(kind).icon go on the HUD.
     std::span<const ActiveEffect> activeEffects() const { return effects_; }
     const ActiveEffect* effect(PrizeKind kind) const;
-    // The weapon a click would fire: the one caught last that has shots left. The weapons are filled in by wave 3; the session
-    // only grants them (gun 12 shots, cannon 6, bazooka 7, laser 5) and counts them down.
+    // The weapon a click would fire: the one caught last that has shots left (gun 12 shots, cannon 6, bazooka 7, laser 5). The
+    // others keep their shots. A click fires it (Weapons::fire, docs/GAMEPLAY.md section 18.1) and counts a shot down.
     std::optional<WeaponState> weapon() const;
     int shotsLeft(WeaponType type) const;
-    // Takes a shot from weapon(); false if there is none. The weapon's effect ends with its last shot.
+    // Takes a shot from weapon(); false if there is none. The weapon's effect ends with its last shot. Firing does this: it is for
+    // the weapons' own use and for tests.
     bool useShot();
     // What the prizes have done: the ball's radius and speed (the speed prizes multiply GameplayRules::ballSpeed), the bat's
     // collision radius and its scale against GameplayRules::batRadius (draw the bat that much wider), the night, 0 (day) to 1.
@@ -456,6 +479,7 @@ public:
 
 private:
     friend class SpecialObjects;
+    friend class Weapons;
 
     struct Ball {
         int id = 0;
@@ -495,6 +519,7 @@ private:
     TargetRule levelEnd_;
     PhysicsScene scene_;
     SpecialObjects objects_;
+    Weapons weapons_;
     double fixedStep_;
     std::vector<Brick> bricks_;  // by ActorIndex
     std::vector<ActorIndex> dynamicActors_;
