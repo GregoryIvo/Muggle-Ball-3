@@ -61,7 +61,8 @@ build="build/package-$variant"
 if [[ -n "${DEVELOPER_ID:-}" ]]; then game_icon=OFF; else game_icon=ON; fi
 configure=(-S . -B "$build" -DCMAKE_BUILD_TYPE=Release -DMB3_BUILD_TESTS=OFF -DMB3_GAME_ICON=$game_icon
            -DMB3_FETCH_SDL3=ON -DMB3_UNIVERSAL=$([[ $universal -eq 1 ]] && echo ON || echo OFF)
-           -DMB3_BUNDLE_ASSETS=$([[ $bundle_assets -eq 1 ]] && echo ON || echo OFF))
+           -DMB3_BUNDLE_ASSETS=$([[ $bundle_assets -eq 1 ]] && echo ON || echo OFF)
+           -DMB3_DEV_ASSETS=OFF)  # a packaged app may go to other Macs: no path to this one's assets inside
 if [[ $bundle_assets -eq 1 ]]; then
     [[ -d "$assets_dir/Data" ]] || die "no converted assets in $assets_dir (run tools/convert_assets.py, or pass the folder)"
     configure+=(-DMB3_ASSETS_DIR="$assets_dir")

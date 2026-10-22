@@ -8,7 +8,8 @@ namespace mb {
 //   1. the MB3_ASSETS environment variable (used as given, even if it does not exist),
 //   2. Resources/assets inside the macOS app bundle (see MB3_BUNDLE_ASSETS in CMake),
 //   3. ./assets in the working directory,
-//   4. assets/ inside userDataDir(), where an app without bundled assets, started from the Finder, finds them.
+//   4. assets/ inside userDataDir(), where an app without bundled assets, started from the Finder, finds them,
+//   5. CMake's MB3_ASSETS_DIR, in a build made with MB3_DEV_ASSETS (the default; packaged apps leave it out).
 // If none exists, ./assets, so the error message names a place to put them.
 std::filesystem::path assetRoot();
 

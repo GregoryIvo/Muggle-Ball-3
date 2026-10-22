@@ -23,7 +23,8 @@ it (macOS ignores `$HOME` here, so this is how to keep experiments and tests awa
 end's smoke test, `tests/frontend_smoke.cpp`, sets it to a temporary folder and reads the files back).
 
 An app without bundled assets, started from the Finder, also looks for the converted assets in `assets/`
-inside this folder (after `MB3_ASSETS`, the bundle and `./assets`).
+inside this folder (after `MB3_ASSETS`, the bundle and `./assets`; a build of your own then tries the
+repository's `assets/`, see `MACOS.md`).
 
 ## Files
 

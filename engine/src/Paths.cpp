@@ -26,6 +26,13 @@ std::filesystem::path assetRoot() {
     if (const std::filesystem::path user = userDataDir(); !user.empty() && std::filesystem::exists(user / "assets", ec)) {
         return user / "assets";
     }
+#ifdef MB3_DEV_ASSETS_DIR
+    // A build that is not handed out knows where this machine's converted assets are, so the Finder, which starts
+    // apps in /, finds them too.
+    if (const std::filesystem::path dev = MB3_DEV_ASSETS_DIR; std::filesystem::exists(dev, ec)) {
+        return dev;
+    }
+#endif
     return local;
 }
 

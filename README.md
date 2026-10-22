@@ -167,7 +167,10 @@ to regenerate them; that is the only thing that needs `glslangValidator` and
    `~/Library/Application Support/MuggleBall3/` (see [`docs/SAVES.md`](docs/SAVES.md)); set
    `MB3_USER_DATA` to use another folder (the tests do, so that they never touch your saves).
    An app without bundled assets, started from the Finder, also looks for the converted
-   assets in `assets/` inside that folder.
+   assets in `assets/` inside that folder, and a build of your own then in the repository's
+   `assets/` (CMake's `MB3_DEV_ASSETS`, which packaged apps leave out), so
+   `build/app/MuggleBall3.app` opens from the Finder as it is. If the game cannot start, it
+   says why in a dialog.
 
 ## Legal
 

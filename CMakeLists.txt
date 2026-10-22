@@ -7,6 +7,7 @@ option(MB3_FETCH_SDL3 "Compile SDL3 from source and link it statically instead o
 option(MB3_BUNDLE_ASSETS "macOS: copy the converted game assets into the .app. For your own copy only: never distribute it" OFF)
 option(MB3_GAME_ICON "macOS: use the icon converted from your copy of the game (it is the game's artwork: off for apps you hand out)" ON)
 set(MB3_ASSETS_DIR "" CACHE PATH "Converted game assets: icon and bundled assets (default: $MB3_ASSETS, else <source>/assets)")
+option(MB3_DEV_ASSETS "Let the app fall back to MB3_ASSETS_DIR, this machine's converted assets, wherever it is started from (off for apps you hand out)" ON)
 
 if(CMAKE_HOST_APPLE)
   if(MB3_UNIVERSAL)
