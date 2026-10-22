@@ -81,6 +81,8 @@ void put16(std::string& out, std::uint16_t v) {
 // BIN chunk layout (byte offsets are repeated in the JSON below):
 //    0 quad positions   48    48 quad normals   48    96 quad uvs        32
 //  128 quad indices u32 24   152 tri positions  36   188 tri indices u16  6 (+2 padding)
+//  196 times 0 1 2       12   208 Arm translation 36  244 Arm rotation   48
+//  292 times 0.5 1.5      8   300 Cannon scale     24
 std::string synthBin() {
     std::string bin;
     putFloats(bin, {0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0});
@@ -94,6 +96,12 @@ std::string synthBin() {
         put16(bin, i);
     }
     put16(bin, 0);
+    putFloats(bin, {0, 1, 2});
+    putFloats(bin, {1, 0, 0, 1, 2, 0, 5, 2, 0});
+    // The middle key is the 45 degree turn negated, which is the same turn: the interpolation must go the short way to it.
+    putFloats(bin, {0, 0, 0, 1, 0, 0, -0.38268343f, -0.92387953f, 0, 0, 0.70710678f, 0.70710678f});
+    putFloats(bin, {0.5f, 1.5f});
+    putFloats(bin, {0.1f, 0.1f, 0.1f, 1, 1, 1});
     return bin;
 }
 
@@ -102,6 +110,7 @@ std::string synthBin() {
 //   Base : matrix, D3D rotationZ(90 degrees) + translation (5, 6, 7)
 //   Arm  : translation (1, 0, 0) and scale 2, as TRS
 //   node 3: quaternion for a 90 degree rotation about z
+// Animations: "Slide" moves Arm (translation and rotation, its scale stays), "Grow" scales Cannon.
 // Meshes: 0 = quad (material 0) + indexed triangle (material 1); 1 = non-indexed triangle, no material.
 // Image 0 exists on disk, image 1 does not; material 2 names a texture the converter could not find.
 json synthDocument() {
@@ -142,7 +151,21 @@ json synthDocument() {
     {"bufferView": 2, "componentType": 5126, "count": 4, "type": "VEC2"},
     {"bufferView": 3, "componentType": 5125, "count": 6, "type": "SCALAR"},
     {"bufferView": 4, "componentType": 5126, "count": 3, "type": "VEC3", "min": [0,0,1], "max": [2,2,1]},
-    {"bufferView": 5, "componentType": 5123, "count": 3, "type": "SCALAR"}
+    {"bufferView": 5, "componentType": 5123, "count": 3, "type": "SCALAR"},
+    {"bufferView": 6, "componentType": 5126, "count": 3, "type": "SCALAR", "min": [0], "max": [2]},
+    {"bufferView": 7, "componentType": 5126, "count": 3, "type": "VEC3"},
+    {"bufferView": 8, "componentType": 5126, "count": 3, "type": "VEC4"},
+    {"bufferView": 9, "componentType": 5126, "count": 2, "type": "SCALAR", "min": [0.5], "max": [1.5]},
+    {"bufferView": 10, "componentType": 5126, "count": 2, "type": "VEC3"}
+  ],
+  "animations": [
+    {"name": "Slide",
+     "channels": [{"sampler": 0, "target": {"node": 2, "path": "translation"}},
+                  {"sampler": 1, "target": {"node": 2, "path": "rotation"}}],
+     "samplers": [{"input": 6, "output": 7, "interpolation": "LINEAR"}, {"input": 6, "output": 8}]},
+    {"name": "Grow",
+     "channels": [{"sampler": 0, "target": {"node": 1, "path": "scale"}}],
+     "samplers": [{"input": 9, "output": 10, "interpolation": "LINEAR"}]}
   ],
   "bufferViews": [
     {"buffer": 0, "byteOffset": 0, "byteLength": 48},
@@ -150,9 +173,14 @@ json synthDocument() {
     {"buffer": 0, "byteOffset": 96, "byteLength": 32},
     {"buffer": 0, "byteOffset": 128, "byteLength": 24},
     {"buffer": 0, "byteOffset": 152, "byteLength": 36},
-    {"buffer": 0, "byteOffset": 188, "byteLength": 6}
+    {"buffer": 0, "byteOffset": 188, "byteLength": 6},
+    {"buffer": 0, "byteOffset": 196, "byteLength": 12},
+    {"buffer": 0, "byteOffset": 208, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 244, "byteLength": 48},
+    {"buffer": 0, "byteOffset": 292, "byteLength": 8},
+    {"buffer": 0, "byteOffset": 300, "byteLength": 24}
   ],
-  "buffers": [{"byteLength": 196}]
+  "buffers": [{"byteLength": 324}]
 })");
 }
 
@@ -273,6 +301,86 @@ void testModel(const fs::path& tmp) {
     writeGlb(tmp / "meshes" / "strip.glb", strips);
     check(throwsWith([&] { mb::loadModel(tmp / "meshes" / "strip.glb"); }, "strip.glb"),
           "model: non-triangle primitive throws");
+}
+
+bool near(const mb::Mat4& a, const mb::Mat4& b) {
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) {
+            if (!near(a.m[i][j], b.m[i][j])) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+mb::Mat4 scaleTurnMove(float scale, float turnDegrees, mb::Vec3 move) {
+    return mb::Mat4::scaling({scale, scale, scale}) * mb::Mat4::rotationZ(mb::radians(turnDegrees)) *
+           mb::Mat4::translation(move);
+}
+
+void testModelAnimations(const fs::path& tmp) {
+    const fs::path glb = tmp / "meshes" / "anim.glb";
+    writeGlb(glb, synthDocument());
+    const mb::Model model = mb::loadModel(glb);
+
+    check(model.animations.size() == 2 && model.animations[0].name == "Slide" && model.animations[1].name == "Grow",
+          "animation: both read, in file order");
+    check(model.findAnimation("Slide") == &model.animations[0] && model.findAnimation("GROW") == &model.animations[1],
+          "animation: found without regard to case");
+    check(model.findAnimation("Hit") == nullptr && model.findAnimation("") == nullptr, "animation: a miss is null");
+    check(near(model.animations[0].duration, 2) && near(model.animations[1].duration, 1.5f), "animation: duration is the last key");
+    check(model.animations[0].tracks.size() == 1 && model.animations[0].tracks[0].node == 2 &&
+              model.animations[0].tracks[0].scaleTimes.empty() && model.animations[0].tracks[0].translationTimes.size() == 3,
+          "animation: one track a node, with the parts it moves");
+
+    // The parts of a node, which an animation that moves some of them keeps the others of.
+    check(near(model.nodes[2].translation, {1, 0, 0}) && near(model.nodes[2].scale, {2, 2, 2}) &&
+              near(model.nodes[2].rotation.w, 1),
+          "animation: a node's parts, with the defaults");
+    check(near(model.nodes[3].rotation.z, 0.70710678f) && near(model.nodes[3].scale, {1, 1, 1}), "animation: a rotation part");
+    check(near(mb::trsMatrix({1, 0, 0}, {0, 0, 0, 1}, {2, 2, 2}), model.nodes[2].local) &&
+              near(mb::trsMatrix({0, 0, 0}, {0, 0, 0.70710678f, 0.70710678f}, {1, 1, 1}), model.nodes[3].local),
+          "animation: trsMatrix makes what the loader makes of a node");
+
+    const mb::ModelAnimation& slide = model.animations[0];
+    check(near(model.localPoses(slide, 0)[2], model.nodes[2].local), "animation: the first key is the rest pose here");
+    check(near(model.localPoses(slide, 1)[2], scaleTurnMove(2, 45, {1, 2, 0})), "animation: a key, the scale kept from the node");
+    check(near(model.localPoses(slide, 0.5f)[2], scaleTurnMove(2, 22.5f, {1, 1, 0})),
+          "animation: halfway, the turn the short way to a negated quaternion");
+    check(near(model.localPoses(slide, 1.5f)[2], scaleTurnMove(2, 67.5f, {3, 2, 0})), "animation: halfway between the last keys");
+    check(near(model.localPoses(slide, 2)[2], scaleTurnMove(2, 90, {5, 2, 0})) &&
+              near(model.localPoses(slide, 9)[2], scaleTurnMove(2, 90, {5, 2, 0})),
+          "animation: after the last key it holds it");
+    check(near(model.localPoses(slide, -3)[2], model.nodes[2].local), "animation: before the first key it holds it");
+    check(near(model.localPoses(slide, 1)[0], model.nodes[0].local) && near(model.localPoses(slide, 1)[1], model.nodes[1].local) &&
+              near(model.localPoses(slide, 1)[3], model.nodes[3].local),
+          "animation: the nodes it does not move stay as they are");
+
+    const mb::ModelAnimation& grow = model.animations[1];
+    const auto cannonScale = [&](float time) { return model.localPoses(grow, time)[1].m[0][0]; };
+    check(near(cannonScale(0), 0.1f) && near(cannonScale(0.5f), 0.1f) && near(cannonScale(1), 0.55f) &&
+              near(cannonScale(1.5f), 1) && near(cannonScale(7), 1),
+          "animation: scale keys, held outside them");
+    check(near(model.localPoses(grow, 1)[1].m[3][0], 0) && near(model.localPoses(grow, 1)[1].m[1][1], 0.55f),
+          "animation: a node with no parts of its own is moved from the defaults");
+
+    // The pose of a node includes its parents', as globalTransform() does for the rest pose.
+    check(near(model.globalPoses(slide, 0)[2], model.globalTransform(2)) && near(model.globalPoses(slide, 0)[0], model.globalTransform(0)),
+          "animation: the first key's global poses are the rest pose's");
+    check(near(model.globalPoses(slide, 1)[2], scaleTurnMove(2, 45, {1, 2, 0}) * model.nodes[0].local) &&
+              near(model.globalPoses(slide, 1)[3], model.nodes[3].local),
+          "animation: a global pose is the local one followed by its parents'");
+
+    // A sampler that is not linear is refused, and so is a path that is not a part of the transform.
+    json cubic = synthDocument();
+    cubic["animations"][0]["samplers"][0]["interpolation"] = "STEP";
+    writeGlb(tmp / "meshes" / "step.glb", cubic);
+    check(throwsWith([&] { mb::loadModel(tmp / "meshes" / "step.glb"); }, "step.glb"), "animation: a step sampler is refused");
+    json weights = synthDocument();
+    weights["animations"][0]["channels"][0]["target"]["path"] = "weights";
+    writeGlb(tmp / "meshes" / "weights.glb", weights);
+    check(throwsWith([&] { mb::loadModel(tmp / "meshes" / "weights.glb"); }, "weights.glb"), "animation: morph weights are refused");
 }
 
 // ---------------------------------------------------------------------------
@@ -472,6 +580,7 @@ int main() {
     fs::create_directories(tmp);
 
     testModel(tmp);
+    testModelAnimations(tmp);
     testTextureIndex(tmp);
     testMaterialLibrary(tmp);
 

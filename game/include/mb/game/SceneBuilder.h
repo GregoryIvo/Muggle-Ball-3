@@ -47,6 +47,8 @@ struct SceneDraw {
     // does not move; its item.world also holds the kSkyOffsetY shift.)
     ActorIndex actor = kNoActor;
     Mat4 local;
+    // The node of the model the primitive hangs on, for a prop that is posed by an animation (LevelScene::appendActorPosed).
+    int node = -1;
     // Texture files for item.material.texture: none, one, or (when animTimeMs > 0)
     // the frames of an animation, each shown for animTimeMs.
     std::vector<std::filesystem::path> textures;

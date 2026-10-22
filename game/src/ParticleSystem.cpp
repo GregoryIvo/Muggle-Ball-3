@@ -70,6 +70,11 @@ float fadeOf(const ParticleDef& def) {
     return def.fadeTime > 0 ? def.fadeTime : kDefaultFade;
 }
 
+// How long a beam takes to fade out once it starts to.
+float beamFade(float asked, const ParticleDef& def) {
+    return asked > 0 ? asked : fadeOf(def);
+}
+
 // A number in [0, 1) from three others: stateless, so the same bolt shakes the same way.
 float hash01(std::uint32_t seed, std::uint32_t a, std::uint32_t b) {
     std::uint32_t h = seed * 2654435761u ^ (a + 1) * 40503u ^ (b + 1) * 2246822519u;
@@ -229,6 +234,7 @@ EffectId ParticleSystem::make(const ParticleDef* def, Vec3 at, const EffectOptio
     effect.at = effect.previous = at;
     effect.scale = std::max(options.scale, 0.0f);
     effect.holdSeconds = std::max(options.seconds, 0.0f);
+    effect.fadeSeconds = std::max(options.fade, 0.0f);
     effect.direction = normalize(length(options.direction) > 0 ? options.direction : def->direction.value_or(Vec3{}));
     seed_ = seed_ * 1664525u + 1013904223u;
     effect.seed = options.seed != 0 ? options.seed : seed_ ^ (effect.id * 0x9E3779B9u);
@@ -365,7 +371,7 @@ ParticleSystem::Particle ParticleSystem::start(Effect& effect, Vec3 at, float ag
     const Vec3 axis = length(effect.direction) > 0 ? effect.direction : up;
     switch (def.type) {
         case ParticleType::Flash:
-            p.life = fadeOf(def);
+            p.life = effect.holdSeconds > 0 ? effect.holdSeconds : fadeOf(def);
             p.velocity = effect.direction;  // the plane it lies in is perpendicular to this; none: it faces the camera
             break;
         case ParticleType::Firework: {
@@ -470,7 +476,7 @@ void ParticleSystem::update(double seconds) {
     }
     std::erase_if(effects_, [](const Effect& effect) {
         const bool beam = effect.def->type == ParticleType::Laser || effect.def->type == ParticleType::Lightning;
-        return beam ? effect.fading >= fadeOf(*effect.def) : !effect.emitting && effect.live == 0;
+        return beam ? effect.fading >= beamFade(effect.fadeSeconds, *effect.def) : !effect.emitting && effect.live == 0;
     });
 }
 
@@ -572,7 +578,7 @@ void ParticleSystem::quadsOf(const Particle& p, const ParticleView& view, std::v
 void ParticleSystem::quadsOf(const Effect& effect, const ParticleView& view, std::vector<ParticleQuad>& out) const {
     const ParticleDef& def = *effect.def;
     const Colours colours = coloursOf(def);
-    const float alpha = 1 - std::min(effect.fading / fadeOf(def), 1.0f);
+    const float alpha = 1 - std::min(effect.fading / beamFade(effect.fadeSeconds, def), 1.0f);
     const float width = std::max(def.size, 0.0f) * effect.scale;
     const Vec3 span = effect.to - effect.from;
     const float length_ = length(span);

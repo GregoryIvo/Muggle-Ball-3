@@ -23,6 +23,9 @@ add_library(mb_game
   src/ParticleDraw.cpp
   src/BrickEffects.cpp
   src/ObjectEffects.cpp
+  src/BatBarrels.cpp
+  src/WeaponEffects.cpp
+  src/WeaponScene.cpp
   src/Billboard.cpp
   src/PrizeScene.cpp
   src/PrizeHud.cpp

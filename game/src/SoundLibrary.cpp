@@ -153,6 +153,7 @@ VoiceId SoundLibrary::play(const GameMaterial& material, MaterialSound which, fl
         case MaterialSound::Drop: return play(material.dropSound, gain, pan);
         case MaterialSound::Hit: return play(material.hitSound, gain, pan);
         case MaterialSound::Dead: return play(material.deadSound, gain, pan);
+        case MaterialSound::Period: return play(material.periodSound, gain, pan);
     }
     return 0;
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mb/engine/Renderer.h"
+#include "mb/game/BatBarrels.h"
 #include "mb/game/Gameplay.h"
 #include "mb/game/LevelScene.h"
 #include "mb/game/ModelCache.h"
@@ -9,6 +10,7 @@
 #include "mb/game/ParticleDraw.h"
 #include "mb/game/ParticleSystem.h"
 #include "mb/game/PrizeScene.h"
+#include "mb/game/WeaponScene.h"
 
 #include <cstdint>
 #include <span>
@@ -36,7 +38,8 @@ Vec3 ballPosition(const BallView& ball, const BatView& bat, float lead);
 
 // A GameSession on screen: the level as the rules have it (what exploded or fell is gone, what was hit shows its
 // damage, a person or an animal that was destroyed shrinks away), the bat and the balls, as a list of draws; the prizes
-// and their effects are PrizeScene's, and the special objects' ObjectEffects. Every effect the particle files describe (the
+// and their effects are PrizeScene's, the special objects' ObjectEffects, the weapons' barrels on the bat BatBarrels' and what
+// they fire WeaponScene's. Every effect the particle files describe (the
 // flashes where bricks explode, blasts, sparks, smoke, trails, leaves) is the one ParticleSystem's, which it owns, steps and
 // turns into batches. It reads the session and the events it reported; it draws nothing itself and knows no window.
 //
@@ -98,6 +101,8 @@ private:
     ParticleSystem particles_;
     ParticleBatches batches_;
     ObjectEffects effects_;  // the special objects' (dynamite, cannons, rockets, teleports ...)
+    BatBarrels barrels_;     // the weapons' barrels on the bat
+    WeaponScene weapons_;    // what the weapons and the strikes fire, and the effects they make
     std::vector<DrawItem> items_;
 };
 

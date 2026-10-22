@@ -196,7 +196,8 @@ position parameter exists in the data**.
 | `lazer-Korpus`, `Lazer-Stvol` | +-0.61 | -1.11 to 2.91 | the laser |
 
 The weapon frames map one to one onto the four weapon prizes and the four
-bullet definitions (section 4). The default bat of the game (`PlayScene`) is the frames `Korpus` (with its wings and little gear
+bullet definitions (section 4); their sizes in this table are at the rest pose of the file, where `Pushka` is tiny and the others small:
+the `Common` take grows them, which `GAMEPLAY.md` 18.11 describes. The default bat of the game (`PlayScene`) is the frames `Korpus` (with its wings and little gear
 below it), `Shesterenka-Left`, `Shesterenka-Right`, `Hand`, `Small-Hand` and `Bita`, which matches the footage's close-ups of
 the bat without a prize; its origin stands on the floor under the centre of the collision sphere, so that the arch's apex
 (z 3.0) meets the ball (radius 0.6) at its contact z. The texture is `Metall-Raketka-Red.jpg`; materials
@@ -272,6 +273,11 @@ suggests one sound per volley.
 
 `velocity` is in the owner's frame, so the cannon's `+x` is its own forward and
 the meteor's (-10, -30, 10) slants across the board while falling.
+
+The projectiles' models (`Bat-Bullets.x`, `Kernel.x`, `Bat-Rocket.x`, `Meteor.x`) each have one take, `Anim-1`, a turn about one axis
+(the bullets about their length, the left against the right, once in 2 s; the cannonball about x once in 2.33 s; the rocket about its
+length once in 1.33 s; the meteor about x once in 1.33 s), which the game loops while they fly. The rocket's file names no particles
+(only the meteor's names `trailmeteor`); how the weapons look is `GAMEPLAY.md` 18.12.
 
 ## 5. Prizes (`Prizes/*`)
 

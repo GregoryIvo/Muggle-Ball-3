@@ -170,6 +170,20 @@ target_link_libraries(mb_weapon_smoke PRIVATE mb_game)
 add_test(NAME mb_weapon_smoke COMMAND mb_weapon_smoke)
 set_tests_properties(mb_weapon_smoke PROPERTIES SKIP_RETURN_CODE 77)
 
+# What the weapons look like: the clock of the barrels' animation, the particle effects the events and the flying projectiles call for, and the
+# HUD's shot count, on made-up particle files and levels. CPU only.
+add_executable(mb_weapon_view_tests test_weapon_view.cpp)
+target_link_libraries(mb_weapon_view_tests PRIVATE mb_game)
+add_test(NAME mb_weapon_view_tests COMMAND mb_weapon_view_tests)
+
+# The weapons' picture on the real data and the GPU without a window: the barrels in bat.x's own animation, what flies, the beam, the
+# lightning, the meteors and their effects, in three worlds. Exits 77 (skipped) without MB3_ASSETS or a GPU.
+add_executable(mb_weapon_view_smoke weapon_view_smoke.cpp)
+target_include_directories(mb_weapon_view_smoke PRIVATE ${PROJECT_SOURCE_DIR}/app)
+target_link_libraries(mb_weapon_view_smoke PRIVATE mb_game)
+add_test(NAME mb_weapon_view_smoke COMMAND mb_weapon_view_smoke)
+set_tests_properties(mb_weapon_view_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
 # The prizes: what drops, how it falls and is caught, and what each of the 28 does, on made-up levels. CPU only.
 add_executable(mb_prize_tests test_prizes.cpp)
 target_link_libraries(mb_prize_tests PRIVATE mb_game)

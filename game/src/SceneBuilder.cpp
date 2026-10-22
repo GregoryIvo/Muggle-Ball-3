@@ -199,6 +199,7 @@ struct Builder {
                 draw.item.world = local * actorWorld;
                 draw.actor = ref.index;
                 draw.local = local;
+                draw.node = node;
                 draw.item.layer = background ? kBackgroundLayer : kWorldLayer;
 
                 const ModelMaterial* own = prim.material >= 0 ? &model->materials[prim.material] : nullptr;

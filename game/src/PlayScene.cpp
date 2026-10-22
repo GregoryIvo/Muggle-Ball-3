@@ -13,7 +13,7 @@ namespace mb {
 namespace {
 
 // The frames of bat.x that make the default bat (Korpus brings the wings and the little gear with it); the weapons'
-// frames are for the prizes that carry them.
+// frames are BatBarrels'.
 constexpr const char* kBatFrames[] = {"Korpus", "Shesterenka-Left", "Shesterenka-Right", "Hand", "Small-Hand", "Bita"};
 // Red, blue, yellow: Settings::bat.
 constexpr const char* kBatMaterials[] = {"Metall-Raketka-Red.jpg", "Metall-Raketka-Blue.jpg", "Metall-Raketka-Yellow.jpg"};
@@ -131,7 +131,9 @@ PlayScene::PlayScene(ModelCache& cache, const MaterialLibrary& materials, const 
                    const std::filesystem::path file = textures.find(name);
                    return file.empty() ? TextureHandle{0} : cache.texture(file);
                }),
-      effects_(cache, materials, textures, level, particles_) {
+      effects_(cache, materials, textures, level, particles_),
+      barrels_(cache, materials, textures, batMaterial(bat)),
+      weapons_(cache, materials, textures, particles_, session.rules().weapons) {
     update(session, {}, 0);
 }
 
@@ -141,6 +143,8 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
     level_.follow(session.scene());
     effects_.update(session, events, seconds, level_);
     prizes_.update(events, seconds);
+    barrels_.update(session, events, seconds);
+    weapons_.update(session, events, lead);
 
     for (const GameEvent& event : events) {
         switch (event.type) {
@@ -203,6 +207,7 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
             items_.push_back(item);
         }
         prizes_.appendMagnet(session, place, items_);
+        barrels_.append(place, items_);
     }
 
     std::erase_if(rolls_, [&](const auto& entry) {
@@ -244,6 +249,7 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
         addBall(ball.at + ball.velocity * static_cast<float>(ball.age), ball.turn, left * ball.size, ball.look);
     }
     items_.insert(items_.end(), effects_.items().begin(), effects_.items().end());
+    items_.insert(items_.end(), weapons_.items().begin(), weapons_.items().end());
     prizes_.appendPrizes(session, lead, items_);
 
     night_ = session.nightLevel();

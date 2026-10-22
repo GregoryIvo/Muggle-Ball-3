@@ -63,8 +63,8 @@ constexpr float kNightSky = 0.49f;
 // ---- The models
 
 // What is not a prize: the balls with models of their own, the Wall's rope and the Magnet's horseshoe (a frame of bat.x). The
-// prizes come first, in the order of PrizeKind. (The weapons' barrels are frames of bat.x too, but the game moves them: they grow
-// out of the bat in its "Common" animation and recoil in it. They come with the weapons.)
+// prizes come first, in the order of PrizeKind. (The weapons' barrels are frames of bat.x too, but the game moves them in the
+// model's own animation: they are BatBarrels'.)
 enum Extra : ActorIndex {
     kPowerBall = kPrizeKindCount,
     kExplosiveBall,

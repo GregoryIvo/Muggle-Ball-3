@@ -187,6 +187,15 @@ void testFlash() {
     check(quads.size() == 1 && quads[0].depthTest && near(dot(quads[0].halfRight, {0, 1, 0}), 0) && near(dot(quads[0].halfUp, {0, 1, 0}), 0) &&
               near(quads[0].centre.y, 0.1f) && near(length(quads[0].halfRight) * 2, 5, 0.05f),
           "flash: explosemeteor's direction up lays it flat on the floor, swelling at 50 units/s");
+    // `seconds` is how long a flash lives where its fade_time would be too short: it still swells at its speed and fades over all of it.
+    ParticleSystem longer(library());
+    longer.spawn("explosemeteor", {4, 0, 5}, {.seconds = 0.4f});
+    run(longer, 0.3);
+    quads = quadsOf(longer);
+    check(quads.size() == 1 && near(length(quads[0].halfRight) * 2, 10, 0.05f) && near(quads[0].colourBegin.a, 0.25f, 0.06f),
+          "flash: with `seconds` it is full size at 0.2 s and a quarter strong at 0.3 s of 0.4");
+    run(longer, 0.15);
+    check(longer.particleCount() == 0, "flash: and gone after it");
     ParticleSystem tilted(library());
     tilted.spawn("Flash", {}, {.direction = {1, 0, 0}});
     run(tilted, 0.05);
@@ -474,6 +483,14 @@ void testLaser() {
     check(near(quads[0].colourBegin.a, 1 - (0.7f - 0.1f - 0.2f) / 1.5f, 0.03f), "laser: full strength for `seconds`, then it fades over `fade_time_msec` (1.5 s)");
     run(system, 1.5);
     check(!system.alive(id) && quadsOf(system).empty(), "laser: gone when it has faded");
+
+    // `fade` says how long it takes to fade, where the definition's would be too long.
+    ParticleSystem quick(library());
+    const EffectId brief = quick.beam("Laser", {0, 1, 0}, {0, 1, 100}, {.seconds = 0.2f, .fade = 0.25f});
+    run(quick, 0.2 + 0.125);
+    check(near(quadsOf(quick)[0].colourBegin.a, 0.5f, 0.15f), "laser: with `fade` it is about half strong half that long into its fade");
+    run(quick, 0.25);
+    check(!quick.alive(brief) && quadsOf(quick).empty(), "laser: and gone after it, not the definition's 1.5 s");
 
     // Aimed every frame it never fades, and follows; stopped, it fades.
     ParticleSystem held(library());

@@ -37,8 +37,12 @@ struct EffectOptions {
     Vec3 direction{};
     float scale = 1;  // of the sizes and distances the definition gives, not of the times
     // spawn(): how long an emitter (Trail, Smoke, WaterBubble, Tornado) keeps emitting before it stops by itself; 0 puts all of its
-    // `num` particles out at once. beam(): how long it stays at full strength, after it is made and after each aim(), before it fades.
+    // `num` particles out at once; how long a Flash lives (it swells for the first part and fades over all of it), 0: its
+    // `fade_time_msec`. beam(): how long it stays at full strength, after it is made and after each aim(), before it fades.
     float seconds = 0;
+    // beam(): how long it takes to fade out, for one that must be gone sooner (or later) than the definition's `fade_time_msec`
+    // says; 0: the definition's.
+    float fade = 0;
     std::uint32_t seed = 0;  // 0: the next of the system's own sequence
 };
 
@@ -123,6 +127,7 @@ private:
         float scale = 1;
         float age = 0;
         float holdSeconds = 0;     // a beam's
+        float fadeSeconds = 0;     // and how long it takes to fade out, 0: its definition's
         float holdLeft = 0;
         float fading = 0;          // how long a beam has been fading
         bool held = true;          // aimed since the last update

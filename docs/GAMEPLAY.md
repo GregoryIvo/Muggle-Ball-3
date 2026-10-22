@@ -698,7 +698,7 @@ The icons (`Hud.cpp`, `PrizeHud.h`): one for each effect in force that has one (
 | Multiball, Drunken Ball | the extra balls and the wobbling path are the session's |
 | Night | the scene's light is dimmed to 0.38 of itself at full night (`nightLevel()`), and the sky, the halos and the flashes, which have no light, to 0.49 [M, section 14.3]; the HUD, drawn over it, is not dimmed |
 | Earthquake, Wind | the session throws the loose pieces about, and that is all there is to see; the camera does not shake [M] |
-| the weapons | **not drawn yet**: their firing is section 18 and their picture the next stage's. The barrels (`Pulemet-*`, `Pushka`, `Bazuka-*`, `lazer-*`) are frames of `bat.x` that the game moves: in its `Common` animation each grows from a tenth of its size to full size in 0.6 s, recoils and shrinks again, and the glTF files keep that animation in `extras.animations` (`ASSET_FORMATS.md`) |
+| the weapons | the barrels (`Pulemet-*`, `Pushka`, `Bazuka-*`, `lazer-*`, frames of `bat.x`) grow on the bat in the model's own `Common` animation, recoil at each shot and shrink away when the weapon ends; what flies, the laser's beam, the Thunderbolt's lightning and the meteors are drawn: sections 18.11 and 18.12 |
 
 ### 16.4 Sounds
 
@@ -716,7 +716,7 @@ The icons (`Hud.cpp`, `PrizeHud.h`): one for each effect in force that has one (
 
 ### 16.6 Still open
 
-- The weapons' barrels (above).
+- The bat's own motion: the same `Common` take of `bat.x` has keys for the body (`Korpus` bobs 0.2 units up and down), the wings, the gears and the hand, which the game does not play: whether the original moves the bat so is [?] (the footage's bat is too small to say).
 - The halo's real size, the orbs' spin and the models' height above the floor are not measured.
 - The icons' own place in the original's HUD (the numbers sit right of the icon at the right edge in the footage; the icon's exact x is a guess).
 - Whether the Explosive Ball is the bomb in the original's footage (it looks like the plain ball in the one case seen).
@@ -830,7 +830,7 @@ What is tested: `mb_special_object_tests` (made-up levels: the blast, its reach 
 
 ## 18. Weapons and strikes as built (step 5, weapons)
 
-What the game does with the four weapons and the two strike prizes of sections 7 and 14.3 where the footage and the data leave room: the rules, with no picture and no sound (the barrels, the bullets, the beam, the lightning, the meteors and their sounds are the next stage's). Tags as before; `[I]` is a choice made where both are silent. The rules are `Weapons` (`game/Weapons.h`, `game/src/Weapons.cpp`), a member of `GameSession` that is its friend, called at three places of `Gameplay.cpp` and `SessionPrizes.cpp`: a click that no ball takes (`fire`), the catch of a Thunderbolt or a Meteorite Rain (`startStrike`) and once a fixed step after the contacts (`update`). Its numbers are `WeaponRules`, `GameplayRules::weapons` (18.10). The projectiles are bodies of the session's `PhysicsScene` (`addProjectile`); what they do to an object goes through `SpecialObjects::weaponHit` and `burst`, so that 17.1 stands. Tests: `mb_weapon_tests` (made-up levels), `mb_weapon_smoke` (the 83 levels), `mb_gameplay_smoke` (the autopilot fires what it has caught).
+What the game does with the four weapons and the two strike prizes of sections 7 and 14.3 where the footage and the data leave room: the rules (18.1 to 18.10) and then what is shown and heard (18.11 to 18.14: the barrels of the bat, what flies, the beam, the lightning, the meteors, and their sounds). Tags as before; `[I]` is a choice made where both are silent. The rules are `Weapons` (`game/Weapons.h`, `game/src/Weapons.cpp`), a member of `GameSession` that is its friend, called at three places of `Gameplay.cpp` and `SessionPrizes.cpp`: a click that no ball takes (`fire`), the catch of a Thunderbolt or a Meteorite Rain (`startStrike`) and once a fixed step after the contacts (`update`). Its numbers are `WeaponRules`, `GameplayRules::weapons` (18.10). The projectiles are bodies of the session's `PhysicsScene` (`addProjectile`); what they do to an object goes through `SpecialObjects::weaponHit` and `burst`, so that 17.1 stands. Tests: `mb_weapon_tests` (made-up levels), `mb_weapon_smoke` (the 83 levels), `mb_gameplay_smoke` (the autopilot fires what it has caught), and for the picture and the sounds `mb_weapon_view_tests` and `mb_weapon_view_smoke` (18.14).
 
 ### 18.1 Firing
 
@@ -866,7 +866,7 @@ What the game does with the four weapons and the two strike prizes of sections 7
 - it **stops at the first actor that nothing damages** (a wall, the board, a solid piece of scenery, steel), at the point where it meets it (`LaserBeam::to`); with nothing in the way it reaches `laserRange` = 60. In the real levels that is the far wall or a platform;
 - the balls and the bat are no actors, and the **teleports are not there**: it goes through them;
 - it pushes nothing.
-`beams()` has it on show for `laserLife` = 0.45 s, growing to its length within `laserGrow` = 0.1 s [M] (what the picture does with the numbers is the next stage's).
+`beams()` has it on show for `laserLife` = 0.45 s, growing to its length within `laserGrow` = 0.1 s [M] (what the picture does with the numbers is 18.12).
 
 ### 18.4 What a hit does
 
@@ -962,6 +962,76 @@ Every projectile ends with exactly one of `ProjectileHit`, `BoltStruck`, `Meteor
 | `offscreen` | 2 units | I |
 
 What is tested: `mb_weapon_tests` (made-up levels: the engine's kinds of body and `raycastAll`; the top edge against the camera; the click with no weapon, with a held ball, while the bat swoops in, with the Magnet, in the Lost phase and after the level is won; the shot count, the interval, a weapon running out and replacing another; each weapon's spawn point, velocity and gravity, and the barrels of a wider bat; a projectile that leaves the board; the damage of each projectile against bricks of one to four energy, the burst's reach and push, what is spent on steel and walls; the laser's piercing, width, stop, one hit a body, teleports and balls, fading and range; dynamite set off by a bullet and its chain, a cannon, a firework crate, metal, springs, volcanoes, generators and teleports; the prizes a kill may leave; the Thunderbolt's burst, spread, targets, top edge, metal spared and seeds; the meteors' count, timing, slant, aim and damage; the strikes' damage; that nothing is thrown once the level is won; the autopilot's look ahead; two identical games) and `mb_weapon_smoke` (the 83 levels, every weapon and both strikes given at once, the click held down, 24 s each: nothing not finite or off the board, shots counted, every projectile accounted for, the strikes all thrown, the balls' speed and plane, the time of a step).
+
+### 18.11 The barrels on the bat
+
+**What is in the data [D].** `bat.x` has four takes (`Common`, `Hit`, `Right`, `Left`); the converter writes them as glTF animations (`ASSET_FORMATS.md`, the model's `animations`). The weapons are frames of the model that the default bat does not draw: `Pulemet-Left` and `Pulemet-Right` (each with its `Pulemet-Stvol-*`) for the Machine Gun, `Pushka` for the Cannon, `Bazuka-Korpus` (with `Bazuka-Stvol`) for the Bazooka and `lazer-Korpus` (with `Lazer-Stvol`) for the Laser. `Common` is one take of 3.5 seconds (3.97 for the cannon) keyed for all of them at once, in 4800 ticks a second (D3DX's default; the keys are 160 ticks, one frame of 30 a second, apart): the barrels grow from a small size, push their guns out, stand, recoil once and settle, stand, and draw back and shrink away. Each weapon's frames are at their rest pose at tick 0, small: the body of `Pulemet-*` at 0.095, `lazer-Korpus` at 0.107 and `Bazuka-Korpus` at 0.138 of its size, and `Pushka`, whose mesh is authored tiny, at a tenth of the 10.4 it grows to.
+
+**Where the take is cut [D for the times, I for the cut].** The keys stand still between the three moves, so the take is cut into four pieces with the times the keys give (`BarrelClip`, `BatBarrels.cpp`):
+
+| piece | ticks | seconds | what the keys do |
+|---|---|---|---|
+| growing | 0 to 4000 | 0.83 | the body is full size at 3200 (0.67 s) and the gun is pushed out by 4000 (the Gun's barrels by 1.1 units, the Bazooka's by 1.1, the Laser's by 0.7); the barrel then waits, at 4000, until its recoil |
+| recoil | the Gun 7040, the Cannon and the Laser 6880, the Bazooka 5440, to 11200 | 0.9 (the Bazooka 1.2) | the gun moves back (the Gun's by 0.9 units in 0.23 s, the Cannon's by 0.4, the Bazooka's by 1.1, the Laser's by 0.6), forward past where it was by about a fifth of that and settles at 11200 where it waited |
+| waiting | 11200 to 12000 (the Gun 14400) | | |
+| shrinking | the Gun 14400, the others 12000, to 16800 | 1.0 (the Gun 0.5) | the gun draws back and the body shrinks to where it began |
+
+**What shows when [I].** A weapon's barrel is shown while the weapon is the one a click fires (`weapon()`, 18.1): the one caught last that has shots. It starts to grow when it becomes that, waits, and recoils from the start of its recoil at each `ShotFired` (again from the start if it is already recoiling: the Machine Gun's quick shots make its guns kick every 0.2 s). When the weapon ends (its last shot or the bat is lost), or another weapon is caught, the barrel draws back and shrinks; the recoil of a last shot is played to its end first, so that it is seen. A barrel that is wanted again while it shrinks starts to grow from the beginning (it jumps; two weapons held at once and swapped quickly is the only way to see it). A shot may leave while the barrel is still small: the rules do not wait for the picture (the footage has the Laser's first beam 1.4 s after the catch, but that is when the player clicked) and the shot starts at the data's spawn point (18.3) in any case. The barrels are drawn with the bat, at the bat's size (a wider bat has wider barrels), with the bat's texture, and are gone with it as it flies in and out. `BarrelClock` is the timing, with no model in it (tested without a GPU); `BatBarrels` poses the frames from `Model::globalPoses` of `Common` at the clock's time.
+
+**Footage [M, weak].** The Laser caught at V1 61.6 has its barrel full size at 62.2 (`nocommentary-DpvwN-k35Eg-t61.0-63.8`): about the 0.67 s of the take; the Machine Gun's barrels and the Cannon's are in `special-V2-t96.55-97.39` and `james-oSjPIw8W0zE-t20-cannon-bat`, small beside the rest of the bat, as they are here. The recoil is not visible at the footage's size.
+
+**Assets.** The take is in `bat.glb` only when it was converted with the converter that writes animations; with an older `bat.glb` the barrels are not drawn and the game says so once (re-run `tools/convert_assets.py`).
+
+### 18.12 What flies, the beam and the strikes
+
+What the weapons and the strikes look like (`WeaponScene`: the models; `WeaponEffects`: what is asked of the one particle system, 19). Each projectile is the model its object names (`Data/Objects/Bullets`, `Interactive/meteor.XML` [D]) with its game material, at the place of its body carried on by the lead, turning in its model's own `Anim-1` take (a turn about one axis, looped by its age [D]: the bullets about their own length, the left against the right, once in 2 s; the cannonball about x once in 2.33 s; the rocket about its length once in 1.33 s; the meteor about x once in 1.33 s).
+
+| what | picture | tag |
+|---|---|---|
+| bullets (Machine Gun) | `bat-bullets.x`, the frame of each barrel (`Left-Bullet`, `Right-Bullet`), `bat_bullet`: small dark capsules, no shadow (the footage shows none: `special-V2-t160.12-160.27`) | D, M |
+| cannonball | `kernel.x`, `bat_kernel`: the spiked black ball of `special-V2-t96.55-97.39`, with the blob of shadow the balls have, 2 units across | D, M, I |
+| rocket | `bat-rocket.x`, `bat_rocket`, with a shadow, and a trail: `Trail/TrailBlue` put out from its tail (0.8 behind the middle of its capsule) at 0.35 of its size. The footage has a small red rocket and a short glow, no streak (`special-V2-t112.30-113.30`), and the data names no trail for the rocket (`rocket.xml` has no `particles1`), so the trail is kept short and small | D, M, I |
+| the laser | the `Laser` particle as a beam from the barrel to the tip of `LaserBeam`: yellow at the barrel to red at the tip, with a round end each, its front running out at 150 units/s (about 0.2 s for 30 units). The tip's round red end is the red mark where it stopped. At full strength for 0.25 s and gone at 0.45 s, when the rules drop the beam (the footage: full at 0.26 s, dim at 0.4 s, gone by 0.54 s, V1 58.88 to 59.3) | D, M |
+| a bolt | the `Lightning` particle as a bolt from the top edge of the screen (`BoltStruck::end`) to where it struck: ten pieces thrown aside, taking a new shape 30 times a second. At full strength for 0.1 s and gone 0.05 s after [M: each of the five of `special-V2-t408.00-408.70` is seen about 0.1 s]. The falling body (0.3 to 0.6 s, 18.5) is not drawn: the footage's bolt is there at once, from the top. A target above the top edge has none | D, M, I |
+| a meteor | `meteor.x` with its `meteor` material (the data's `Lopata.jpg`, grey-brown rock), tumbling, with a shadow, and `TrailMeteor` (size 5, pink to red, fading in 0.5 s) put out from its middle for as long as it flies [D: `particles1="trailmeteor"`] | D |
+| the meteor's landing | `explosemeteor`, the ring of `Particles/boom.png` lying on the water below where it came down, 10 across at 50 units/s: it swells for 0.2 s and fades over its life, 0.4 s [M: the rings of `special-V2-t858-865` last about 0.4 s]. The file's `fade_time_msec` alone, 0.2 s, ends it when it has swollen, so the life is asked for (`EffectOptions::seconds` of a Flash) | M, I |
+| the cannonball's burst | `exploseyadro` at its 0.4 of its 10 units: the white-orange star of `special-V2-t97.15-97.60`, about 4 units across with a core of 2 [M] | D, M |
+| the rocket's burst | the same at 0.45: "4 to 5 units across" [M, `special-V2-t112.58-112.91`] | D, M |
+| what the burst and the beam destroy | the usual flash of the brick's `exploseType` (19.5) | |
+| a bullet hitting | no picture of its own: the brick it destroys has its flash, and a wall shows nothing [?] | |
+| the muzzle | none: the footage shows no flare at the bat's barrels [?] | |
+
+All of it is asked for from the events (`LaserBeam`, `BoltStruck`, `MeteorImpact`, `ProjectileExploded`, 18.8) and from `session.projectiles()`; a trail follows its projectile and stops (what it left fades) when the projectile is gone. The same names are used by the real files: `mb_weapon_view_smoke` plays each weapon and strike in three worlds and checks that its effect was drawn.
+
+### 18.13 Sounds
+
+What each event sounds like (`PlaySounds`, `AUDIO.md`): the `period` sound of the projectile's material is the shot's and its `dead` sound the impact's [D, with the use inferred as in `OBJECTS.md` section 4].
+
+| event | sound | data |
+|---|---|---|
+| `ShotFired` | the weapon's: `bullet_shoot`, `kernel_shoot`, `rocket_shoot`, `lazer_shoot`, once for each shot, so once for the Machine Gun's pair (the data marks the right bullet's `shootSound`, and its sound is played once, at the bat's place, not at the barrel's) | files `bullet_shoot.ogg`, `kernel_shoot.ogg`, `rocket_shoot.ogg`, `lazer_shoot.ogg` |
+| `ProjectileHit` | `bullet_dead`, `kernel_dead`, `rocket_dead`, `lazer_dead`: **no file in `sounds.xml`, so silent**. A cannonball's, a rocket's and a bullet's impact are heard through the bricks they destroy, which make their own `dead` sounds | none |
+| `BoltStruck` | `thunderbolt_dead`, the thunder, at the strike | `thunderbolt_dead.ogg` |
+| `MeteorFalling` | `meteor`, the meteor's `period` sound, as it starts to fall | `meteor.ogg` |
+| `MeteorImpact` | `meteor_dead`, which is `dynamite_dead.ogg` (with a replay delay of 0.5 s, so that two meteors landing together are one sound) | `dynamite_dead.ogg` |
+| `ProjectileExploded`, `ProjectileGone`, `LaserBeam` | none | |
+
+The Thunderbolt's `thunderbolt` `period` sound has no file either, so nothing is heard as a bolt falls; when the original played it, and when it played the meteor's, is [?] (there is no event for either but the strike and the start). Every sound is panned by where on the board it is, as the others.
+
+### 18.14 The numbers of the picture, and what is tested
+
+| constant | value | tag |
+|---|---|---|
+| ticks a second of `bat.x`'s takes | 4800 | D |
+| barrels: grown, recoil start (Gun, Cannon, Bazooka, Laser), recoil end, shrink start (Gun, others), shrink end | 4000; 7040, 6880, 5440, 6880; 11200; 14400, 12000; 16800 ticks | D (the cut: I) |
+| the laser's beam: full strength, then fade | 0.25 s, then until `laserLife` (0.2 s) | M |
+| a bolt: full strength, fade | 0.1 s, 0.05 s | M, I |
+| the meteor's ring: life | 0.4 s | M |
+| burst scale: cannonball, rocket | 0.4, 0.45 of `exploseyadro`'s 10 units | M |
+| the rocket's trail: scale, distance behind its middle | 0.35, 0.8 units | I, D |
+| the shadow under a cannonball, a rocket, a meteor | 2.0 units across | I |
+
+Tested: `mb_weapon_view_tests` (no GPU or data: the barrels' clock in every phase and interruption, the clips' order and their keys' ticks; the particle effects each event asks for on made-up files with the real numbers (the beam's strength over time, the bolt, the ring's size and life, the bursts' size, a trail that follows its rocket and stops with it, none for bullets, cannonballs and bolts); the weapon sounds in `mb_sound_tests`; that the HUD's shot count falls in the step of the shot), `mb_weapon_view_smoke` (the real data on the GPU: the animations in the converted files, a tenth to full size, a recoil that settles, a shrinking; the barrels following the weapons through a catch, a second catch, a shot and the weapon's end; every weapon and strike played in three levels of three worlds, with its projectiles drawn and its effects on show), and the converter's and the loader's tests for the animations (`tests/test_xfile.py`, `tests/test_assets.cpp`).
 
 ## 19. Particles as built (step 5, fx)
 

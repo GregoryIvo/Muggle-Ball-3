@@ -52,7 +52,7 @@ private:
     std::unordered_map<std::string, std::size_t> musicsByName_;
 };
 
-enum class MaterialSound { Drop, Hit, Dead };
+enum class MaterialSound { Drop, Hit, Dead, Period };
 
 using PeriodicId = std::uint32_t;  // 0 is none
 
