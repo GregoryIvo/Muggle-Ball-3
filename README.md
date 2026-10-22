@@ -28,17 +28,19 @@ when it is lost, bricks that explode flash and leave (people and animals shrink 
 hit has its sound. The hearts and points carry from level to level, a finished level opens the
 next, a lost game goes to Game Over or the high scores, and `--autoplay` lets an autopilot play
 (see below). The 35 sharks and birds that follow a path swim and dance along it, as kinematic bodies that push the ball
-and the bricks they meet (see [`docs/LEVEL_FORMAT.md`](docs/LEVEL_FORMAT.md), "Path motion"). The 22 sails hang from their
-ships' yards, fill out in the wind, fall when the ship breaks and score when they are hit (see
-[`docs/GAMEPLAY.md`](docs/GAMEPLAY.md), section 20). Not there yet: prizes and the bat's weapons, cannons, reflections, particle
-systems, and model animation.
+and the bricks they meet (see [`docs/LEVEL_FORMAT.md`](docs/LEVEL_FORMAT.md), "Path motion"). The 28 prizes (they drop from destroyed
+objects, fall to the bat and change it, the ball or the board; `docs/GAMEPLAY.md` sections 15 and 16), the level's special objects (dynamite
+chains, interactive cannons, teleports, firework crates, springs, volcanoes and metal; section 17), the bat's four weapons and the Thunderbolt and
+meteor strikes (section 18), the particle systems of `Data/Particles` (section 19) and the 22 sails, which hang from their ships' yards, fill out in
+the wind, fall when the ship breaks and score when they are hit (section 20), are in. Not there yet: reflections, and the animation of models other
+than the bat's weapon barrels.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
 | `engine/` | Platform-neutral runtime: window and input, GPU renderer and shaders, model and image loading, physics (`PhysicsWorld` over Jolt), audio (Ogg Vorbis decoding, mixer, device), logging, paths |
-| `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, level physics (`PhysicsScene`), the rules of play (`GameSession`, `BallReach`), the level's special objects (`SpecialObjects`), the weapons and the strikes of the prizes (`Weapons`), objects that follow paths (`PathPlayer`), what a session looks and sounds like (`PlayScene`, `ObjectEffects`, `PlaySounds`), camera, sound library, save data; the 2D UI (bitmap fonts, string table, menu forms, the menu screens and their flow, the HUD) |
+| `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, level physics (`PhysicsScene`), the rules of play (`GameSession`, `BallReach`), the level's special objects (`SpecialObjects`), the prizes (`Prizes`, the session's `SessionPrizes.cpp`), the weapons and the strikes of the prizes (`Weapons`), the sails (`Cloth`, `ClothPlan`), objects that follow paths (`PathPlayer`), the particle systems (`ParticleDef`, `ParticleSystem`, `ParticleDraw`), what a session looks and sounds like (`PlayScene`, `ObjectEffects`, `BrickEffects`, `PrizeScene`, `PrizeHud`, `Billboard`, `BatBarrels`, `WeaponScene`, `WeaponEffects`, `ClothDraw`, `PlaySounds`), camera, sound library, save data; the 2D UI (bitmap fonts, string table, menu forms, the menu screens and their flow, the HUD) |
 | `app/` | Executable entry point: the game's front end and its play session (`PlaySession`), the level viewer (with physics and music) and the menu form viewer |
 | `platform/macos/` | App bundle metadata (the only per-platform code so far) |
 | `scripts/` | `package_macos.sh`: universal build, ad-hoc signing, Developer ID signing and notarization |

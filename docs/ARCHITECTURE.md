@@ -202,7 +202,7 @@ for (const GameEvent& e : session.takeEvents()) { /* BrickHit, BrickDestroyed, B
 | What | Where |
 |---|---|
 | Every number the rules use, each with its source in `GAMEPLAY.md` and how well it is known | `GameplayRules` |
-| What happens, for the sound and the look | `GameEvent`: `BallLaunched`, `BatHit`, `BoardHit`, `BallsHit`, `BrickHit`, `BrickDestroyed`, `ActorFell`, the special objects' `DynamiteBlast`, `CannonFired`, `ShotHit`, `RocketLaunched`, `RocketBurst`, `BallEntered`, `BallEmerged`, the weapons' `ShotFired`, `ProjectileHit`, `LaserBeam`, `BoltStruck` and the like (section 18), then `BallLost`, `LifeLost`, `BatLeft`, `BatEntered`, `LevelComplete`, `GameOver` |
+| What happens, for the sound and the look | `GameEvent`: `BallLaunched`, `BatHit`, `BoardHit`, `BallsHit`, `BrickHit`, `BrickDestroyed`, `ActorFell`, the special objects' `DynamiteBlast`, `CannonFired`, `ShotHit`, `RocketLaunched`, `RocketBurst`, `BallEntered`, `BallEmerged`, the weapons' `ShotFired`, `ProjectileHit`, `LaserBeam`, `BoltStruck` and the like (section 18), then `BallLost`, `BallFreed`, the prizes' `PrizeDropped`, `PrizeCaught`, `PrizeMissed`, `EffectStarted`, `EffectEnded`, `StrikeGranted`, `BallStuck`, `Blast`, `BallRubbered`, then `LifeLost`, `BatLeft`, `BatEntered`, `LevelComplete`, `GameOver` |
 | Which bricks are hurt, and which must go for the level to end | `canBeDamaged`, `isTarget`, `TargetRule` (the default `Bricks`, every brick and tree whatever its motion, is the rule of the footage, `GAMEPLAY.md` "Rules settled by the second study"; `BrickType`, H-type of `OBJECTS.md`, is refuted and kept for comparing and for tests; chosen in `SessionOptions::levelEnd`); targets out of the ball's reach do not count (below) |
 | The cursor as a bat position | `cursorOnPlane`, `batTargetX` |
 | A player that needs no hands | `Autopilot`, `autoplay()` (returns the events; `mb_gameplay_smoke --log <level>` prints them) |
@@ -219,7 +219,7 @@ The prizes are in the session too (`GAMEPLAY.md` section 15; `game/Prizes.h` has
 down the board (`fallingPrizes()`) and is caught by the bat (`PrizeCaught`, `PrizeMissed`), and the effects, timed, counted or instant, are
 state the picture reads (`activeEffects()`, `weapon()`, `ballRadius()`, `ballSpeed()`, `batRadius()`, `nightLevel()`, `BallView::stuck`) with
 `EffectStarted`/`EffectEnded` for the sounds. `SessionOptions::campaignLevel` and `prizeSeed` say which prizes may drop and make a session
-repeat. Tests: `mb_prize_tests` (made-up levels), `mb_prize_smoke` (the table against the data).
+repeat. Tests: `mb_prize_tests` (made-up levels), `mb_prize_smoke` (the table against the data), `mb_prize_view_tests` (what they put on screen, with no GPU).
 
 What the prizes look like is `PrizeScene` (`game/PrizeScene.h`, `GAMEPLAY.md` section 16), a part of `PlayScene` that reads the session and the events:
 the falling orbs with their halos, the flashes where a prize is caught or missed and the Explosive Ball goes off, the models of the Power Ball and the
@@ -264,7 +264,8 @@ looked at when the level starts and twice a second at the targets that are loose
 (`ActorStatus::outOfPlay`, `SessionStats::targetsOutOfPlay`). What the look cannot see (a piece that stays up where the physics left it) is
 let go when balls have flown for 90 s without touching a brick and few targets are left (`GameplayRules::stallSeconds`,
 `SessionStats::targetsLetGo`). No level can then be impossible for want of such a target (`GAMEPLAY.md` section 12 has what the autopilot
-makes of it).
+makes of it). A ball that cannot move is put back in the world (`BallFreed`, `GameplayRules::jamTime`), and one that is pinned again in the
+same pocket after `jamFreesInARow` frees is lost, so that no pocket holds the only ball for ever.
 
 Tests: `mb_gameplay_tests` on made-up levels (the bat's law, the life sequence, damage and explosions, the end of the
 level under each reading and the required set, the targets out of the ball's reach, bricks that wake what they held, the cursor); `mb_gameplay_smoke`
@@ -280,13 +281,14 @@ the click each frame, and turns what they report into what is seen and heard.
 |---|---|
 | `GameSession` + `Autopilot` | The rules; with `--autoplay` the autopilot's input replaces the mouse's. `PlayerInput` (`app/`, the keys are SDL's) turns the mouse into the bat's target through `batTargetX` and the drawable size; a click (the button going down, not held) or Space launches. The click or key that ends the pause is not given to it: `GameFlow::Step::resumed` makes the front end call `LevelSession::resume()` instead of `update()` for that frame, which starts `PlayerInput` over. |
 | `PlayScene` (`game/`) | The picture of a session as a list of draws: `LevelScene` for the level (actors at their physics poses, what exploded or fell hidden, a hit brick retextured by its damage state, a person or an animal that was destroyed scaled down about its centre while it shrinks, `LevelScene::setScale`), the bat (the frames of `bat.x` that make the default bat, with the texture of `Settings::bat`), the balls (rolling by the distance over the radius, a soft shadow, shrinking away over 0.25 s when lost), and, through the one `ParticleSystem` it owns (see "Particles"), the flash of each `BrickDestroyed` by its material's `exploseType` (none for a person or an animal, who shrinks instead). Reads the session and its events; no window. |
+| `PrizeScene`, `PrizeHud`, `Billboard` (`game/`, `PrizeScene` is drawn by `PlayScene`) | What the prizes look like: the falling orbs with their halos, the flashes where one is caught or missed and where the Explosive Ball goes off, the models of the Power and Explosive Balls, the Magnet's horseshoe, the Wall's rope, the Yo-Yo's string and the night's dimmed light; the HUD's caption and icons (`PrizeHud`, which `PlaySession` fills into the `GameHud`). Reads the session and its events; no rules, no window. |
 | `ObjectEffects` (`game/`, drawn by `PlayScene`) | What the special objects look like: a cannonball (`Yadro.x`) with its shadow and a flare at the muzzle, a rocket (`Fire-rocket.x`) with its shadow, the ring where a ball goes into a teleport and comes out, a spring that gives (`LevelScene::setScale`), the glow of a flicker; and what the particle files define, asked of the `ParticleSystem`: the blast's flash (the explosion the level names), the cannonball's burst, the muzzle's smoke, the rocket's trail and burst, the flickers' sparks and smoke, a tree's leaves. Billboards and two meshes from the session's events and `objects()`; no rules, no window. |
 | `BatBarrels`, `WeaponScene`, `WeaponEffects` (`game/`, drawn by `PlayScene`) | What the weapons and the strikes look like: the barrels on the bat in `bat.x`'s own animation (a clock for each weapon: grow, wait, recoil on `ShotFired`, shrink when the weapon ends), the bullets, the cannonball, the rocket and the meteors as their models turning in their own takes (a shadow on the water for the heavy ones), and, asked of the `ParticleSystem`, the laser's beam, the bolt's lightning, the rocket's and the meteor's trails, the bursts and the meteor's ring. |
 | `PlaySounds` (`game/`) | An event as its sound through the `SoundLibrary`, panned by x (the table is in `AUDIO.md`). |
 | the fades | A level comes up out of the dark in 0.6 s; when the last target is gone the picture holds for 0.1 s (0.45 s when the game is lost) and fades out in 0.8 s, under the HUD; then `update` reports the outcome. The level cannot be paused meanwhile (`LevelSession::ending()` to `GameFlow::setLevelEnding`): leaving from the pause would lose the outcome, the win never recorded or the game over never reaching the name entry. |
 
-The session steps by 1/60 s; the picture carries the balls and the bat on by their velocities for the time the frame is ahead of the
-last step, so a display at 120 Hz moves smoothly (a ball held on the bat goes on with the bat, `ballPosition`). `--autoplay` plays on
+The session steps by 1/60 s; the picture carries the balls, the bat, the falling prizes, the cannonballs and the rockets on by their velocities for the time the frame is ahead of the
+last step, so a display at 120 Hz moves smoothly (a ball held on the bat goes on with the bat, `ballPosition`; `shotPosition`, `rocketPosition`). The level's own actors are drawn where the last step left them. `--autoplay` plays on
 nobody's behalf: its `SaveData` has no folder, so it reads and writes none of the player's files, and the front end leaves the system
 cursor alone (`FrontEndOptions::hideCursor`). Tests: `mb_play_smoke` plays real levels on the GPU without a window (a crate shows
 its damage textures, a brick leaves the picture, the autopilot wins a level with the right hold and its fade out is reported, the click

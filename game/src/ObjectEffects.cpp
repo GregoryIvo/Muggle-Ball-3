@@ -75,6 +75,14 @@ std::uint32_t seedOf(Vec3 at, double time) {
 
 }  // namespace
 
+Vec3 shotPosition(const SpecialObjects::Shot& shot, float lead) {
+    return shot.position + shot.velocity * lead;
+}
+
+Vec3 rocketPosition(const SpecialObjects::Rocket& rocket, float rocketSpeed, float lead) {
+    return rocket.position + Vec3{0, rocketSpeed * lead, 0};
+}
+
 ObjectEffects::ObjectEffects(ModelCache& cache, const MaterialLibrary& materials, const TextureIndex& textures, const Level& level,
                              ParticleSystem& particles)
     : rocket_(cache, materials, textures, modelLevel(ObjectType::FireRocket, "Fire-rocket.x", "Fire-rocket"), PhysicsPlan{}),
@@ -116,7 +124,8 @@ std::string ObjectEffects::burstEffect(const GameEvent& event) const {
     return chosen.file + "/" + chosen.name;
 }
 
-void ObjectEffects::update(const GameSession& session, std::span<const GameEvent> events, double seconds, LevelScene& level) {
+void ObjectEffects::update(const GameSession& session, std::span<const GameEvent> events, double seconds, LevelScene& level,
+                           double lead) {
     time_ += seconds;
     for (const GameEvent& event : events) {
         switch (event.type) {
@@ -164,14 +173,16 @@ void ObjectEffects::update(const GameSession& session, std::span<const GameEvent
     items_.clear();
     const SpecialObjects& objects = session.objects();
     for (const SpecialObjects::Shot& shot : objects.shots()) {
-        addMesh(shot_, Mat4::translation(shot.position));
-        addShadow({shot.position.x, 0, shot.position.z}, 2.0f);
+        const Vec3 at = shotPosition(shot, static_cast<float>(lead));
+        addMesh(shot_, Mat4::translation(at));
+        addShadow({at.x, 0, at.z}, 2.0f);
     }
     for (const SpecialObjects::Rocket& rocket : objects.rockets()) {
-        addMesh(rocket_, Mat4::translation(rocket.position));
-        addShadow({rocket.position.x, 0, rocket.position.z}, 2.0f);
+        const Vec3 at = rocketPosition(rocket, session.rules().objects.rocketSpeed, static_cast<float>(lead));
+        addMesh(rocket_, Mat4::translation(at));
+        addShadow({at.x, 0, at.z}, 2.0f);
     }
-    followRockets(objects);
+    followRockets(objects, session.rules().objects.rocketSpeed, static_cast<float>(lead));
     followFires(session);
     for (const ActorIndex actor : objects.flickers()) {
         if (session.actor(actor).removed) {
@@ -190,13 +201,14 @@ void ObjectEffects::update(const GameSession& session, std::span<const GameEvent
 }
 
 // Each rocket in the air leaves a trail from its tail; the trail stops when the rocket is gone, and what it left fades out.
-void ObjectEffects::followRockets(const SpecialObjects& objects) {
+void ObjectEffects::followRockets(const SpecialObjects& objects, float rocketSpeed, float lead) {
     for (const SpecialObjects::Rocket& rocket : objects.rockets()) {
+        const Vec3 at = rocketPosition(rocket, rocketSpeed, lead);  // where the rocket is drawn
         EffectId& trail = trails_[rocket.crate];
         if (!particles_.alive(trail)) {
-            trail = particles_.attach(kRocketTrail, rocket.position);
+            trail = particles_.attach(kRocketTrail, at);
         }
-        particles_.moveTo(trail, rocket.position);
+        particles_.moveTo(trail, at);
     }
     std::erase_if(trails_, [&](const auto& entry) {
         const bool flying = std::ranges::any_of(objects.rockets(), [&](const SpecialObjects::Rocket& rocket) { return rocket.crate == entry.first; });

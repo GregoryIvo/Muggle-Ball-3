@@ -216,6 +216,9 @@ public:
     bool isAwake(BodyId body) const;
     void wake(BodyId body);
     std::uint64_t userData(BodyId body) const;
+    // The mass of a dynamic body, as the world has it (a body made from its shapes and density: the density times their volume);
+    // 0 for a static or kinematic one, which no hit moves.
+    float mass(BodyId body) const;
 
     // Contacts that began, and joints that broke, since the last call.
     std::vector<ContactEvent> takeContacts();

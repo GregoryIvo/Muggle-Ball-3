@@ -194,9 +194,10 @@ light pieces of wrecked ships); the rest are a documented allowance of the smoke
 
 `GameSession` (`game/Gameplay.h`, ARCHITECTURE.md) plays a level in a `PhysicsScene` with its own ball and bat:
 
-- **The ball** (`addGameBall`) is a sphere of 0.6 with `ballMaterial` (friction 0.5, restitution 0.999), continuous
+- **The ball** (`addGameBall`) is a sphere of 0.6 (`radius` says another: the Big Ball's 1.0 and the Weak Ball's 0.4) with `ballMaterial` (friction 0.5, restitution 0.999), continuous
   collision and no gravity, locked to the plane it starts on (y = 0.6) and free to turn only about the vertical, at up
-  to PhysX's default 7 rad/s. Its mass is the material's density times its volume, 0.9 against the median brick's 51:
+  to PhysX's default 7 rad/s. Its mass is the material's density times its volume, 0.9 against the median brick's 51
+  (`PhysicsWorld::mass()`, which a hit that breaks joints reads for the ball's size):
   a ball that light loses speed in every collision with a brick, which `GAMEPLAY.md` takes as the reason the original
   sets the speed back to 15 after each bounce (the rules do it after every fixed step). Friction at a wall turns the
   ball by 11 to 18 degrees on most bounces in the footage, both ways: it takes sideways speed off the ball and puts
@@ -224,9 +225,10 @@ The 22 sails of 9 levels are `ClothSet` (`game/Cloth.h`) over `PhysicsWorld::add
 
 ## Not done yet
 
-The bat's lane (`PhysicsPlan::zones`) is not used: the rules take the bat's line as a number. There are no prizes
-yet, and no render interpolation (a 120 Hz display shows each 60 Hz physics state twice). Step 5: cannons,
-teleports, springs, volcanoes (the sharks and birds on paths are in, see above, and the sails, see "Cloth"). Several dynamic bodies are saved with
+The bat's lane (`PhysicsPlan::zones`) is not used: the rules take the bat's line as a number. The level's own actors are not
+interpolated (a 120 Hz display shows each 60 Hz physics state twice; the balls, the bat, the prizes and the cannonballs and rockets are carried on by their
+velocities, `PlayScene`). Step 5 is in: the sharks and birds on paths, the cannons, teleports, springs and volcanoes (see above and `GAMEPLAY.md` 17),
+the weapons' projectiles (`GAMEPLAY.md` 18) and the sails (see "Cloth"). Several dynamic bodies are saved with
 nothing under them and fall when woken (the pirate of `piratos-po-volnam` at x = 30, outside the board, falls 490
 units; some boulders of `cowboys-samba` and others 11): they need a settle (none of those in the levels with path actors is near one). Not decoded: how the
 original's `ballMaterial` and the board's restitution 1.0 combine on bricks (they bounce at 0.75 here); friction

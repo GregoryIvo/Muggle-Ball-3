@@ -17,7 +17,6 @@ constexpr float kBallMass = 500.0f;
 constexpr float kBallMaxAngularVelocity = 60.0f;
 constexpr float kBallFloor = -30.0f;  // below this it has left the world
 constexpr double kBallMaxAge = 20.0;
-constexpr float kBallVolume = 4.0f * kPi / 3.0f * kBallRadius * kBallRadius * kBallRadius;
 
 constexpr float kLowBand = 0.3f;  // lowestPoints() gives the points this close to the lowest one
 // How often a body that fell asleep with nothing under it is woken again before it is let sleep anyway, and how many
@@ -273,7 +272,7 @@ float PhysicsScene::massOf(std::uint64_t userData, BodyId body) const {
         return kImmovable;
     }
     if (userData == kGameBallData) {
-        return kBallVolume * ballDensity_;
+        return world_.mass(body);  // (its radius is the prizes' to change: Big Ball, Weak Ball)
     }
     if (userData == kProjectileData) {
         const auto it = std::ranges::find(projectileMasses_, body, &std::pair<BodyId, float>::first);

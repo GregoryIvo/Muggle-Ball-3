@@ -14,6 +14,11 @@
 
 namespace mb {
 
+// Where a cannonball and a rocket are drawn, `lead` seconds past the session's last step (PlayScene::update): carried on with their
+// velocity as the balls are, so that on a display faster than the steps they glide instead of standing still for a frame and jumping.
+Vec3 shotPosition(const SpecialObjects::Shot& shot, float lead);
+Vec3 rocketPosition(const SpecialObjects::Rocket& rocket, float rocketSpeed, float lead);
+
 // What the level's special objects look like in play (docs/GAMEPLAY.md sections 17 and 19): the flash of a charge of dynamite,
 // the cannonball and its burst, the smoke at the muzzle, the rocket of a firework crate with its trail and its burst, the ring
 // where a ball goes into a teleport or comes out, a spring that gives with a hit, the flame and smoke of a flicker, the leaves
@@ -27,8 +32,8 @@ public:
                   ParticleSystem& particles);
 
     // Brings the effects up to the session, `seconds` after the last call, with the events since then. `level` is the picture
-    // of the level, for the springs that give.
-    void update(const GameSession& session, std::span<const GameEvent> events, double seconds, LevelScene& level);
+    // of the level, for the springs that give. `lead` is how far past its last step the picture is (PlayScene::update).
+    void update(const GameSession& session, std::span<const GameEvent> events, double seconds, LevelScene& level, double lead = 0);
 
     // What to draw on top of the level and the balls, as of the last update().
     std::span<const DrawItem> items() const { return items_; }
@@ -57,7 +62,7 @@ private:
     void addMesh(const LevelScene& model, const Mat4& place);
     void addShadow(Vec3 under, float size);
     void drawFlash(const Flash& flash);
-    void followRockets(const SpecialObjects& objects);
+    void followRockets(const SpecialObjects& objects, float rocketSpeed, float lead);
     void followFires(const GameSession& session);
     std::string_view blastEffect(const GameEvent& event) const;
     std::string burstEffect(const GameEvent& event) const;

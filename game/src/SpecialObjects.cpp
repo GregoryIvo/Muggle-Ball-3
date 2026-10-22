@@ -17,6 +17,10 @@ constexpr float kShotLimit = 80.0f;
 constexpr float kShotFloor = -20.0f;
 // A blast radius outside this is not one the level means.
 constexpr float kLeastRadius = 0.5f, kMostRadius = 30.0f;
+// A ball that comes out of an exit is moved on along its way in steps of this, at most this many, until it clears the exit's
+// plates.
+constexpr float kLaunchStep = 0.1f;
+constexpr int kMostLaunchSteps = 40;
 
 // The distance from a point to a box, zero inside.
 float distanceTo(const Bounds& box, Vec3 p) {
@@ -30,8 +34,13 @@ Vec3 centreOfBox(const Bounds& box) {
     return (box.low + box.high) * 0.5f;
 }
 
-bool inside(Vec3 p, Vec3 half) {
-    return std::fabs(p.x) <= half.x && std::fabs(p.y) <= half.y && std::fabs(p.z) <= half.z;
+// Whether a ball of this radius centred at `p`, in the frame of a source's trigger box (`half` its half extents), goes in. Its centre
+// is in the box [M]. A ball wider than the plain one cannot get its centre there: the tent's plates are 1.94 to 1.97 apart at the
+// ball's height (the middle is 0.97 to 0.99 from either [D]) and the Big Ball is 2.0 across, so it stops at the mouth; it goes in
+// when it touches the box [I].
+bool entersSource(Vec3 p, Vec3 half, float radius) {
+    const Bounds box{-half, half};
+    return distanceTo(box, p) <= (radius > kBallRadius ? radius : 0.0f);
 }
 
 }  // namespace
@@ -92,6 +101,11 @@ SpecialObjects::SpecialObjects(const Level& level, const PhysicsPlan& plan, cons
                 Portal portal;
                 portal.actor = ref.index;
                 portal.centre = transformPoint(actor.body.massLocalPose.translationPart(), actor.pose);
+                for (const PhysicsShape& shape : actor.body.shapes) {  // (the trigger box is not one of them)
+                    if (shape.type == PhysicsShapeType::Box) {
+                        portal.plates.push_back({inverse(shape.localPose * actor.pose), shape.halfExtents});
+                    }
+                }
                 for (const ZoneBox& zone : plan.zones) {
                     if (zone.actor == ref.index && zone.trigger) {  // the source's centre box
                         portal.toBox = inverse(zone.local * actor.pose);
@@ -129,11 +143,16 @@ bool SpecialObjects::ballHit(GameSession& session, ActorIndex actor, const Conta
     if (kind == Kind::Cannon) {  // (a touch sets them off, a blow or not: touches())
         return true;
     }
+    // One that a blast, a cannonball or a weapon destroyed is a body in the way while it waits out its delay or shrinks away: it
+    // neither kicks nor sounds.
+    const GameSession::Brick& brick = session.bricks_[actor];
+    if (brick.removed || brick.exploding || brick.shrinking) {
+        return true;
+    }
     if (kind == Kind::Spring) {
         kick(session, actor, ball);
     }
     // The ball hurts none of these, but it hit them: they make their sound.
-    const GameSession::Brick& brick = session.bricks_[actor];
     GameEvent event;
     event.type = EventType::BrickHit;
     event.ball = ball;
@@ -290,7 +309,8 @@ void SpecialObjects::touches(GameSession& session) {
         return;
     }
     const PhysicsScene& scene = session.scene_;
-    const float least = session.rules_.hitFraction * session.rules_.ballSpeed;
+    // As hard as a blow of the ball, which is a share of the ball's speed as the speed prizes have it (GameSession::ballSpeed()).
+    const float least = session.rules_.hitFraction * session.ballSpeed();
     for (const ContactEvent& contact : scene.contacts()) {
         for (int side = 0; side < 2; ++side) {
             const std::uint64_t mine = side == 0 ? contact.userDataA : contact.userDataB;
@@ -405,7 +425,10 @@ void SpecialObjects::land(GameSession& session, const Shot& shot, const Hit& hit
 
 void SpecialObjects::touchCrate(GameSession& session, ActorIndex actor) {
     const auto crate = std::ranges::find(crates_, actor, &Crate::actor);
-    if (crate == crates_.end() || crate->waiting || crate->flying) {
+    // A crate that is already shrinking away was destroyed before this touch, by a blast, a cannonball or a weapon: no rocket (17.5).
+    // (One that is only exploding may have been destroyed by the blow that touched it, in this very step, and still lights.)
+    const GameSession::Brick& brick = session.bricks_[actor];
+    if (crate == crates_.end() || crate->waiting || crate->flying || brick.shrinking || brick.removed) {
         return;
     }
     crate->waiting = true;
@@ -461,7 +484,7 @@ void SpecialObjects::runPortals(GameSession& session) {
             }
             const Vec3 at = session.scene_.world().pose(ball.body).translationPart();
             for (std::size_t i = 0; i < sources_.size(); ++i) {
-                if (inside(transformPoint(at, sources_[i].toBox), sources_[i].half)) {
+                if (entersSource(transformPoint(at, sources_[i].toBox), sources_[i].half, ball.radius)) {
                     enterPortal(session, ball.id, i);
                     break;
                 }
@@ -489,7 +512,7 @@ void SpecialObjects::runPortals(GameSession& session) {
             continue;
         }
         // It leaves where the drift has taken it, at the ball's speed.
-        const Vec3 at = transit.exit + transit.heading * (rules_.portalDriftSpeed * static_cast<float>(rules_.portalDrift));
+        const Vec3 at = launchPoint(transit, ball->radius);
         const std::size_t index = static_cast<std::size_t>(ball - session.balls_.begin());
         const Vec3 heading = transit.heading;
         transits_.erase(transits_.begin() + static_cast<std::ptrdiff_t>(i));
@@ -503,6 +526,26 @@ void SpecialObjects::runPortals(GameSession& session) {
             session.loseBall(index, at, {});
         }
     }
+}
+
+// Where a ball of this radius is made as it leaves the exit: where the drift has taken it, and on along its way until it touches
+// none of the exit's plates. The way out does not follow the exit's orientation (17.4), so the drift's end can be inside a plate, and a
+// ball made there is pushed about between the plates for a second, until the jam rule frees it.
+Vec3 SpecialObjects::launchPoint(const Transit& transit, float radius) const {
+    Vec3 at = transit.exit + transit.heading * (rules_.portalDriftSpeed * static_cast<float>(rules_.portalDrift));
+    const auto exit = std::ranges::find(exits_, transit.exitActor, &Portal::actor);
+    if (exit == exits_.end()) {
+        return at;
+    }
+    const auto touches = [&](Vec3 p) {
+        return std::ranges::any_of(exit->plates, [&](const Plate& plate) {
+            return distanceTo(Bounds{-plate.half, plate.half}, transformPoint(p, plate.toBox)) < radius + rules_.portalClearance;
+        });
+    };
+    for (int i = 0; i < kMostLaunchSteps && touches(at); ++i) {
+        at = at + transit.heading * kLaunchStep;
+    }
+    return at;
 }
 
 void SpecialObjects::enterPortal(GameSession& session, int ballId, std::size_t source) {

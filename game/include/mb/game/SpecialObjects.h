@@ -60,6 +60,9 @@ struct SpecialObjectRules {
     double portalDrift = 0.2;          // then drifts this long [M: 0.15 to 0.3] ...
     float portalDriftSpeed = 6.0f;     // ... at this speed [M: 0.7 units in the first 0.1 s] before it leaves at the ball's speed
     float portalSpreadDegrees = 45.0f; // it leaves toward the bat side within this of straight on [M: 0, -14, +45; I for the spread]
+    // The tent of an exit is solid and does not turn the way the ball leaves (17.4), so the point 1.2 units out can be inside a
+    // plate; the ball is put on along its way until it clears the plates by this much [I].
+    float portalClearance = 0.05f;
 
     // ---- Fireworks (17.5)
     double rocketDelay = 0.7;        // a touch to the rocket coming off the crate [M: 1013.33 to 1014.02]
@@ -168,11 +171,16 @@ private:
         double launchAt = 0;
         Vec3 from{};           // where the rocket starts
     };
+    struct Plate {  // one of the solid boxes of a teleport (the two plates of its tent)
+        Mat4 toBox;   // the world to its frame
+        Vec3 half{};
+    };
     struct Portal {
         ActorIndex actor = kNoActor;
         Mat4 toBox;     // the world to the frame of its trigger box
         Vec3 half{};    // the trigger box's half extents
         Vec3 centre{};  // the middle of the pyramid: where a ball that comes out of it appears
+        std::vector<Plate> plates;
     };
     struct Transit {
         int ball = 0;
@@ -222,6 +230,7 @@ private:
     void runCrates(GameSession& session);
     void runPortals(GameSession& session);
     void enterPortal(GameSession& session, int ball, std::size_t source);
+    Vec3 launchPoint(const Transit& transit, float radius) const;
     void runVibros(GameSession& session);
 };
 

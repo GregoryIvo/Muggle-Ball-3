@@ -137,6 +137,23 @@ Actor portal(ObjectType type, Vec3 at) {
     return actor(type, at, kKinematic, 48, std::move(shapes), type == ObjectType::TeleportSrc ? "portal-in" : "portal-out");
 }
 
+// A teleport as knight-turnir has it: two plates 25.5 degrees off the vertical, leaning in at the top, 1.78 long, and for a source the
+// trigger box between them (shape flags 15; its long side runs along z, 1.6 long). A ball is 0.97 to 0.99 from the middle of the tunnel
+// to either plate at its height: the plain ball (0.6) fits with room to spare, the Big Ball (1.0) not at all.
+Actor tent(ObjectType type, Vec3 at) {
+    Shape left = box({0.17595f, 1.90439f, 0.89009f}, {-0.73784f, 1.75f, 0});
+    left.localPose.rotation = {0.90258f, 0.43052f, 0, -0.43052f, 0.90258f, 0, 0, 0, 1};
+    Shape right = box({0.17595f, 1.90439f, 0.89009f}, {0.71968f, 1.74913f, 0});
+    right.localPose.rotation = {-0.90258f, -0.43052f, 0, -0.43052f, 0.90258f, 0, 0, 0, -1};
+    std::vector<Shape> shapes = {left, right};
+    if (type == ObjectType::TeleportSrc) {
+        Shape trigger = box({0.8f, 1.0f, 1.0f}, {0.01222f, 1.01799f, -0.00203f}, 2, kTriggerFlags);
+        trigger.localPose.rotation = {0, 1, 0, 0, 0, 1, 1, 0, 0};
+        shapes.push_back(trigger);
+    }
+    return actor(type, at, kKinematic, 48, std::move(shapes), type == ObjectType::TeleportSrc ? "portal-in" : "portal-out");
+}
+
 Actor firework(Vec3 at) {
     return actor(ObjectType::Firework, at, kDynamicNoTurn, 90, {box({1.0f, 1.6f, 0.7f}, {0, 1.6f, 0})}, "Fireworks");
 }
@@ -161,6 +178,7 @@ SessionOptions options(TargetRule rule = TargetRule::Never) {
     SessionOptions o;
     o.levelEnd = rule;
     o.physicsSettings.threads = 0;  // on the caller, so that a run repeats exactly
+    o.rules.prizes.drops = false;   // the rules of the objects alone; the prizes are given by hand, see "Prizes and the objects"
     return o;
 }
 
@@ -690,6 +708,204 @@ void testFlicker() {
     check(g.session.score() == 70, "flicker: a cauldron is a brick the ball destroys, for 70 points");
 }
 
+// ---- Destroyed objects, prizes and the objects ---------------------------------------------------------------------
+
+// A spring or a crate that a blast, a cannonball or a weapon destroyed shrinks away for 0.35 s with its body still in the world. In
+// that time it is a body in the way and no more: the spring neither kicks the ball nor makes its sound, and the crate gives no rocket
+// (docs/GAMEPLAY.md 17.5, 17.6). A whole spring does both (testSpring).
+void testDestroyedObjects() {
+    Game g(levelOf({board(), actor(ObjectType::Spring, {0, 0, 10}, kStatic, 230, {box({1.5f, 1.0f, 1.5f}, {0, 1.0f, 0})}, "spring")}));
+    g.session.hit(1, {});
+    g.run(0.05);
+    check(g.session.actor(1).shrink > 0 && !g.session.actor(1).removed, "destroyed spring: it is shrinking away, its body still there");
+    const int id = g.shoot({0.8f, 0.6f, 7.5f}, {0, 0, 1});  // 0.4 units short of its face: there in 0.03 s
+    g.run(0.2);
+    check(g.ball(id) != nullptr, "destroyed spring: the ball is in play");
+    const bool hitByTheBall = std::ranges::any_of(g.log, [](const GameEvent& e) { return e.type == EventType::BrickHit && e.ball >= 0; });
+    check(!hitByTheBall, "destroyed spring: a ball that meets it is not kicked and the spring makes no sound for it");
+
+    // The crate: destroyed by a hit that is no ball's, never touched; a ball brushes its shrinking body 0.25 s later.
+    Game c(levelOf({board(false), firework({0, 0, 10})}));
+    c.session.hit(1, {});
+    c.run(0.15);  // exploding for 0.1 s, then shrinking
+    check(c.session.actor(1).shrink > 0 && !c.session.actor(1).removed, "destroyed crate: it is shrinking away, its body still there");
+    const Vec3 at = c.where(1);
+    c.shoot({at.x + 1.58f, 0.6f, at.z + 3}, {0, 0, -1});
+    c.run(3.0);
+    check(c.count(EventType::RocketLaunched) == 0, "destroyed crate: a brush on its shrinking body lights no rocket");
+}
+
+// What the speed prizes make of the ball's speed reaches the spring's kick and the teleport's exit, and the debris that sets a cannon
+// off has to hit as hard as a blow of the ball at that speed (a blow is a share of the ball's speed, GameplayRules::hitFraction).
+void testSpeedPrizesAndObjects() {
+    Game g(levelOf({board(), actor(ObjectType::Spring, {0, 0, 10}, kDynamic, 230, {box({1.5f, 1.0f, 1.5f}, {0, 1.0f, 0})}, "spring")}));
+    for (int i = 0; i < 3; ++i) {
+        g.session.givePrize(PrizeKind::SpeedUp);
+    }
+    const float faster = g.session.ballSpeed();
+    g.shoot({2.0f, 0.6f, 4}, {0, 0, 1});
+    g.runUntil([&] { return g.count(EventType::BrickHit) > 0; }, 2);
+    g.step();
+    const Vec3 v = g.session.balls().back().velocity;
+    check(near(faster, 15 * 1.1f * 1.1f * 1.1f, 0.01f) && near(std::hypot(v.x, v.z), faster, 0.05f),
+          "speed prizes: the spring kicks the ball at the session's speed, " + std::to_string(std::hypot(v.x, v.z)));
+
+    Game t(levelOf({board(false), portal(ObjectType::TeleportSrc, {-10, 0, 5}), portal(ObjectType::TeleportDest, {10, 0, 5})}));
+    for (int i = 0; i < 3; ++i) {
+        t.session.givePrize(PrizeKind::SlowDown);
+    }
+    const int id = t.shoot({-10, 0.6f, -4}, {0, 0, 1});
+    check(t.runUntil([&] { return t.count(EventType::BallEmerged) > 0 && t.ball(id) != nullptr && t.ball(id)->velocity.z != 0; }, 3),
+          "speed prizes: the ball comes out");
+    const Vec3 w = t.ball(id) != nullptr ? t.ball(id)->velocity : Vec3{};
+    check(near(t.session.ballSpeed(), 15 * 0.91f * 0.91f * 0.91f, 0.01f) && near(std::hypot(w.x, w.z), t.session.ballSpeed(), 0.05f),
+          "speed prizes: and leaves the teleport at the session's speed, " + std::to_string(std::hypot(w.x, w.z)));
+
+    // A block that falls onto the cannon at about 6 units/s: a blow of the ball at 15 (4.5), none of the ball at twice that (9).
+    const auto fires = [](int speedUps) {
+        SessionOptions o = options();
+        o.physics.start = StartState::Still;
+        Game game(levelOf({board(), cannon({0, 0, 5}),
+                           actor(ObjectType::Brick, {-0.4f, 4.32f, 5}, kDynamic, 20, {box({0.5f, 0.5f, 0.5f})}, "Steel.jpg")}),
+                  o);
+        for (int i = 0; i < speedUps; ++i) {
+            game.session.givePrize(PrizeKind::SpeedUp);
+        }
+        game.run(1.5);
+        return game.count(EventType::CannonFired);
+    };
+    check(fires(0) == 1 && fires(8) == 0, "speed prizes: a block that hits the cannon at 6 units/s sets it off at speed 15 and not at 30");
+}
+
+// A Big Ball is 2.0 across and the tent of a teleport 1.94 to 1.97 between its plates, so its centre cannot get into the trigger box:
+// it goes in when it reaches the box. A ball that only goes by does not.
+void testBigBallEntersASource() {
+    const auto enters = [](bool big, float offset) {
+        Game g(levelOf({board(false), tent(ObjectType::TeleportSrc, {-10, 0, 5}), tent(ObjectType::TeleportDest, {10, 0, 5})}));
+        if (big) {
+            g.session.givePrize(PrizeKind::BigBall);
+        }
+        g.shoot({-10 + offset, 0.6f, -4}, {0, 0, 1});
+        g.run(2.5);
+        return g.count(EventType::BallEntered) > 0;
+    };
+    check(enters(false, 0), "big ball: a plain ball goes into the tent");
+    check(enters(true, 0) && enters(true, 0.5f) && enters(true, -0.5f), "big ball: so does a Big Ball, centred or half a unit off");
+    check(!enters(true, 2.6f), "big ball: but not one that goes by the side of the tent");
+}
+
+// The exit's tent is solid and the way out does not follow its orientation (17.4): with the exit turned a quarter, the plates stand across
+// the way out, and the point 1.2 units on is inside the near one. The ball is made beyond it, whatever its size.
+void testExitLaunchClearsThePlates() {
+    for (const bool big : {false, true}) {
+        SessionOptions o = options();
+        o.rules.objects.portalSpreadDegrees = 0;  // straight on: -z
+        Actor exit = portal(ObjectType::TeleportDest, {10, 0, 5});
+        exit.pose.rotation = kFacesPlusZ;  // the plates (1.3 off the middle along the exit's x) are now 1.3 off along z
+        Game g(levelOf({board(false), portal(ObjectType::TeleportSrc, {-10, 0, 5}), exit}), o);
+        if (big) {
+            g.session.givePrize(PrizeKind::BigBall);
+        }
+        const std::string who = big ? "big ball" : "ball";
+        const int id = g.shoot({-10, 0.6f, -4}, {0, 0, 1});
+        check(g.runUntil([&] { return g.count(EventType::BallEmerged) > 0 && g.ball(id) != nullptr && g.ball(id)->velocity.z != 0; }, 3),
+              "exit: the " + who + " leaves the teleport");
+        const BallView* view = g.ball(id);
+        if (view == nullptr) {
+            continue;
+        }
+        const float nearFace = 5 - 1.3f - 0.2f;  // of the plate on the bat's side: z = 3.5
+        check(view->position.z + view->radius <= nearFace + 0.01f && near(view->radius, big ? 1.0f : 0.6f),
+              "exit: the " + who + " is made clear of the plate that stood in its way, at z " + std::to_string(view->position.z));
+        g.run(2.0);
+        check(g.count(EventType::BallFreed) == 0, "exit: and is not jammed in it for a second");
+    }
+}
+
+// A game's only ball is in a teleport (no body, not lost) when a prize that works on balls is caught.
+void testBallInATeleportMeetsThePrizes() {
+    SessionOptions o = options();
+    o.rules.prizes.skullBallsVanish = 0.1;  // within the 0.4 s that the ball is away
+    const Level level = levelOf({board(false), portal(ObjectType::TeleportSrc, {-5, 0, 5}), portal(ObjectType::TeleportDest, {10, 0, 5})});
+    // The bat is in, the ball is let go and reaches the source.
+    const auto away = [](Game& g) {
+        if (!g.ready()) {
+            return false;
+        }
+        g.step({.launch = true});
+        return g.runUntil([&] { return g.count(EventType::BallEntered) > 0; }, 3);
+    };
+
+    // Multiball has no ball to take balls from, and the ball comes back.
+    Game m(level, o);
+    check(away(m), "teleport and prizes: the only ball is in the source");
+    m.session.givePrize(PrizeKind::Multiball);
+    check(m.session.balls().size() == 1, "multiball: a ball in a teleport has no body to copy from: no balls are made");
+    m.run(0.6);
+    check(m.session.balls().size() == 1 && m.count(EventType::BallEmerged) == 1 && m.count(EventType::BallLost) == 0,
+          "multiball: and the ball comes out all the same");
+
+    // The Big Ball makes the ball that is away big: it comes out with the new radius.
+    Game b(level, o);
+    check(away(b), "teleport and prizes: again, the ball is in the source");
+    b.session.givePrize(PrizeKind::BigBall);
+    check(near(b.session.balls()[0].radius, 1.0f), "big ball: the ball in a teleport has the new radius at once");
+    b.run(0.6);
+    check(b.session.balls().size() == 1 && !b.session.balls()[0].held && b.session.balls()[0].appear > 0.99f &&
+              near(b.session.balls()[0].radius, 1.0f),
+          "big ball: and comes out whole and big");
+
+    // The Skull takes every ball, one in a teleport too: it is lost at the source, and does not come out afterwards.
+    Game k(level, o);
+    check(away(k), "teleport and prizes: and again");
+    k.session.givePrize(PrizeKind::Skull);
+    k.run(0.5);
+    const std::optional<GameEvent> lost = k.first(EventType::BallLost);
+    check(lost && near(lost->position.x, -5, 0.5f) && near(lost->position.z, 5, 0.5f) && k.session.balls().empty() &&
+              k.count(EventType::BallEmerged) == 0,
+          "skull: the ball that was in a teleport is lost at the source, and does not come out afterwards");
+    k.run(3.5);
+    check(k.count(EventType::LifeLost) == 1 && k.count(EventType::BallLost) == 1 && k.session.phase() == SessionPhase::Ready &&
+              k.session.balls().size() == 1 && k.session.balls()[0].held,
+          "skull: a heart is spent, and the new bat has its ball");
+}
+
+// The Explosive Ball's blast takes the objects around the brick it hurt: metal, springs, dynamite (which goes off and has its own
+// blast). A ball that only meets metal hurts nothing and does not use the charge up.
+void testExplosiveBallAndObjects() {
+    const auto thing = [](ObjectType type, Vec3 at, const char* material) {
+        return actor(type, at, kStatic, 100, {box({1, 1, 1}, {0, 1, 0})}, material);
+    };
+    const auto level = [&] {
+        return levelOf({board(), brick({0, 1, 10}, "Shark.jpg", kStatic),                  // 1: the ball hits this, at (0, 0.6, 9)
+                        thing(ObjectType::Metall, {3.2f, 0, 9.5f}, "Metall.jpg"),          // 2: 2.2 from the contact
+                        dynamite({-3.0f, 0, 9.5f}),                                        // 3: 2.1 from it
+                        thing(ObjectType::Spring, {0, 0, 18.0f}, "spring"),                // 4: out of reach of the blast and the charge
+                        thing(ObjectType::Metall, {12, 0, 9.5f}, "Metall.jpg")});          // 5: far
+    };
+    Game plain(level());
+    plain.shoot({0, 0.6f, 3}, {0, 0, 1});
+    plain.run(1.5);
+    check(plain.destroyed(1) != nullptr && plain.destroyed(2) == nullptr && plain.destroyed(3) == nullptr,
+          "explosive ball: without it the ball takes the shark and nothing around it");
+
+    Game g(level());
+    g.session.givePrize(PrizeKind::ExplosiveBall);
+    g.shoot({0, 0.6f, 3}, {0, 0, 1});
+    g.run(1.5);
+    check(g.destroyed(1) != nullptr && g.destroyed(2) != nullptr && g.destroyed(3) != nullptr && g.count(EventType::Blast) == 1,
+          "explosive ball: the blast takes the metal and the dynamite within 2.5 as well");
+    check(g.count(EventType::DynamiteBlast) == 1 && g.destroyed(4) == nullptr && g.destroyed(5) == nullptr,
+          "explosive ball: the dynamite goes off in its turn, but not out to the spring (7.8 from it) or the far metal");
+
+    Game h(levelOf({board(), thing(ObjectType::Metall, {0, 0, 10}, "Metall.jpg")}));
+    h.session.givePrize(PrizeKind::ExplosiveBall);
+    h.shoot({0, 0.6f, 3}, {0, 0, 1});
+    h.run(1.0);
+    check(h.count(EventType::Blast) == 0 && h.session.effect(PrizeKind::ExplosiveBall) != nullptr && h.destroyed(1) == nullptr,
+          "explosive ball: a ball that only meets metal hurts nothing and keeps its charge");
+}
+
 // ---- Ending ------------------------------------------------------------------------------------------------------
 
 // The level ends with its bricks, with the dynamite, metal and the rest still standing.
@@ -735,6 +951,12 @@ int main() {
     testSpring();
     testVibro();
     testFlicker();
+    testDestroyedObjects();
+    testSpeedPrizesAndObjects();
+    testBigBallEntersASource();
+    testExitLaunchClearsThePlates();
+    testBallInATeleportMeetsThePrizes();
+    testExplosiveBallAndObjects();
     testEnd();
     testDescribe();
     if (failures > 0) {
