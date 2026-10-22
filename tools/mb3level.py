@@ -284,6 +284,7 @@ def read_joint(rd):
 
 
 def read_paths(rd):
+    # param: 1 closed loop, 0 open; mask bit 0: the points carry tangents (docs/LEVEL_FORMAT.md, "Path motion")
     paths = []
     for _ in range(rd.u32()):
         p = {"name": rd.string(), "param": rd.u32(), "mask": rd.bits(), "points": []}
@@ -295,6 +296,8 @@ def read_paths(rd):
 
 
 def read_path_bindings(rd):
+    # A track's param is the bits of an f32, the speed in world units per millisecond; a key is the position, direction
+    # and up of the object it names (a, b, c) and its object id.
     out = []
     for _ in range(rd.u32()):
         b = {"name": rd.string(), "tracks": []}

@@ -31,6 +31,26 @@ std::vector<ActorRef> flattenActors(const Level& level) {
     return actors;
 }
 
+std::unordered_map<std::uint32_t, ActorIndex> actorsById(std::span<const ActorRef> actors) {
+    std::unordered_map<std::uint32_t, ActorIndex> byId;
+    // try_emplace keeps the first one: an object id wins over a segment id, an earlier object over a later one.
+    for (const ActorRef& ref : actors) {
+        if (ref.actor->object) {
+            byId.try_emplace(ref.actor->object->id, ref.index);
+        }
+    }
+    for (const ActorRef& ref : actors) {
+        if (ref.actor->object) {
+            const std::size_t segments = ref.actor->object->clothSegments.size();
+            for (std::size_t k = 0; k < segments; ++k) {
+                byId.try_emplace(ref.actor->object->id + 1 + static_cast<std::uint32_t>(k),
+                                 ref.index + 1 + static_cast<ActorIndex>(k));
+            }
+        }
+    }
+    return byId;
+}
+
 std::size_t Level::countObjects(ObjectType type) const {
     return countIn(actors, type);
 }

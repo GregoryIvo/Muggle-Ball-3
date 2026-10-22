@@ -2,8 +2,8 @@
 // MB3_ASSETS is not set), no GPU.
 //
 //   mb_physics_smoke [--shots N] [--seconds S] [level]
-//        the test: each level stands for S seconds on its own (default 10): what is not a running machine must not
-//        move, and the machines must turn the way their motors drive them. Then N test balls are shot into it, one
+//        the test: each level stands for S seconds on its own (default 10): what is not a running machine or an actor on a
+//        path must not move, and the machines must turn the way their motors drive them. Then N test balls are shot into it, one
 //        at a time into a fresh copy (default 4, at most 24, from where the bat is, at different x and angles), S
 //        seconds each, and nothing may blow up, sink through the floor or be left hanging in the air. A failing
 //        level is named; the levels no ball reached are listed.
@@ -75,10 +75,22 @@ bool finite(const Mat4& m) {
     return true;
 }
 
-// Moves the world on by `seconds`, tracking the bodies the plan makes dynamic or kinematic.
+// The actors that follow a path: they are meant to move, and to turn as fast as the path does (a shark that pivots on the
+// spot at the end of its run swings its centre of mass, a few units from the origin of its frame, round at whatever speed
+// that takes). mb_path_smoke has them.
+std::vector<bool> pathActors(const PhysicsScene& scene) {
+    std::vector<bool> onPath(scene.plan().actors.size(), false);
+    for (const PathMover& mover : scene.pathMovers()) {
+        onPath[mover.actor] = true;
+    }
+    return onPath;
+}
+
+// Moves the world on by `seconds`, tracking the bodies the plan makes dynamic or kinematic (but the path actors' speed).
 Outcome run(PhysicsScene& scene, float seconds) {
     Outcome out;
     const PhysicsPlan& plan = scene.plan();
+    const std::vector<bool> onPath = pathActors(scene);
     std::vector<ActorIndex> tracked;
     std::vector<Mat4> start;
     for (ActorIndex i = 0; i < plan.actors.size(); ++i) {
@@ -96,6 +108,9 @@ Outcome run(PhysicsScene& scene, float seconds) {
         scene.step(kStep);
         if (s % 6 == 5) {  // a tenth of a second is fine-grained enough to catch a body that flies away
             for (const ActorIndex i : tracked) {
+                if (onPath[i]) {
+                    continue;
+                }
                 const float speed = length(scene.world().linearVelocity(scene.body(i)));
                 out.fastest = std::max(out.fastest, std::isfinite(speed) ? speed : 1e9f);
             }
@@ -272,10 +287,11 @@ void standAlone(const Level& level, const MaterialLibrary& materials, float seco
     // What a running machine rests on settles under its weight (a windmill's tower, saved with overlaps, by up to
     // 0.25), so beside a machine the bodies that are none may move that much.
     const float allowed = machines > 0 ? kMachineSettle : kMoveLimit;
+    const std::vector<bool> onPath = pathActors(scene);
     std::size_t strays = 0;
     ActorIndex first = kNoActor;
     for (const Outcome::Mover& mover : alone.movers) {
-        if (!machine[mover.actor] && mover.distance > allowed) {
+        if (!machine[mover.actor] && !onPath[mover.actor] && mover.distance > allowed) {
             first = strays++ == 0 ? mover.actor : first;
         }
     }

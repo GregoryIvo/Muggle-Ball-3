@@ -511,7 +511,7 @@ void PhysicsWorld::removeBody(BodyId body) {
     w.records.erase(body);
 }
 
-int PhysicsWorld::step(float dt) {
+int PhysicsWorld::step(float dt, const std::function<void()>& beforeStep) {
     Impl& w = *impl_;
     if (!(dt > 0) || !std::isfinite(dt)) {
         return 0;
@@ -522,6 +522,9 @@ int PhysicsWorld::step(float dt) {
     w.accumulator += dt;
     int steps = 0;
     while (w.accumulator + epsilon >= fixed && steps < w.settings.maxStepsPerCall) {
+        if (beforeStep) {
+            beforeStep();
+        }
         w.fixedStep();
         w.accumulator = std::max(0.0, w.accumulator - fixed);
         ++steps;

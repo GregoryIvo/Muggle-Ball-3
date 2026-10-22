@@ -27,15 +27,16 @@ bat and a click launches the ball; the bat swoops in and out, the ball rolls and
 when it is lost, bricks that explode flash and leave (people and animals shrink away), damaged ones show their cracks, and every
 hit has its sound. The hearts and points carry from level to level, a finished level opens the
 next, a lost game goes to Game Over or the high scores, and `--autoplay` lets an autopilot play
-(see below). Not there yet: prizes and the bat's weapons, sails (cloth), moving sharks and trains,
-cannons, reflections, particle systems, and model animation.
+(see below). The 35 sharks and birds that follow a path swim and dance along it, as kinematic bodies that push the ball
+and the bricks they meet (see [`docs/LEVEL_FORMAT.md`](docs/LEVEL_FORMAT.md), "Path motion"). Not there yet: prizes and the
+bat's weapons, sails (cloth), cannons, reflections, particle systems, and model animation.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
 | `engine/` | Platform-neutral runtime: window and input, GPU renderer and shaders, model and image loading, physics (`PhysicsWorld` over Jolt), audio (Ogg Vorbis decoding, mixer, device), logging, paths |
-| `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, level physics (`PhysicsScene`), the rules of play (`GameSession`, `BallReach`), what a session looks and sounds like (`PlayScene`, `PlaySounds`), camera, sound library, save data; the 2D UI (bitmap fonts, string table, menu forms, the menu screens and their flow, the HUD) |
+| `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, level physics (`PhysicsScene`), the rules of play (`GameSession`, `BallReach`), objects that follow paths (`PathPlayer`), what a session looks and sounds like (`PlayScene`, `PlaySounds`), camera, sound library, save data; the 2D UI (bitmap fonts, string table, menu forms, the menu screens and their flow, the HUD) |
 | `app/` | Executable entry point: the game's front end and its play session (`PlaySession`), the level viewer (with physics and music) and the menu form viewer |
 | `platform/macos/` | App bundle metadata (the only per-platform code so far) |
 | `scripts/` | `package_macos.sh`: universal build, ad-hoc signing, Developer ID signing and notarization |

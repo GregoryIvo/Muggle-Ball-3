@@ -4,6 +4,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include <bit>
+#include <charconv>
+#include <cstdint>
 #include <fstream>
 #include <limits>
 #include <sstream>
@@ -27,6 +30,39 @@ Pose pose(const json& j) {
     }
     p.position = vec3(j.at("position"));
     return p;
+}
+
+// Whether a bit of a bitset, `{count, hex}` in the JSON, is set: bit 0 is the lowest of the first byte.
+bool bitSet(const json& bits, std::size_t bit) {
+    const std::string hex = bits.value("hex", std::string());
+    unsigned byte = 0;
+    const std::size_t at = bit / 8 * 2;
+    if (hex.size() < at + 2 || std::from_chars(hex.data() + at, hex.data() + at + 2, byte, 16).ec != std::errc()) {
+        return false;
+    }
+    return ((byte >> (bit % 8)) & 1u) != 0;
+}
+
+Path path(const json& j) {
+    Path out;
+    out.name = j.at("name").get<std::string>();
+    out.closed = j.value("param", 0u) != 0;
+    out.tangents = j.contains("mask") && bitSet(j["mask"], 0);
+    for (const json& pt : j.at("points")) {
+        out.points.push_back({vec3(pt.at("pos")), vec3(pt.at("tng")), vec3(pt.at("dir")), vec3(pt.at("up"))});
+    }
+    return out;
+}
+
+// A track's `param` is the bits of a float, its speed.
+PathTrack pathTrack(const json& j) {
+    PathTrack track;
+    track.speed = std::bit_cast<float>(j.at("param").get<std::uint32_t>());
+    for (const json& key : j.at("keys")) {
+        track.keys.push_back({vec3(key.at("a")), vec3(key.at("b")), vec3(key.at("c")),
+                              key.at("object").get<std::uint32_t>()});
+    }
+    return track;
 }
 
 ShapeType shapeType(const std::string& name) {
@@ -201,12 +237,15 @@ Level parseLevelJson(std::string_view text) {
         level.joints.push_back(joint(jj));
     }
     for (const json& p : j.value("paths", json::array())) {
-        Path path;
-        path.name = p.at("name").get<std::string>();
-        for (const json& pt : p.at("points")) {
-            path.points.push_back({vec3(pt.at("pos")), vec3(pt.at("tng")), vec3(pt.at("dir")), vec3(pt.at("up"))});
+        level.paths.push_back(path(p));
+    }
+    for (const json& b : j.value("pathBindings", json::array())) {
+        PathBinding binding;
+        binding.name = b.at("name").get<std::string>();
+        for (const json& t : b.at("tracks")) {
+            binding.tracks.push_back(pathTrack(t));
         }
-        level.paths.push_back(std::move(path));
+        level.pathBindings.push_back(std::move(binding));
     }
     return level;
 }

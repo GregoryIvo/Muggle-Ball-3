@@ -403,3 +403,26 @@ stalls; a person aims, and has the weapons. The 23 levels it does not finish (14
 still destroying bricks in the last 30 s of the run, the other 4 (knight-labirint, knight-nazad-k-mame, knight-za-princessoi and village-logovo-vedmi,
 with 1 to 8 targets left) had stood still for 35 to 81 s, so that the stall rule was about to let go of them; most of the 23 have 100 to 250 targets.
 A person with the prizes will be faster.
+
+## 13. Moving sharks and birds (step 5)
+
+35 objects in 8 levels move along paths: the 19 sharks of `piratos-po-krugy` (two rings, circling), the 10 birds of
+`cowboys-samba` (a dance round one loop), and one shark in each of `piratos-ostrovok`, `piratos-birthday`,
+`piratos-dva-doma`, `piratos-ribalka`, `Piratos-Zagoraem` and `piratos-zoloto-gorillas`. What the data says about the
+paths, the curve and the speed is in `LEVEL_FORMAT.md`, "Path motion" ([D] there); this is what the game does with it.
+
+| rule | in the game |
+|---|---|
+| what moves | the objects with the path flag, as kinematic bodies: each fixed step `PhysicsScene` sets the pose the path has them at, at the end of the step, so they push the ball and any loose brick in their way, like the bat |
+| how fast | the track's speed, in units a *millisecond*: **5 units/s** for the sharks, **6** for the birds of `cowboys-samba`, **7** for the shark of `piratos-dva-doma`. **[?] Not measured on footage.** From the data: the saved poses lie 17 ms of travel (34 in `piratos-ribalka`) behind their keys, a frame at 60 Hz **[I]**. Whoever measures a shark on the footage should compare: a shark of `piratos-ostrovok` covers its 66 unit loop in 13 s, and 40 units (the board's width) in 8 s |
+| the path | a closed curve through its points (Catmull-Rom), walked at a steady speed along it, for ever; the object faces along the curve and leans with the points' ups. A lap takes 6.6 to 20 s |
+| start | where the key puts it, in the right place along the path: the objects of one level share a loop with an even spacing (about 10, 8 and 5 units apart) |
+| hits | as for any brick: a shark has 1 energy (91 points), a small one 97 and a bird 120, both 2. The ball meets a moving body with its speed in the contact, and bounces off it |
+| destroyed | removed with its body; it stops being drawn and driven |
+| the end of a level | required, like every brick whatever its motion (`TargetRule::Bricks`, settled item 7): a level ends only when its last shark or bird is gone too [I: the footage shows the shark of level 1 destroyed early; `piratos-po-krugy` ended by the Next Level star] |
+
+Open: the speed above; whether the original's sharks turn the way the curve does (the paths of `piratos-ribalka`, `piratos-birthday` and
+`Piratos-Zagoraem` turn by 110 to 155 degrees with a radius of 0.02 to 0.15 units: a shark that pivots on the spot at
+the end of its run, and swings its tail past at over 100 units a second [I]); whether a hit changes a shark's course (nothing in the data says so, here it swims on, and a bounce off
+it adds its velocity to the ball's, whose speed the rules then set back to 15); and the shark of `piratos-ostrovok`,
+whose key is 3.2 units off its path (it starts on the path).

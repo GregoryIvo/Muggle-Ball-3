@@ -208,6 +208,7 @@ type    u32   1 board, 2 bat, 3 ball, 4 brick, 5 prize, 6 shadowcaster,
               21 firerocket, 22 vibro, 23 flicker, 24 metall, 25 dynamite, 26 train
 id      u32
 flags   u32
+        0x001 → set on exactly the 35 objects that follow a path (see Path motion); the binding names them by id
         0x002 → string material
         0x004 → string mesh
         0x008 → string frame
@@ -359,7 +360,9 @@ count u32
   point[...] = pos f32[3], tangent f32[3], dir f32[3], up f32[3]
 ```
 
-`bitset` = u32 bitCount + (bitCount / 8 + 1) bytes.
+`bitset` = u32 bitCount + (bitCount / 8 + 1) bytes, bit 0 the lowest bit of the first byte. What the fields mean is
+under "Path motion" below: `param` is 1 for a loop and 0 for an open path, bit 0 of `mask` says the points carry
+tangents, and `dir` and `up` are the frame of the curve at the point.
 
 ## Path bindings (sub_448de0)
 
@@ -369,6 +372,142 @@ count u32
   track[...] = keyCount u32, index u32, param u32, mask bitset,
                key[keyCount] = f32[3] × 3, u32 object
 ```
+
+The binding's `name` is the name of a path. A track's `param` is the bits of an `f32`, the speed; each key is the
+position, direction and up (the three vectors) of the object (an object `id`, as joints name actors) that moves, as it
+stands when the level begins. See "Path motion".
+
+## Path motion
+
+How the paths and bindings make 35 objects move: the sharks and the birds, the objects with game-object flag `0x01`.
+Everything is decoded from the data of all 83 levels (the executable's code for it has not been read), so each claim is
+tagged: **[D]** the data shows it, checked numerically against the 35 objects; **[I]** inferred; **[?]** not verified.
+The runtime is `game/PathPlayer.h` (the curve, and where an object is on it) and `PhysicsScene::step` (moving the
+bodies); `mb_path_smoke` runs it on the real levels (35 movers in 8 levels, 3 keys off their path, the starting
+frames, the speeds).
+
+### What is in a level
+
+**The paths are the editor's library of tracks, saved with every level [I].** Whether anything uses them is another
+matter: only 8 levels bind anything, and a path that nothing is bound to moves nothing **[D]**. Their names and
+counts:
+
+| Path | In | Points | Used by |
+|---|---|---|---|
+| `track/track` | all 83 levels, the same 4 points in each | open, explicit tangents | nothing in a level: see below |
+| `track/krug1` | 82 (empty in 81, 8 points in `piratos-po-krugy`) | a loop round (0.1, 5.4), radius 14 to 17, length 98 | the 10 small sharks of `piratos-po-krugy` |
+| `track/krug2` | 80, the same 8 points in each | a loop round (0, 5.7), radius 11, length 71 | the 9 sharks of `piratos-po-krugy` |
+| `track/samba` | 38 (20 knights', 12 cowboys', 4 pirates', 2 village levels), the same 7 points | a loop of length 49, rising and falling by 2.5 | the 10 birds of `cowboys-samba` |
+| `track/shark` | 82, in 6 variants (64 levels have the same 7 points: length 58) | loops of 3 to 7 points, length 33 to 66 | the shark of each of 6 levels |
+
+(`piratos-bad-night` has only `track/track`.) "Krug" is Russian for a circle: the two `krug` paths are the rings the
+sharks of `piratos-po-krugy` circle on **[I]**. **They have nothing to do with the `vibro` objects `krug.x`** (6 of the
+23 vibros; the other 17 are `barrel.x`), flat discs of diameter 5, life rings: none is bound to a path, and their distance
+from the `krug` circles of their levels runs from 0.05 to 10 with no pattern. How a vibro moves (a bobbing on the waves,
+perhaps) is unknown. The 35 objects that follow a path:
+
+| Level | Path | Objects (ids), mesh | Speed | Lap |
+|---|---|---|---|---|
+| `piratos-po-krugy` | `krug1` | 10 `shark-small.x` (5 to 14), about 10 units apart | 5 units/s | 19.6 s |
+| `piratos-po-krugy` | `krug2` | 9 `shark.x` (32 to 40), about 8 apart | 5 | 14.2 s |
+| `cowboys-samba` | `samba` | 10 `c-bird2.x` (140 to 148, 164), about 5 apart | 6 | 8.2 s |
+| `piratos-ostrovok` | `shark` | `shark.x` (212) | 5 | 13.1 s |
+| `piratos-birthday` | `shark` (5 points) | `shark.x` (176) | 5 | 8.4 s |
+| `piratos-dva-doma` | `shark` | `shark.x` (152) | 7 | 9.3 s |
+| `piratos-ribalka` | `shark` (4 points) | `shark.x` (169) | 5 | 13.2 s |
+| `Piratos-Zagoraem` | `shark` (3 points) | `shark.x` (153) | 5 | 6.6 s |
+| `piratos-zoloto-gorillas` | `shark` | `shark.x` (128) | 5 | 11.5 s |
+
+The objects with the flag and the objects named by a key are the same 35 **[D]**. Each is a `brick` with a kinematic
+body (flags `0x180`) and has one key: a `shark.x` is worth 91 points and one hit, a `shark-small.x` 97 and two, a bird 120
+and two.
+
+### The fields
+
+- **Path `param`**: 1 for a path that is a loop, 0 for an open one; `track/track` is the only open one **[D]**. The
+  closing segment from the last point back to the first is an ordinary segment: two birds of `cowboys-samba` stand on it,
+  within 4 mm of the curve **[D]**.
+- **Path `mask`** (4 bits): bit 0 is set exactly on the paths whose points carry tangents, which is `track/track` in 83
+  levels and no other path **[D]**. Bits 1 and 2 vary from level to level on paths with identical points (`00`, `02`,
+  `04`, `06` on `krug1`; `01`, `05`, `07` on `track/track`), so they are editor settings, not part of the path **[I]**.
+- **Point `pos`, `tangent`, `dir`, `up`**: `tangent` is the Hermite tangent, non-zero only where bit 0 of the mask says
+  so; `dir` and `up` are the frame of the path at the point: a unit direction and a unit up perpendicular to it. At
+  every point of a loop `dir` is the curve's unit tangent to within a degree or so (a mean of 0.9 over every loop of every
+  level) **[D]**; the curve does not need it.
+- **Binding `name`**: the path the tracks are on **[D]** (the name of a path in the same level).
+- **Track `param`**: the bits of an `f32`: **0.005**, **0.006** or **0.007**, the speed (see below) **[D]**. **`index`**
+  is 0 in all 8 tracks and **`mask`** is 5 bits, `0x19`, in all of them: not understood, and not used **[?]**. Every
+  binding has at most one track.
+- **Key `a`, `b`, `c`**: the position, the direction (the object's +z) and the up (its +y) of the object, and
+  **`object`** its `id` **[D]**.
+
+### The curve
+
+Each pair of neighbouring points is joined by a cubic Hermite segment, parameter 0 to 1, with the tangent at each end:
+the point's own `tangent` when the path has tangents (`track/track`), else **Catmull-Rom's: half the way from the point
+before to the point after** (wrapping round on a loop) **[D]**. 32 of the 35 keys lie on that curve to within 1 cm (2 mm
+on most), where the same curve with centripetal or chordal parameters misses them by up to 0.5 **[D]**. The 3 that do
+not belong to paths the designer edited after placing the object: the shark of `piratos-ostrovok` is 3.2 units off the
+curve (and 34 degrees off its direction), two small sharks of `piratos-po-krugy` 0.3. How the original treated such a
+key, whether it snapped the object to the curve or left it off, is not in the data **[?]**.
+
+Between the points the frame follows the curve: the direction is the curve's tangent (32 keys agree to a mean of
+0.34 degrees, at most 0.77), and the up is the points' ups blended along the segment (the plain blend, then made
+perpendicular to the direction: a mean of 0.33 degrees from the keys, at most 2.7) **[D]**. (Blending the points'
+*directions* instead misses the keys' by 4.6 degrees on average.) The paths of the sharks dive and roll (`up` leans by
+up to 10 degrees, y from -1.6 to 0), so the frame is a full orientation, not a heading.
+
+The object's pose is the rotation whose **rows are x = up × direction, y = up, z = direction**, at the position
+(`NxMat33` columns are the same three vectors; `Mat4::fromPhysX`): the 35 saved rotations are that matrix to within
+0.04 (the lag below) **[D]**. The mesh's forward axis is +z.
+
+The curve is not always well behaved: the paths of `piratos-ribalka` (4 points: out to one end, back through a point in
+the middle and out to the other), `piratos-birthday` (5) and `Piratos-Zagoraem` (3) turn by 110 to 155 degrees inside
+one segment with a radius of curvature of 0.02 to 0.15 (the 8-point circles of `krug1` and `krug2`: 5.9),
+where the speed of the curve in its parameter changes more than tenfold. So an object on them pivots on the spot at
+the turns. Walked by arc length that is no problem; walked by the parameter the sharks would race along the straights
+and crawl round the turns.
+
+### The speed
+
+**The track's `param` is a speed in world units per millisecond, along the curve, whatever its shape [D for the unit
+of length, I for the millisecond].** Every one of the 35 saved poses lies behind its key, on the line of the key's
+direction, by exactly `17 × param` in all but one level (0.0850 for 0.005, 0.1020 for 0.006, 0.1190 for 0.007; to 4
+digits, for 19 sharks on circles of radius 11 and 15), and by `34 × param` in `piratos-ribalka` (0.1700). A path-wide
+rate would give a lag that depends on the length of the segment the object is on; this does not, so `param` is world
+units. And 17 and 34 are frame times: the key is where the editor's last update put the object (one step of
+`param` × the frame time in milliseconds, 17 ms for a frame at 60 Hz, 34 for a long one) and the PhysX actor, saved
+at the same moment, was still where the step before had put it **[I]**. That makes the speeds **5, 6 and 7 units a
+second** (the ball goes 15): a shark crosses the 40 wide board in 8 seconds, and a small one of `piratos-po-krugy`
+circles in 20.
+
+**[?] Not checked against footage.** That the unit is the millisecond rests on the saved lag being one frame at 60 Hz
+(17 ms), and on nothing else. If the footage shows another speed, change `kPathUnitsPerSecond` in
+`game/PathPlayer.h`, the one place that has the factor.
+
+### How an object moves
+
+At the start of a level an object is at its key (the point of the curve nearest it, preferring the one where the
+curve runs its way, so that a path that crosses itself gives the right branch) and goes on in the direction of the
+points, **forward** (the keys' directions agree with increasing index, and the saved poses are behind them) **[D]**,
+at its track's speed. On a loop it goes round for ever, and neither stops nor turns at the closing segment. An open
+path has no data (the only one, `track/track`, has nothing bound); the runtime stops an object at its end.
+Objects on one path keep their spacing, since they share a speed; they do not collide with each other (kinematic).
+
+In the game a path actor is a kinematic body whose target `PhysicsScene` sets before every fixed step, so it pushes the
+dynamic bodies it meets (the ball, bricks). It is put on the curve before the first step, not moved there: the saved
+poses are a frame behind the keys, and the shark of `piratos-ostrovok` is 3.2 units off its path. A destroyed shark or
+bird is removed with its body and is driven no further.
+
+### `track/track`: the bat's path **[I]**
+
+The same 4 points in all 83 levels, open, with tangents (mask bit 0): (-43.4, 8.7, -16.1) heading (+x, slightly -z),
+(-6.7, 0, -26.0), (-1.7, 0, -25.4) and (0.25, 0, -20.9) heading +z. It starts beyond the lower left of the picture, high
+above the water, runs in below the board's near edge and ends at the bat's place (x 0, z -21; the bat's line is
+`GameplayRules::batZ`), 49.6 units later. That fits the bat flying in at the start of a level and after a lost ball
+(docs/GAMEPLAY.md, "The life cycle on screen": "swoops in from beyond the lower left"; 0.7 s for it would be 71 units a
+second), and its `up` rolls by up to 19 degrees on the way. Nothing in the data binds it, and `PlayScene`'s swoop is a
+made-up one fitted to the footage, so this stays a guess; if it is right, it is what that swoop should follow.
 
 ## Converted JSON
 
@@ -390,6 +529,11 @@ paths         [{name, param, mask: {count, hex}, points: [{pos, tng, dir, up}]}]
 pathBindings  [{name, tracks: [{index, param, mask, keys: [{a, b, c, object}]}]}]
 trailingBytes int       bytes left unparsed; 0 in every shipped level
 ```
+
+A path's `param` and `mask`, and a binding's track, are as under "Path motion": a key's `a`, `b` and `c` are the
+object's position, direction and up, and a track's `param` is the integer whose bits are its speed as an `f32`
+(1000593162 is 0.005). The runtime reads them into `Level::paths` (`closed`, `tangents`) and `Level::pathBindings`; a
+file without them has no moving objects.
 
 An actor is `{offset, pose: {rotation[9], position[3]}, density, actorFlags,
 group, body?, shapes, object?}` (`offset` is where its descriptor starts in the

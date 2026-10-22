@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -162,9 +163,11 @@ public:
     JointId addJoint(const JointDesc& desc);
     void removeJoint(JointId joint);
 
-    // Advances the simulation by dt seconds in fixed steps (PhysicsSettings::fixedStep).
+    // Advances the simulation by dt seconds in fixed steps (PhysicsSettings::fixedStep). `beforeStep`, if there is
+    // one, is called ahead of every fixed step, for the caller that moves kinematic bodies with setKinematicTarget():
+    // each step needs its own target, however many a call takes.
     // Returns the number of fixed steps taken.
-    int step(float dt);
+    int step(float dt, const std::function<void()>& beforeStep = {});
 
     Mat4 pose(BodyId body) const;  // the body's frame, as given in BodyDesc::pose
     Vec3 linearVelocity(BodyId body) const;

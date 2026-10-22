@@ -4,6 +4,7 @@
 #include "mb/engine/Physics.h"
 #include "mb/game/Level.h"
 #include "mb/game/MaterialLibrary.h"
+#include "mb/game/PathPlayer.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -147,7 +148,8 @@ class PhysicsScene {
 public:
     // The 84 joints that hold a cloth's corners (75 ball joints and 9 fixed ones, on ships, boats and plots) are
     // not made: the cloth is kinematic until step 5 simulates it, so they would pin the ship to the air where its
-    // sail was saved. Everything else of the plan is built.
+    // sail was saved. Everything else of the plan is built. The actors that follow a path (docs/LEVEL_FORMAT.md,
+    // "Path motion") start on it.
     PhysicsScene(const Level& level, const MaterialLibrary& materials, const PhysicsOptions& options = {},
                  const PhysicsSettings& settings = {});
 
@@ -164,6 +166,13 @@ public:
     // Whether a joint that has not broken still holds the actor.
     bool held(ActorIndex actor) const;
 
+    // The actors that follow a path: kinematic bodies that step() moves along it, one fixed step at a time, so that
+    // they push whatever is in the way. An actor whose body is gone (removeActor) drives no more.
+    std::span<const PathMover> pathMovers() const { return movers_; }
+    // Seconds of fixed steps the paths have been walked: where each mover is, see PathPlayer::frame().
+    double pathTime() const { return pathTime_; }
+    const PathPlayer& paths() const { return paths_; }
+
     // Takes an actor out of the world, body and joints: a brick that was destroyed, a piece that fell off the board.
     // Whatever rested on it falls: the sleeping bodies within 0.3 units of it wake at once (and with them whatever is
     // joined to them, which the look for hanging bodies skips), and the next step looks for others with nothing under
@@ -177,10 +186,12 @@ public:
         std::size_t joints = 0;
         std::size_t jointsRefused = 0;  // in the plan, but the world could not make them
         std::size_t clothJoints = 0;    // left out until the cloth is simulated, see PhysicsScene::PhysicsScene
+        std::size_t pathMovers = 0;     // kinematic bodies that follow a path, see pathMovers()
     };
     const Counts& counts() const { return counts_; }
 
-    // Advances the simulation by dt seconds (fixed steps inside) and then
+    // Advances the simulation by dt seconds (fixed steps inside), the path actors going to where their paths have them
+    // at the end of each, and then
     //  - breaks the joints that were hit hard enough (JointBreaking::Impact): a hit is a contact that begins at more
     //    than PhysicsSettings::bounceThreshold. It strikes a force of effective mass * closing speed / fixed step (the
     //    mass of the body that is hit if the other cannot move, else the reduced mass) and breaks every joint of both
@@ -243,6 +254,9 @@ private:
     std::vector<Ball> balls_;
     std::vector<ContactEvent> contacts_;
     std::set<ActorIndex> touched_;
+    PathPlayer paths_;
+    std::vector<PathMover> movers_;  // the ones of paths_ with a kinematic body
+    double pathTime_ = 0;
 
     std::vector<ActorIndex> fallingActors_;  // dynamic, with gravity and free to move down: see wakeUnsupported()
     std::vector<std::uint8_t> wasAwake_;     // by ActorIndex
@@ -266,6 +280,7 @@ private:
     void releaseJoint(std::size_t planJoint);  // the joint is gone: its bodies wake, or one asleep would hang
     void jointBroke(std::size_t planJoint);
     void wakeUnsupported();
+    void movePathActors();  // before each fixed step
 };
 
 }  // namespace mb

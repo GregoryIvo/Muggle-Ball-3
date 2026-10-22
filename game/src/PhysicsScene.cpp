@@ -93,6 +93,7 @@ PhysicsScene::PhysicsScene(const Level& level, const MaterialLibrary& materials,
                            const PhysicsSettings& settings)
     : plan_(planPhysics(level, materials, options)),
       world_(plan_.gravity, settings),
+      paths_(level),
       breaking_(options.breaking),
       fixedStep_(world_.settings().fixedStep),
       impactSpeed_(world_.settings().bounceThreshold) {
@@ -120,6 +121,22 @@ PhysicsScene::PhysicsScene(const Level& level, const MaterialLibrary& materials,
             case MotionType::Kinematic: ++counts_.kinematicBodies; break;
             case MotionType::Static: ++counts_.staticBodies; break;
         }
+    }
+
+    // A path actor starts where its path has it, not where it was saved: the poses were saved a frame or two behind
+    // the path, and a key can lie a few units off a path that was edited afterwards.
+    for (const PathMover& mover : paths_.movers()) {
+        const BodyId body = bodies_[mover.actor];
+        if (body == 0 || world_.motionType(body) != MotionType::Kinematic) {
+            logWarn("PhysicsScene: actor {} is bound to a path but is not a kinematic body; it stays put", mover.actor);
+            continue;
+        }
+        world_.setPose(body, paths_.pose(mover, 0));
+        movers_.push_back(mover);
+    }
+    counts_.pathMovers = movers_.size();
+    if (paths_.unusedKeys() > 0) {
+        logWarn("PhysicsScene: {} path keys name no usable path or no actor", paths_.unusedKeys());
     }
 
     wasAwake_.assign(plan_.actors.size(), 0);
@@ -277,8 +294,17 @@ void PhysicsScene::breakByHit(const ContactEvent& contact) {
     }
 }
 
+void PhysicsScene::movePathActors() {
+    pathTime_ += fixedStep_;
+    for (const PathMover& mover : movers_) {
+        if (bodies_[mover.actor] != 0) {
+            world_.setKinematicTarget(bodies_[mover.actor], paths_.pose(mover, pathTime_));
+        }
+    }
+}
+
 void PhysicsScene::step(float dt) {
-    world_.step(dt);
+    world_.step(dt, [this] { movePathActors(); });
     wakeUnsupported();
 
     contacts_ = world_.takeContacts();

@@ -7,6 +7,7 @@ add_library(mb_game
   src/SoundLibrary.cpp
   src/SceneBuilder.cpp
   src/PhysicsPlan.cpp
+  src/PathPlayer.cpp
   src/PhysicsScene.cpp
   src/BallReach.cpp
   src/Gameplay.cpp
