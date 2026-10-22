@@ -973,7 +973,9 @@ void testFlowLevelEnd() {
 
     flow.hud().lives = 1;
     flow.hud().score = 500;
-    flow.hud().powerUps = {"Gun"};
+    flow.hud().powerUps = {{"Gun", 7}};
+    flow.hud().caption = "Gun";
+    flow.hud().captionAlpha = 0.8f;
     // The level is won and fades out; the player presses Escape (twice) meanwhile. Nothing is paused or left, and the win is
     // delivered, once.
     UiInput esc;
@@ -985,8 +987,9 @@ void testFlowLevelEnd() {
     GameFlow::Step next = flow.levelEnded(LevelOutcome::Complete);
     check(next.loadLevel && *next.loadLevel == 2 && flow.level() == 2 && flow.mode() == GameFlow::Mode::Playing,
           "end: a level that is won leads straight to the next of the campaign, with no Loading form");
-    check(flow.hud().lives == 1 && flow.hud().score == 500 && flow.hud().level == 3 && flow.hud().powerUps.empty(),
-          "end: the hearts and the points go on with the player, the bonuses do not, the number is the next level's");
+    check(flow.hud().lives == 1 && flow.hud().score == 500 && flow.hud().level == 3 && flow.hud().powerUps.empty() &&
+              flow.hud().caption.empty() && flow.hud().captionAlpha == 0,
+          "end: the hearts and the points go on with the player, the bonuses and the caption do not, the number is the next level's");
     SaveData stored = h.reloaded();
     check(stored.progress.isCompleted("pirates", "piratos-b") && stored.progress.unlockedLevels("pirates") == 3 &&
               stored.progress.bestScore("piratos-b") == 500,

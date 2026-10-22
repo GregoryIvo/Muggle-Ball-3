@@ -121,7 +121,8 @@ struct Watch {
                 fail(std::format("ball {} appears {}", ball.id, static_cast<double>(ball.appear)));
             }
             const float speed = std::hypot(ball.velocity.x, ball.velocity.z);
-            if (!ball.held && !ball.away && std::fabs(speed - session.rules().ballSpeed) > 0.01f * session.rules().ballSpeed) {
+            if (!ball.held && !ball.away && !ball.stuck &&
+                std::fabs(speed - session.ballSpeed()) > 0.01f * session.ballSpeed()) {
                 fail(std::format("ball {} speed {:.3f}", ball.id, static_cast<double>(speed)));
             }
         }

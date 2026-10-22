@@ -93,8 +93,8 @@ struct HudOptions {
     std::optional<mb::GameHud> state;  // --hud-state; otherwise the placeholders: 3 lives, no points, the level's number
 };
 
-// "lives,score,level" and then any number of bonus icon names: "3,1529,1" or "5,768915,62,Cannon,Magnit". False if
-// the text is not that.
+// "lives,score,level" and then any number of bonus icon names, each with its number after a colon if it has one: "3,1529,1" or
+// "5,768915,62,Cannon:6,Magnit:30". False if the text is not that.
 bool parseHudState(std::string_view text, mb::GameHud& hud);
 
 class HudOverlay {

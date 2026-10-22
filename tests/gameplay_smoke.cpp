@@ -1,7 +1,7 @@
 // Plays every converted level with the autopilot against the real game data (needs it: skips with exit code 77 when
 // MB3_ASSETS is not set), no GPU.
 //
-//   mb_gameplay_smoke [--seconds S] [--rule never|type|bricks] [--strict|--no-stall] [--log] [--left] [level]
+//   mb_gameplay_smoke [--seconds S] [--rule never|type|bricks] [--strict|--no-stall] [--campaign-level N] [--log] [--left] [level]
 //        each level is played for S seconds of game time (default 60) by the autopilot (the bat follows the ball that
 //        comes down first), with hearts to spare so that it plays on after a lost ball, and ends as the game ends it
 //        (SessionOptions::levelEnd: every brick and tree, with the look at what the ball can reach and the stall
@@ -15,10 +15,13 @@
 //        plane's after every frame, a ball may only leave past the bat, a ball in flight must move at least 0.3 units in 2 s
 //        (the speed the session reports is the one it sets, so a ball frozen by the solver shows only here), and none may
 //        be pinned against the bat (the session frees a ball that is pinned elsewhere, in a pocket of the board, and
-//        the table counts those). --strict switches the look at what the ball can reach and the stall rule off,
-//        --no-stall only the stall rule. With a level name, --log prints its event log.
+//        the table counts those). The prizes drop as in the game, the level's place in the campaign counting (the red ones
+//        come from level 10): the table has the prizes dropped and caught, and the summary how many levels the Next Level star
+//        ended (--campaign-level N plays every level as the N-th). --strict switches the look at what the ball can reach and the
+//        stall rule off, --no-stall only the stall rule. With a level name, --log prints its event log.
 
 #include "mb/game/Autopilot.h"
+#include "mb/game/Campaign.h"
 #include "mb/game/Gameplay.h"
 #include "mb/game/LevelCatalog.h"
 #include "mb/game/LevelLoader.h"
@@ -75,6 +78,7 @@ struct Outcome {
     float furthest = 0;  // the ball's greatest |x|
     float farthest = 0;  // and its greatest z
     double stepMs = 0;
+    bool starDropped = false, starCaught = false;  // the Next Level star
     std::vector<GameEvent> events;
     std::vector<std::string> problems;
     std::vector<std::string> standing;  // the targets left, one line each
@@ -96,10 +100,12 @@ const char* motionName(MotionType motion) {
 TargetRule gRule = SessionOptions{}.levelEnd;
 bool gStrict = false;   // every target counts, whatever the ball can reach, and the level never stands still
 bool gNoStall = false;  // the look at what the ball can reach stays, the stall rule goes
+int gCampaignLevel = 0; // every level is played as this one of the campaign (0: as its own)
 
-Outcome play(const Level& level, const MaterialLibrary& materials, double seconds) {
+Outcome play(const Level& level, const MaterialLibrary& materials, double seconds, int campaignLevel) {
     SessionOptions options;
     options.levelEnd = gRule;
+    options.campaignLevel = campaignLevel;
     if (gStrict) {
         options.ignoreUnreachable = false;
     }
@@ -137,14 +143,14 @@ Outcome play(const Level& level, const MaterialLibrary& materials, double second
             for (const BallView& ball : s.balls()) {
                 const Vec3 bat = s.bat().position;
                 if (!ball.held && !ball.away && std::hypot(ball.position.x - bat.x, ball.position.z - bat.z) <
-                                      rules.batRadius + kBallRadius + kReachBeyond) {
+                                                     s.batRadius() + ball.radius + kReachBeyond) {
                     problem(std::format("ball {} was pinned against the bat at ({:.2f}, {:.2f})", ball.id,
                                         static_cast<double>(ball.position.x), static_cast<double>(ball.position.z)));
                 }
             }
         }
         for (const BallView& ball : s.balls()) {
-            if (ball.held || ball.away) {  // (a ball in a teleport is gone for 0.4 s)
+            if (ball.held || ball.away || ball.stuck) {  // (a ball in a teleport is gone for 0.4 s)
                 anchors.erase(ball.id);
                 continue;
             }
@@ -158,7 +164,7 @@ Outcome play(const Level& level, const MaterialLibrary& materials, double second
                 anchor.frame = frame;
             }
             const float speed = std::hypot(ball.velocity.x, ball.velocity.z);
-            if (!std::isfinite(speed) || std::fabs(speed - rules.ballSpeed) > kSpeedTolerance * rules.ballSpeed ||
+            if (!std::isfinite(speed) || std::fabs(speed - s.ballSpeed()) > kSpeedTolerance * s.ballSpeed() ||
                 ball.velocity.y != 0) {
                 problem(std::format("ball {} speed {:.3f}", ball.id, static_cast<double>(speed)));
             }
@@ -188,6 +194,10 @@ Outcome play(const Level& level, const MaterialLibrary& materials, double second
     for (const GameEvent& event : result.events) {
         if (event.type == EventType::BrickDestroyed || event.type == EventType::ActorFell) {
             out.lastProgress = event.time;
+        }
+        if (event.prize == PrizeKind::NextLevel) {
+            out.starDropped = out.starDropped || event.type == EventType::PrizeDropped;
+            out.starCaught = out.starCaught || event.type == EventType::PrizeCaught;
         }
         // A ball may only leave past the bat.
         if (event.type == EventType::BallLost &&
@@ -241,15 +251,16 @@ std::string join(const std::vector<std::string>& parts) {
     return text;
 }
 
-int run(const MaterialLibrary& materials, const LevelCatalog& catalog, double seconds, bool log, bool left,
+int run(const MaterialLibrary& materials, const LevelCatalog& catalog, const Campaign& campaign, double seconds, bool log, bool left,
         const char* only) {
-    std::printf("%-26s | %14s | %5s %7s %4s %5s %6s %5s | %9s | %-11s | %7s | %s\n", "level", "targets", "dead", "points",
-                "lost", "bat", "hits", "freed", "left", "done at (s)", "last (s)", "ms/step");
-    std::printf("%-26s | %4s %4s %4s | %5s %7s %4s %5s %6s %5s | %4s %4s | %5s %5s | %7s |\n", "", "all", "type", "out", "",
-                "", "", "", "", "", "all", "type", "all", "type", "");
+    std::printf("%-26s | %14s | %5s %7s %4s %5s %6s %5s | %9s | %-11s | %7s | %9s | %s\n", "level", "targets", "dead", "points",
+                "lost", "bat", "hits", "freed", "left", "done at (s)", "last (s)", "prizes", "ms/step");
+    std::printf("%-26s | %4s %4s %4s | %5s %7s %4s %5s %6s %5s | %4s %4s | %5s %5s | %7s | %9s |\n", "", "all", "type", "out", "",
+                "", "", "", "", "", "all", "type", "all", "type", "", "drop/got");
     int failed = 0, levels = 0, finishedBy[2] = {0, 0}, withTargets[2] = {0, 0};
     int emptyLevels = 0, levelsLetGo = 0, standingHigh = 0, standingOutside = 0, standingOnField = 0, freed = 0, levelsWithFreed = 0;
     int completed = 0, outOfPlay = 0, levelsOutOfPlay = 0;
+    int prizesDropped = 0, prizesCaught = 0, prizesMissed = 0, levelsWithStar = 0, endedByStar = 0, starsCaught = 0;
     std::vector<std::string> notCompleted;
     double share[2] = {0, 0};  // summed over the levels: the part of the targets destroyed
     double stepMs = 0, worstStepMs = 0, slowest = 0;
@@ -260,12 +271,14 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, double se
         }
         ++levels;
         const Level level = loadLevelJson(entry.path);
-        const Outcome out = play(level, materials, seconds);
-        std::printf("%-26s | %4d %4d %4d | %5d %7lld %4d %5d %6d %5d | %4d %4d | %5s %5s | %7.1f | %.3f\n", entry.name.c_str(),
+        const Outcome out = play(level, materials, seconds,
+                                  gCampaignLevel > 0 ? gCampaignLevel : campaign.indexOf(entry.name).value_or(0) + 1);
+        std::printf("%-26s | %4d %4d %4d | %5d %7lld %4d %5d %6d %5d | %4d %4d | %5s %5s | %7.1f | %3d/%-3d%s | %.3f\n", entry.name.c_str(),
                     out.targetsAtStart[0], out.targetsAtStart[1], out.stats.targetsOutOfPlay, out.stats.bricksDestroyed,
                     static_cast<long long>(out.score), out.stats.ballsLost, out.stats.batHits, out.stats.bricksHit,
                     out.stats.ballsFreed, out.targetsLeft[0], out.targetsLeft[1], finish(out.finishedAt[0]).c_str(),
-                    finish(out.finishedAt[1]).c_str(), out.lastProgress, out.stepMs);
+                    finish(out.finishedAt[1]).c_str(), out.lastProgress, out.stats.prizesDropped, out.stats.prizesCaught,
+                    out.starCaught && out.complete ? " *" : (out.starDropped ? " s" : "  "), out.stepMs);
         std::fflush(stdout);
         for (int i = 0; i < 2; ++i) {
             withTargets[i] += out.targetsAtStart[i] > 0;
@@ -277,6 +290,12 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, double se
         emptyLevels += out.targetsAtStart[0] == 0 || out.targetsAtStart[1] == 0;
         levelsLetGo += out.letGo > 0;
         completed += out.complete;
+        prizesDropped += out.stats.prizesDropped;
+        prizesCaught += out.stats.prizesCaught;
+        prizesMissed += out.stats.prizesMissed;
+        levelsWithStar += out.starDropped;
+        starsCaught += out.starCaught;
+        endedByStar += out.starCaught && out.complete;
         outOfPlay += out.stats.targetsOutOfPlay;
         levelsOutOfPlay += out.stats.targetsOutOfPlay > 0;
         if (!out.complete && gRule != TargetRule::Never) {
@@ -333,6 +352,9 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, double se
                 "reach until they fall), %d beyond where any ball went (out of reach)\n",
                 standingOnField, standingHigh, static_cast<double>(kHigh), standingOutside);
     std::printf("balls freed from a pin: %d, in %d levels\n", freed, levelsWithFreed);
+    std::printf("prizes: %d dropped, %d caught, %d missed; the Next Level star fell in %d levels (s in the table), was caught in %d and "
+                "ended %d of the %d levels completed (*)\n",
+                prizesDropped, prizesCaught, prizesMissed, levelsWithStar, starsCaught, endedByStar, completed);
     if (emptyLevels > 0) {
         std::printf("%d levels have no target under one of the readings\n", emptyLevels);
     }
@@ -370,20 +392,23 @@ int main(int argc, char** argv) {
             gStrict = true;
         } else if (std::strcmp(argv[i], "--no-stall") == 0) {
             gNoStall = true;
+        } else if (std::strcmp(argv[i], "--campaign-level") == 0 && i + 1 < argc) {
+            gCampaignLevel = std::max(1, std::atoi(argv[++i]));
         } else if (std::strcmp(argv[i], "--rule") == 0 && i + 1 < argc) {
             const std::string rule = argv[++i];
             gRule = rule == "type" ? TargetRule::BrickType : (rule == "bricks" ? TargetRule::Bricks : TargetRule::Never);
         } else if (argv[i][0] != '-') {
             only = argv[i];
         } else {
-            std::printf("usage: mb_gameplay_smoke [--seconds S] [--rule never|type|bricks] [--strict|--no-stall] [--log] [--left] [level]\n");
+            std::printf("usage: mb_gameplay_smoke [--seconds S] [--rule never|type|bricks] [--strict|--no-stall] [--campaign-level N] [--log] [--left] [level]\n");
             return 2;
         }
     }
     try {
         const MaterialLibrary materials = MaterialLibrary::load(materialsJson);
         const LevelCatalog catalog(assets / "Data" / "Levels");
-        return run(materials, catalog, seconds, log, left, only);
+        const Campaign campaign = Campaign::load(assets / "Data" / "xml" / "levels.json");
+        return run(materials, catalog, campaign, seconds, log, left, only);
     } catch (const std::exception& e) {
         std::printf("FAIL: %s\n", e.what());
         return 1;

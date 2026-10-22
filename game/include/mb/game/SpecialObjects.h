@@ -13,10 +13,10 @@ namespace mb {
 
 class GameSession;
 
-// Every number the level's special objects use (docs/GAMEPLAY.md section 15, built on the footage of section 14). The
+// Every number the level's special objects use (docs/GAMEPLAY.md section 17, built on the footage of section 14). The
 // comment says where it comes from: [M] measured from footage, [D] read from the game's data, [I] inferred, [?] a guess.
 struct SpecialObjectRules {
-    // ---- What hurts what (15.1)
+    // ---- What hurts what (17.1)
     // The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers. The rest of the level's objects (cannons,
     // springs, volcanoes, generators and metal) react to it and are hurt by blasts and cannonballs (and by whatever a weapon
     // does through GameSession::hit()). A blast and a cannonball take this much energy off what they reach: what has one or
@@ -25,7 +25,7 @@ struct SpecialObjectRules {
     int blastDamage = 2;
     int cannonballDamage = 2;
 
-    // ---- Dynamite (15.2)
+    // ---- Dynamite (17.2)
     // The blast radius when the level gives none that makes sense (it is 5 for the big charge and 3 for the small [D]).
     float defaultBlastRadius = 5.0f;
     // A charge that a blast reaches goes off this long after it, whatever the material's exploseDelay (100 ms for one a
@@ -41,7 +41,7 @@ struct SpecialObjectRules {
     float blastLift = 0.5f;
     float blastReferenceMass = 100.0f;
 
-    // ---- Interactive cannon (15.3)
+    // ---- Interactive cannon (17.3)
     // The cannonball leaves the muzzle with the velocity yadro.XML gives, in the cannon's frame (+x is its forward) [D;
     // 29.4 to 33.3 units/s measured, 31 on average [M]], and falls under the level's gravity: a lob that lands about 26
     // units away on level ground [I; the footage shows no arc over 20 units, which a lob of this kind does not show either].
@@ -54,20 +54,20 @@ struct SpecialObjectRules {
     // A cannon fires at most this often [I; the same one fired 4.7 s apart at the quickest in 28 s].
     double cannonCooldown = 0.5;
 
-    // ---- Teleports (15.4)
+    // ---- Teleports (17.4)
     double portalGone = 0.2;           // the ball is gone this long [M: 0.13 to 0.25]
     double portalGrow = 0.1;           // and grows from a speck at the exit in this [M: 3 frames at 30 fps]
     double portalDrift = 0.2;          // then drifts this long [M: 0.15 to 0.3] ...
     float portalDriftSpeed = 6.0f;     // ... at this speed [M: 0.7 units in the first 0.1 s] before it leaves at the ball's speed
     float portalSpreadDegrees = 45.0f; // it leaves toward the bat side within this of straight on [M: 0, -14, +45; I for the spread]
 
-    // ---- Fireworks (15.5)
+    // ---- Fireworks (17.5)
     double rocketDelay = 0.7;        // a touch to the rocket coming off the crate [M: 1013.33 to 1014.02]
     float rocketSpeed = 15.6f;       // straight up [M]
     double rocketLife = 1.2;         // to the burst [M: not the 2.5 s of lifeTime [D]]
     float rocketStartHeight = 3.7f;  // above the crate's origin: its top, where the rocket starts [M: 6.5 units at 0.18 s]
 
-    // ---- Vibro (15.7)
+    // ---- Vibro (17.7)
     double vibroPeriod = 2.4;     // [M]
     float vibroBob = 0.1f;        // [M: within 0.1 units]
     float vibroTiltDegrees = 6.0f;  // [I]
@@ -77,7 +77,7 @@ struct SpecialObjectRules {
 };
 
 // The rules of the level's special objects: dynamite, interactive cannons, teleports, firework crates, springs, volcanoes,
-// generators, metal, vibros and flickers (docs/GAMEPLAY.md sections 14 and 15). GameSession owns one and calls it at the
+// generators, metal, vibros and flickers (docs/GAMEPLAY.md sections 14 and 17). GameSession owns one and calls it at the
 // places the objects touch the rules of play:
 //   - ballHit(): a ball with a blow met an object that it does not hurt (instead of hurting it);
 //   - destroyed(): a charge of dynamite went off;

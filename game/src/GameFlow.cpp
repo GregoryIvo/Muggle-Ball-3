@@ -118,6 +118,8 @@ GameFlow::Step GameFlow::levelEnded(LevelOutcome outcome) {
         ++level_;
         hud_.level = level_ + 1;
         hud_.powerUps.clear();
+        hud_.caption.clear();
+        hud_.captionAlpha = 0;
         levelStartScore_ = score;
         advancing_ = true;
         step.loadLevel = level_;

@@ -48,6 +48,15 @@ std::string_view eventName(EventType type) {
         case EventType::BallEmerged: return "BallEmerged";
         case EventType::BallLost: return "BallLost";
         case EventType::BallFreed: return "BallFreed";
+        case EventType::PrizeDropped: return "PrizeDropped";
+        case EventType::PrizeCaught: return "PrizeCaught";
+        case EventType::PrizeMissed: return "PrizeMissed";
+        case EventType::EffectStarted: return "EffectStarted";
+        case EventType::EffectEnded: return "EffectEnded";
+        case EventType::StrikeGranted: return "StrikeGranted";
+        case EventType::BallStuck: return "BallStuck";
+        case EventType::Blast: return "Blast";
+        case EventType::BallRubbered: return "BallRubbered";
         case EventType::LifeLost: return "LifeLost";
         case EventType::BatLeft: return "BatLeft";
         case EventType::BatEntered: return "BatEntered";
@@ -77,6 +86,9 @@ bool finite(Vec3 v) {
     return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
 }
 
+// Turns the phases of the Drunken Ball's wobble apart from ball to ball: the golden angle, in radians.
+constexpr float kGoldenAngle = 2.3999632f;
+
 // The unit direction in the plane at `angle` from +z, positive towards +x.
 Vec3 headingAt(float angle) {
     return {std::sin(angle), 0, std::cos(angle)};
@@ -96,9 +108,13 @@ std::string describe(const GameEvent& event) {
     if (event.actor != kNoActor) {
         add("actor", event.actor);
     }
+    if (event.prize) {
+        add("prize", prizeInfo(*event.prize).stem);
+    }
     switch (event.type) {
         case EventType::BrickHit: add("energy", event.energy); break;
-        case EventType::BrickDestroyed: add("points", event.points); break;
+        case EventType::BrickDestroyed:
+        case EventType::PrizeCaught: add("points", event.points); break;
         case EventType::LifeLost:
         case EventType::GameOver: add("hearts", event.hearts); break;
         default: break;
@@ -201,7 +217,10 @@ GameSession::GameSession(const Level& level, const MaterialLibrary& materials, c
       fixedStep_(scene_.world().settings().fixedStep),
       score_(options.score),
       hearts_(options.hearts.value_or(options.rules.startHearts)),
-      readyAt_(options.rules.startReadyDelay) {
+      readyAt_(options.rules.startReadyDelay),
+      dropRandom_(options.prizeSeed),
+      effectRandom_(options.prizeSeed ^ 0xC0FFEEull),
+      campaignLevel_(options.campaignLevel) {
     const std::vector<ActorRef> refs = flattenActors(level);
     bricks_.resize(refs.size());
     for (const ActorRef& ref : refs) {
@@ -248,13 +267,14 @@ GameSession::GameSession(const Level& level, const MaterialLibrary& materials, c
         }
         releaseTargets(false);
     }
+    initPrizes(materials);
     enterBat();
     refreshViews();
 }
 
 void GameSession::update(double seconds, const GameInput& input) {
     if (input.batTargetX && std::isfinite(*input.batTargetX)) {
-        targetX_ = std::clamp(*input.batTargetX, -rules_.batLimitX, rules_.batLimitX);
+        targetX_ = std::clamp(*input.batTargetX, -batLimit(), batLimit());
     }
     launchPending_ = launchPending_ || input.launch;
     if (!(seconds > 0) || !std::isfinite(seconds)) {
@@ -343,11 +363,14 @@ void GameSession::tick() {
     moveBat();
     if (launch && phase_ == SessionPhase::Ready) {
         launchHeldBall();
+    } else if (launch) {
+        releaseStuck(false);
     }
     scene_.step(static_cast<float>(fixedStep_));
     processContacts();
     keepBalls();
     objects_.update(*this);
+    stepPrizes();
     explodeDue();
     removeShrunk();
     if (ticks_ % kFallCheckEvery == 0) {
@@ -369,7 +392,7 @@ void GameSession::moveBat() {
     if (batBody_ == 0) {  // flying off, or gone
         return;
     }
-    const float limit = rules_.batLimitX;
+    const float limit = batLimit();
     bool teleport = snapBat_;
     if (snapBat_) {
         batX_ = targetX_;
@@ -399,8 +422,9 @@ void GameSession::moveBat() {
 }
 
 void GameSession::enterBat() {
+    batScale_ = 1;  // a new bat comes plain
     if (batBody_ == 0) {
-        batBody_ = scene_.addBat({0, rules_.ballPlaneY, rules_.batZ}, rules_.batRadius);
+        batBody_ = scene_.addBat({0, rules_.ballPlaneY, rules_.batZ}, batRadius());
     }
     snapBat_ = true;  // the new bat appears under the cursor
     bat_.position = {targetX_, rules_.ballPlaneY, rules_.batZ};
@@ -427,13 +451,15 @@ int GameSession::newBall(Vec3 position, Vec3 heading, bool held) {
     ball.heading = heading;
     ball.anchor = position;
     ball.anchoredAt = time_;
+    ball.radius = ballRadius_;
     if (!held) {
-        ball.body = scene_.addGameBall(position, heading * rules_.ballSpeed);
+        ball.body = scene_.addGameBall(position, heading * ballSpeed(), ball.radius);
         if (ball.body == 0) {
             return -1;
         }
     }
     ball.id = nextBall_++;
+    ball.phase = static_cast<float>(ball.id) * kGoldenAngle;
     balls_.push_back(ball);
     return ball.id;
 }
@@ -443,9 +469,9 @@ void GameSession::launchHeldBall() {
     if (held == balls_.end()) {
         return;
     }
-    const Vec3 position{bat_.position.x + rules_.heldOffsetX, rules_.ballPlaneY, bat_.position.z + rules_.heldOffsetZ};
+    const Vec3 position{bat_.position.x + rules_.heldOffsetX, rules_.ballPlaneY, bat_.position.z + heldDistance()};
     const Vec3 heading = headingAt(-radians(rules_.launchAngleDegrees));
-    const BodyId body = scene_.addGameBall(position, heading * rules_.ballSpeed);
+    const BodyId body = scene_.addGameBall(position, heading * ballSpeed(), held->radius);
     if (body == 0) {  // the click is lost; the ball waits for the next one
         return;
     }
@@ -512,8 +538,9 @@ void GameSession::processContacts() {
                 emit(event);
             } else if (bricks_[actor].damageable && std::ranges::find(hitThisStep_, actor) == hitThisStep_.end()) {
                 hitThisStep_.push_back(actor);
-                if (!objects_.ballHit(*this, actor, contact, ball->id)) {
-                    hitBrick(actor, contact.point, contact.normalSpeed, ball->id);
+                if (!objects_.ballHit(*this, actor, contact, ball->id) &&
+                    hitBrick(actor, contact.point, contact.normalSpeed, ball->id)) {
+                    ballHitBrick(contact.point);
                 }
             }
         }
@@ -522,13 +549,16 @@ void GameSession::processContacts() {
 
 void GameSession::hitBat(Ball& ball) {
     const Vec3 at = scene_.world().pose(ball.body).translationPart();
+    if (!ball.onBat && stickBall(ball, at)) {
+        return;
+    }
     const Vec3 bat = scene_.world().pose(batBody_).translationPart();
     // Away from the bat's centre, whatever the ball arrived with, but never back: held to batMaxExitDegrees from +z.
     const float dx = at.x - bat.x, dz = at.z - bat.z;
     const float angle = (dx == 0 && dz == 0) ? 0.0f : std::atan2(dx, dz);
     const float most = radians(rules_.batMaxExitDegrees);
     ball.heading = headingAt(std::clamp(angle, -most, most));
-    scene_.world().setLinearVelocity(ball.body, ball.heading * rules_.ballSpeed);
+    scene_.world().setLinearVelocity(ball.body, ball.heading * ballSpeed());
     if (!ball.onBat) {
         ball.onBat = true;
         ++stats_.batHits;
@@ -541,16 +571,17 @@ void GameSession::hitBat(Ball& ball) {
     }
 }
 
-bool GameSession::hit(ActorIndex actor, Vec3 at) {
-    return actor < bricks_.size() && hitBrick(actor, at, 0, -1);
+bool GameSession::hit(ActorIndex actor, Vec3 at, bool dropsPrize) {
+    return actor < bricks_.size() && hitBrick(actor, at, 0, -1, dropsPrize);
 }
 
-bool GameSession::hitBrick(ActorIndex actor, Vec3 at, float speed, int ball) {
+bool GameSession::hitBrick(ActorIndex actor, Vec3 at, float speed, int ball, bool dropsPrize) {
     Brick& brick = bricks_[actor];
     if (!brick.damageable || brick.removed || brick.exploding || brick.shrinking) {
         return false;
     }
-    --brick.energy;
+    // The Power Ball takes all the energy of what it hits ("Prizes" in docs/GAMEPLAY.md section 15).
+    brick.energy -= ball >= 0 && effect(PrizeKind::PowerBall) != nullptr ? brick.energy : 1;
     ++stats_.bricksHit;
     stalled_ = 0;
     GameEvent event;
@@ -564,6 +595,7 @@ bool GameSession::hitBrick(ActorIndex actor, Vec3 at, float speed, int ball) {
     emit(event);
     if (brick.energy <= 0) {
         brick.exploding = true;
+        brick.noPrize = !dropsPrize;
         brick.explodeAt = time_ + brick.material->exploseDelay / 1000.0;
         exploding_.push_back(actor);
     }
@@ -573,14 +605,14 @@ bool GameSession::hitBrick(ActorIndex actor, Vec3 at, float speed, int ball) {
 void GameSession::keepBalls() {
     const float sinFlat = std::sin(radians(rules_.minPlanarAngleDegrees));
     const float sinSteep = std::sin(radians(rules_.minVerticalAngleDegrees));
-    const float reach = rules_.batRadius + kBallRadius + kBatLeaveSlack +
-                        std::fabs(batVelocity_) * static_cast<float>(fixedStep_);
     for (std::size_t i = 0; i < balls_.size();) {
         Ball& ball = balls_[i];
-        if (ball.held || ball.away) {
+        if (ball.held || ball.away || ball.stuck) {
             ++i;
             continue;
         }
+        const float reach =
+            batRadius() + ball.radius + kBatLeaveSlack + std::fabs(batVelocity_) * static_cast<float>(fixedStep_);
         const Vec3 at = scene_.world().pose(ball.body).translationPart();
         if (!finite(at) || std::fabs(at.x) > rules_.escapeX || at.z > rules_.escapeZ || at.z < rules_.ballLostZ) {
             loseBall(i, at, scene_.world().linearVelocity(ball.body));
@@ -598,10 +630,11 @@ void GameSession::keepBalls() {
         if (speed > 1e-3f) {  // (a ball that stands still keeps the way it was going)
             ball.heading = {velocity.x / speed, 0, velocity.z / speed};
         }
+        steerBall(ball, at);
         if (std::exchange(ball.bounced, false)) {
             ball.heading = turnedOut(ball.heading, at.x, sinFlat, sinSteep);
         }
-        scene_.world().setLinearVelocity(ball.body, ball.heading * rules_.ballSpeed);
+        scene_.world().setLinearVelocity(ball.body, ball.heading * ballSpeed());
         if (ball.onBat && batBody_ != 0) {
             const Vec3 bat = scene_.world().pose(batBody_).translationPart();
             ball.onBat = std::hypot(at.x - bat.x, at.z - bat.z) <= reach;
@@ -616,7 +649,7 @@ bool GameSession::freeBall(Ball& ball, Vec3 at) {
     // Towards the middle of the board: away from the wall it was against, and from the end it was pinned at.
     ball.heading = normalize({at.x > 0 ? -kFreedSlant : kFreedSlant, 0, at.z > 0 ? -1.0f : 1.0f});
     scene_.world().removeBody(ball.body);
-    ball.body = scene_.addGameBall(at, ball.heading * rules_.ballSpeed);
+    ball.body = scene_.addGameBall(at, ball.heading * ballSpeed(), ball.radius);
     ball.bounced = false;
     ball.anchor = at;
     ball.anchoredAt = time_;
@@ -651,6 +684,7 @@ void GameSession::loseBall(std::size_t index, Vec3 position, Vec3 velocity) {
         phase_ = SessionPhase::Lost;
         life_ = Life::BatStays;
         lostAt_ = time_;
+        loseEffects();
     }
 }
 
@@ -733,6 +767,7 @@ void GameSession::explodeDue() {
         } else {
             removeBrick(actor);
         }
+        maybeDropPrize(event.position, *brick.material, !brick.noPrize, actor);
     }
 }
 
@@ -894,14 +929,18 @@ void GameSession::refreshViews() {
         BallView view;
         view.id = ball.id;
         view.held = ball.held;
+        view.stuck = ball.stuck;
+        view.radius = ball.radius;
         if (ball.held) {
             view.position = {bat_.position.x + rules_.heldOffsetX, rules_.ballPlaneY,
-                             bat_.position.z + rules_.heldOffsetZ};
+                             bat_.position.z + heldDistance()};
         } else if (ball.away) {
             const SpecialObjects::Away away = objects_.away(ball.id, time_);
             view.position = away.position;
             view.appear = away.appear;
             view.away = true;
+        } else if (ball.stuck) {
+            view.position = {bat_.position.x + ball.stuckOffset.x, rules_.ballPlaneY, bat_.position.z + ball.stuckOffset.z};
         } else {
             view.position = scene_.world().pose(ball.body).translationPart();
             view.velocity = scene_.world().linearVelocity(ball.body);

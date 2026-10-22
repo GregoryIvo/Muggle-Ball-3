@@ -1,4 +1,4 @@
-// Tests of the level's special objects (SpecialObjects, docs/GAMEPLAY.md sections 14 and 15) on made-up levels: dynamite and
+// Tests of the level's special objects (SpecialObjects, docs/GAMEPLAY.md sections 14 and 17) on made-up levels: dynamite and
 // its chains, the interactive cannon and its cannonball, teleports, firework crates, springs, volcanoes, generators, metal,
 // vibros and flickers, run in a GameSession with the physics on the calling thread. Needs neither a GPU nor game data. The
 // same objects in the real levels: mb_special_object_smoke.
@@ -360,7 +360,7 @@ void testHurtByBlastsOnly() {
 
 // The ball does not hurt metal, so a ball that only bounces off it has done nothing, to the stall rule: a last target that nothing
 // reaches (a bird hanging 5 units up in cowboys-banditos) is let go after 90 s, however often the ball hits the metal (docs/GAMEPLAY.md
-// 15.1).
+// 17.1).
 void testStallAmongMetal() {
     SessionOptions blind = options(TargetRule::BrickType);
     blind.ignoreUnreachable = false;
@@ -604,7 +604,7 @@ void testFirework() {
 }
 
 // A ball that hits the crate squarely hurts it as it hurts a brick (energy 1: destroyed for 120 points). The touch lit the rocket,
-// and it comes all the same; a crate that only a blast reached was never lit, and gives none (docs/GAMEPLAY.md 15.5).
+// and it comes all the same; a crate that only a blast reached was never lit, and gives none (docs/GAMEPLAY.md 17.5).
 void testFireworkBlow() {
     Game g(levelOf({board(), firework({0, 0, 10})}));
     g.shoot({0, 0.6f, 0}, {0, 0, 1});

@@ -392,10 +392,10 @@ BodyId PhysicsScene::launchBall(Vec3 position, Vec3 velocity) {
     return body;
 }
 
-BodyId PhysicsScene::addGameBall(Vec3 position, Vec3 velocity) {
+BodyId PhysicsScene::addGameBall(Vec3 position, Vec3 velocity, float radius) {
     PhysicsShape sphere;
     sphere.type = PhysicsShapeType::Sphere;
-    sphere.radius = kBallRadius;
+    sphere.radius = radius;
     sphere.material = ballMaterial_;
 
     BodyDesc desc;

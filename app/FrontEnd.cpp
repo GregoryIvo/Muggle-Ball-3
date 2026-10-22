@@ -296,10 +296,20 @@ bool parseHudState(std::string_view text, mb::GameHud& hud) {
     hud.score = numbers[1];
     hud.level = numbers[2];
     for (std::size_t i = 3; i < fields.size(); ++i) {
-        if (fields[i].empty()) {
+        const std::size_t colon = fields[i].find(':');
+        const std::string_view icon = fields[i].substr(0, colon);
+        int number = -1;
+        if (icon.empty()) {
             return false;
         }
-        hud.powerUps.emplace_back(fields[i]);
+        if (colon != std::string_view::npos) {
+            const std::string_view digits = fields[i].substr(colon + 1);
+            const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), number);
+            if (digits.empty() || error != std::errc() || end != digits.data() + digits.size() || number < 0) {
+                return false;
+            }
+        }
+        hud.powerUps.emplace_back(std::string(icon), number);
     }
     return true;
 }

@@ -18,6 +18,7 @@
 #include <exception>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -183,11 +184,13 @@ void testWinning(mb::Renderer& renderer, mb_app::Assets& assets) {
     mb::InputEvents nobody;
     mb::LevelOutcome outcome = mb::LevelOutcome::Playing;
     double seconds = 0, completeAt = -1, darkAt = -1;
+    bool byStar = false;
     while (outcome == mb::LevelOutcome::Playing && seconds < 1500) {
         outcome = session.update(nobody, kFrame, hud);
         seconds += kFrame;
         if (completeAt < 0 && session.rules()->phase() == mb::SessionPhase::Complete) {
             completeAt = seconds;
+            byStar = hud.caption == "NextLevel";  // the Next Level star ends a level with targets left
             check(session.ending(), "win: the session is ending as soon as the last target is gone");
         } else if (completeAt >= 0 && darkAt < 0 && session.darkness() > 0) {
             darkAt = seconds;
@@ -200,7 +203,7 @@ void testWinning(mb::Renderer& renderer, mb_app::Assets& assets) {
           "win: and it is reported 0.9 s after the last target (the hold, then the fade out)");
     check(session.darkness() == 1, "win: the picture is dark by then");
     check(hud.score > 1000 && hud.lives >= 0 && hud.lives <= 99, "win: the points were added to those brought in, and the hearts are the rules'");
-    check(session.rules()->targetsLeft(session.rules()->levelEnd()) == 0, "win: no target is left");
+    check(byStar || session.rules()->targetsLeft(session.rules()->levelEnd()) == 0, "win: no target is left, or the star was caught");
 }
 
 // The click that ends a pause is not the level's: the front end does not give the session its frame, and tells it the pause is
@@ -238,6 +241,70 @@ void testResume(mb::Renderer& renderer, mb_app::Assets& assets) {
     check(!heldAfter && pressAfter, "resume: a button that is down as the pause ends launches nothing, and the next press does");
 }
 
+// The prizes on screen: a level played by the autopilot, the same every time, with a prize given by the harness (PrizeCue). A prize that
+// falls is drawn with its halo; the effects change the picture (the Wall's rope, the Magnet's horseshoe, the night's light); the
+// caption and the icons are in the HUD, and the caption goes away.
+void testPrizes(mb::Renderer& renderer, mb_app::Assets& assets) {
+    const mb::SaveData save{fs::path()};
+    struct Run {
+        std::unique_ptr<mb_app::PlaySession> session;
+        mb::GameHud hud;
+        void play(double seconds) {
+            const mb::InputEvents nobody;
+            for (int i = 0; i < static_cast<int>(std::lround(seconds / kFrame)); ++i) {
+                session->update(nobody, kFrame, hud);
+            }
+        }
+    };
+    const auto start = [&](std::vector<mb_app::PrizeCue> cues) {
+        Run run;
+        run.session = std::make_unique<mb_app::PlaySession>(renderer, assets, save, nullptr,
+                                                            mb_app::PlayOptions{.autoplay = true, .prizes = std::move(cues)});
+        run.hud.lives = 2;
+        run.session->start("piratos-ostrovok", run.hud, [](float) {});
+        return run;
+    };
+
+    Run plain = start({});
+    plain.play(2.0);
+    const std::size_t plainItems = plain.session->items().size();
+    check(plain.hud.powerUps.empty() && plain.hud.caption.empty() && plain.hud.captionAlpha == 0, "prizes: nothing on the HUD without one");
+    const mb::DirectionalLight day = plain.session->frame(4.0f / 3.0f).light;
+
+    Run falling = start({{mb::PrizeKind::Bonus, 1.0, false, std::nullopt}});
+    falling.play(2.0);
+    check(falling.session->rules()->fallingPrizes().size() == 1, "prizes: the prize the harness drops is falling");
+    check(falling.session->items().size() >= plainItems + 3, "prizes: it is drawn, its model and its halo of two sprites");
+    check(falling.hud.caption.empty(), "prizes: it has no caption until it is caught");
+
+    Run wall = start({{mb::PrizeKind::Wall, 0.9, true, std::nullopt}});
+    wall.play(2.0);
+    check(wall.hud.caption == "Wall" && wall.hud.captionAlpha > 0.5f, "prizes: a catch puts the prize's caption on the HUD, strong at first");
+    check(wall.hud.powerUps.size() == 1 && wall.hud.powerUps[0].icon == "wall" && wall.hud.powerUps[0].number >= 28 && wall.hud.powerUps[0].number <= 30,
+          "prizes: and its icon, with the seconds it has left");
+    check(wall.session->items().size() > plainItems, "prizes: the Wall's rope is drawn");
+    wall.play(0.8);
+    check(wall.hud.caption == "Wall" && wall.hud.captionAlpha < 0.5f && wall.hud.captionAlpha > 0, "prizes: the caption fades");
+    wall.play(0.6);
+    check(wall.hud.caption.empty() && wall.hud.captionAlpha == 0, "prizes: and is gone after about 2.2 s");
+    check(wall.hud.powerUps.size() == 1 && wall.hud.powerUps[0].number >= 26 && wall.hud.powerUps[0].number <= 28, "prizes: while the icon counts down");
+
+    Run magnet = start({{mb::PrizeKind::Magnet, 0.9, true, std::nullopt}});
+    magnet.play(2.0);
+    check(magnet.session->items().size() > plainItems, "prizes: the Magnet's horseshoe is on the bat");
+
+    Run night = start({{mb::PrizeKind::Night, 0.9, true, std::nullopt}});
+    night.play(3.0);
+    const mb::DirectionalLight dark = night.session->frame(4.0f / 3.0f).light;
+    check(dark.ambient.r < day.ambient.r * 0.45f && dark.diffuse.r < day.diffuse.r * 0.45f, "prizes: the Night dims the scene's light to 0.38");
+    check(colours(renderer.renderToImage(1024, 768, night.session->frame(4.0f / 3.0f), night.session->items())) > 300, "prizes: and the board is still in sight");
+
+    Run big = start({{mb::PrizeKind::BigBall, 0.9, true, std::nullopt}, {mb::PrizeKind::PowerBall, 0.9, true, std::nullopt}});
+    big.play(2.0);
+    check(big.hud.powerUps.size() == 2 && big.hud.powerUps[0].icon == "big" && big.hud.powerUps[1].icon == "Powerful",
+          "prizes: two effects, two icons, the one caught first on top");
+}
+
 }  // namespace
 
 int main() {
@@ -264,6 +331,7 @@ int main() {
         testPlaying(*renderer, assets);
         testWinning(*renderer, assets);
         testResume(*renderer, assets);
+        testPrizes(*renderer, assets);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "FAIL: exception: %s\n", e.what());
         return 1;

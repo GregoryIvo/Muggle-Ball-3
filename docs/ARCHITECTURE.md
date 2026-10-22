@@ -127,15 +127,16 @@ What the player keeps needs no hook: the `Menu` changes the `SaveData` it was ma
 `drawHud(assets, GameHud, width, height, out)` appends the in-game overlay as sprites: a heart (`Icons/Heart.png`) for
 each life down the left edge, "POINTS : n" bottom left and "LEVEL : n" bottom right (the string table's `Scores` and
 `Level`, in the menus' bookworm font at size 22) over the purple band the levels end in, and an icon (`Icons/<name>.png`)
-for each active bonus down the right edge. It is placed from measurements of the two original screenshots in
+for each active bonus down the right edge with its number to the right (seconds or shots), and the caption of the prize caught
+last, green between the points and the level. It is placed from measurements of the two original screenshots in
 `reference/` (hearts 40 px at x 11, y 9, every 44 px; text 15 px from the edges, its line centred 18 px above the bottom;
 all in 1024x768 units, scaled by the target's height) and anchored to the edges of the window, not of the menus' 4:3 area.
-The bonus icons' place is a guess: no screenshot shows one. `drawPause` draws the pause screen from `Pause`,
+The bonus icons' place is a guess (the numbers right of them are the footage's). `drawPause` draws the pause screen from `Pause`,
 `PressAnyKey` and `PressEscape`.
 
 In the game the `GameHud` is the game's: `GameFlow` sets the hearts of a new game (`GameplayRules::startHearts`), no points
 and the level's number counting from 1 when a game starts, `PlaySession` keeps the hearts and the points of the rules in
-it, and it carries over to the next level. `MuggleBall3 --level <name> --hud [--hud-state 3,1529,1,Cannon]` shows
+it, and it carries over to the next level. `MuggleBall3 --level <name> --hud [--hud-state 3,1529,1,Cannon:6]` shows
 placeholders on the level viewer or a screenshot.
 
 ## Gameplay
@@ -168,14 +169,26 @@ them where they are (`PhysicsScene::pathMovers()`, `pathTime()`). The player is 
 own tests: `mb_path_tests` on made-up paths, `mb_path_smoke` on the real levels; the format is in `LEVEL_FORMAT.md`
 ("Path motion") and the rules in `GAMEPLAY.md` section 13.
 
+The prizes are in the session too (`GAMEPLAY.md` section 15; `game/Prizes.h` has the table of the 28 and `PrizeRules`, the code is
+`game/src/SessionPrizes.cpp` with a few calls from `Gameplay.cpp`): a destroyed object may leave one (`PrizeDropped`), which falls straight
+down the board (`fallingPrizes()`) and is caught by the bat (`PrizeCaught`, `PrizeMissed`), and the effects, timed, counted or instant, are
+state the picture reads (`activeEffects()`, `weapon()`, `ballRadius()`, `ballSpeed()`, `batRadius()`, `nightLevel()`, `BallView::stuck`) with
+`EffectStarted`/`EffectEnded` for the sounds. `SessionOptions::campaignLevel` and `prizeSeed` say which prizes may drop and make a session
+repeat. Tests: `mb_prize_tests` (made-up levels), `mb_prize_smoke` (the table against the data).
+
+What the prizes look like is `PrizeScene` (`game/PrizeScene.h`, `GAMEPLAY.md` section 16), a part of `PlayScene` that reads the session and the events:
+the falling orbs with their halos, the flashes where a prize is caught or missed and the Explosive Ball goes off, the models of the Power Ball and the
+Explosive Ball, the Magnet's horseshoe, the Wall's rope and the Yo-Yo's string, and the dimmed light of the night. The HUD's caption and icons are
+`PrizeHud` (`powerUpsOf`, `PrizeCaption`), which `PlaySession` fills into the `GameHud`; `Billboard.h` has the flat things the scene draws
+with the quad (flashes, strips, marks on the floor). `--drop-prize` and `--catch-prize` give a level a prize at a time (see section 16.5).
 The level's special objects (dynamite, interactive cannons, teleports, firework crates, springs, volcanoes, generators, metal, vibros and
-flickers) are the rules of `SpecialObjects` (`game/SpecialObjects.h`, `GAMEPLAY.md` sections 14 and 15), a member of `GameSession` that is its friend and
+flickers) are the rules of `SpecialObjects` (`game/SpecialObjects.h`, `GAMEPLAY.md` sections 14 and 17), a member of `GameSession` that is its friend and
 is called at three places: `processContacts` (a ball with a blow met an object that the ball does not hurt: `ballHit`), `explodeDue` (a charge
 of dynamite was destroyed: `destroyed`, its blast) and once a fixed step (`update`: what touched the cannons and the crates, the cannonballs,
 the rockets, the balls in teleports, the vibros). It reports through the session's events and keeps the state the picture reads
 (`GameSession::objects()`: `shots()`, `rockets()`, `flickers()`); a ball in a teleport has no body and is no lost ball
 (`BallView::away`, `appear`). Its numbers are `SpecialObjectRules` in `GameplayRules::objects`. `canBeDamaged` says which objects something can
-hurt (not the teleports), `SpecialObjects` which of them the ball does not (`GAMEPLAY.md` 15.1). It has its own tests: `mb_special_object_tests` on
+hurt (not the teleports), `SpecialObjects` which of them the ball does not (`GAMEPLAY.md` 17.1). It has its own tests: `mb_special_object_tests` on
 made-up levels and `mb_special_object_smoke` on the real ones.
 
 What falls off the board stops being a target and is taken out (`ActorFell`), with no points and no explosion

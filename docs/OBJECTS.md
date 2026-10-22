@@ -361,7 +361,7 @@ damages or pushes whatever it touches.
 
 ## 7. Interactive objects (`Interactive/*`)
 
-What the game does with them is in `GAMEPLAY.md` section 15 (step 5). Everything that follows is **data** unless marked. None has game parameters in
+What the game does with them is in `GAMEPLAY.md` section 17 (step 5). Everything that follows is **data** unless marked. None has game parameters in
 its `<extra>` except where listed; all behaviour is in the executable. The level
 holds each object as type `cannon`, `firework` and so on, with these shapes.
 

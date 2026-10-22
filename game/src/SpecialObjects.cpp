@@ -228,7 +228,7 @@ void SpecialObjects::push(GameSession& session, ActorIndex actor, Vec3 centre, f
 
 // ---- Springs
 
-// A spring kicks the ball away from its middle, at the ball's speed (docs/GAMEPLAY.md section 15.6 [I]).
+// A spring kicks the ball away from its middle, at the ball's speed (docs/GAMEPLAY.md section 17.6 [I]).
 void SpecialObjects::kick(GameSession& session, ActorIndex actor, int ballId) {
     const auto ball = std::ranges::find(session.balls_, ballId, &GameSession::Ball::id);
     if (ball == session.balls_.end() || ball->body == 0) {
@@ -241,7 +241,7 @@ void SpecialObjects::kick(GameSession& session, ActorIndex actor, int ballId) {
         return;
     }
     ball->heading = normalize(away);
-    session.scene_.world().setLinearVelocity(ball->body, ball->heading * session.rules_.ballSpeed);
+    session.scene_.world().setLinearVelocity(ball->body, ball->heading * session.ballSpeed());
 }
 
 // ---- Cannons
@@ -483,7 +483,7 @@ void SpecialObjects::runPortals(GameSession& session) {
         const Vec3 heading = transit.heading;
         transits_.erase(transits_.begin() + static_cast<std::ptrdiff_t>(i));
         ball->away = false;
-        ball->body = session.scene_.addGameBall(at, heading * session.rules_.ballSpeed);
+        ball->body = session.scene_.addGameBall(at, heading * session.ballSpeed(), ball->radius);
         ball->heading = heading;
         ball->anchor = at;
         ball->anchoredAt = session.time_;

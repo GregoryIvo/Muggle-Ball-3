@@ -53,6 +53,27 @@ void PlaySounds::play(const GameEvent& event) {
         case EventType::BallEmerged:
             sounds_.play("teleport", 1, pan);
             break;
+        case EventType::PrizeCaught:
+            // The star's sound is the level's, which LevelComplete plays in the same step.
+            if (event.material && event.prize != PrizeKind::NextLevel) {
+                sounds_.play(*event.material, MaterialSound::Dead, 1, pan);
+            }
+            break;
+        case EventType::BallStuck:
+            sounds_.play("ballMagnited", 1, pan);
+            break;
+        case EventType::BallRubbered:
+            sounds_.play("ballRubbered", 1, pan);
+            break;
+        case EventType::Blast:
+            sounds_.play("explosion_ball", 1, pan);
+            break;
+        case EventType::PrizeDropped:  // the data names no sound for a prize that appears, falls, fizzles or runs out
+        case EventType::PrizeMissed:
+        case EventType::EffectStarted:
+        case EventType::EffectEnded:
+        case EventType::StrikeGranted:  // (the strikes' own sounds come with them)
+            break;
         case EventType::BatLeft:
             sounds_.play("bat_dead", 1, pan);
             break;

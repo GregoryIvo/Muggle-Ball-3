@@ -128,9 +128,14 @@ hold back a pile of the same sound in one frame.
 | `DynamiteBlast` (the charge's `BrickDestroyed` plays `dynamite_dead`), `ShotHit` (what it struck makes its own sounds), `RocketLaunched` | none | |
 | `BatLeft` | `bat_dead`: the bat flies off after the last ball is lost | inferred |
 | `LevelComplete` | `endlevel` (also the Next Level prize's sound) | inferred |
+| `PrizeCaught` | the prize material's `dead` sound (`bigball`, `night`, `life`...; `money` and `bazuka` have no file, so those two catches are silent); not for the Next Level star, whose `endlevel` is `LevelComplete`'s | data |
+| `BallStuck` | `ballMagnited` (the Magnet holds the ball) | name in `sounds.xml`, use inferred |
+| `BallRubbered` | `ballRubbered` (the Yo-Yo's string turns the ball back) | name in `sounds.xml`, use inferred |
+| `Blast` | `explosion_ball` (the Explosive Ball goes off) | name in `sounds.xml`, use inferred |
+| `PrizeDropped`, `PrizeMissed`, `EffectStarted`, `EffectEnded`, `StrikeGranted` | none | |
 | `BallLost`, `BallFreed`, `LifeLost`, `BatEntered`, `GameOver` | none | |
 
-`ballMagnited`, `ballRubbered`, `explosion_ball` and the prizes' sounds wait for the prizes (step 5).
+The weapons' sounds (`bullet_shoot`, `rocket_shoot`, `kernel_shoot`, `lazer_shoot` and their `*_dead`, `thunderbolt`) come with the weapons.
 
 **Sounds a brick names that `sounds.xml` does not have.** Five names are heard in play, and each is silent and warned about once
 (`SoundLibrary::lookup`; `tests/test_sound.cpp` checks that a repeated unknown name warns once): `wood_hit` and `wood_dead`

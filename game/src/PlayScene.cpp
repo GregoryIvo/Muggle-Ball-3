@@ -1,5 +1,6 @@
 #include "mb/game/PlayScene.h"
 
+#include "mb/game/Billboard.h"
 #include "mb/game/GameCamera.h"
 
 #include <algorithm>
@@ -33,6 +34,10 @@ constexpr double kExplosionSeconds = 0.4;
 constexpr int kSparks = 12;
 constexpr float kMostRolledPerFrame = 3.0f;  // a ball that jumped (it was freed from a pin) did not roll that far
 
+const char* batMaterial(int bat) {
+    return kBatMaterials[std::clamp(bat, 0, static_cast<int>(std::size(kBatMaterials)) - 1)];
+}
+
 Level batLevel(int bat) {
     Level level;
     for (const char* frame : kBatFrames) {
@@ -40,26 +45,12 @@ Level batLevel(int bat) {
         object.type = ObjectType::Bat;
         object.mesh = "bat.x";
         object.frame = frame;
-        object.material = kBatMaterials[std::clamp(bat, 0, static_cast<int>(std::size(kBatMaterials)) - 1)];
+        object.material = batMaterial(bat);
         Actor actor;
         actor.object = object;
         level.actors.push_back(actor);
     }
     return level;
-}
-
-Mat4 facingGameCamera() {
-    const Vec3 forward = normalize(kGameCameraTarget - kGameCameraEye);
-    const Vec3 right = normalize(cross({0, 1, 0}, forward));
-    const Vec3 up = cross(forward, right);
-    Mat4 m;
-    const Vec3 axes[3] = {right, up, forward};
-    for (int i = 0; i < 3; ++i) {
-        m.m[i][0] = axes[i].x;
-        m.m[i][1] = axes[i].y;
-        m.m[i][2] = axes[i].z;
-    }
-    return m;
 }
 
 float progress(const BatView& bat) {
@@ -130,7 +121,7 @@ float heldBallScale(const BatView& bat) {
 }
 
 Vec3 ballPosition(const BallView& ball, const BatView& bat, float lead) {
-    if (ball.held) {
+    if (ball.held || ball.stuck) {
         return ball.position + Vec3{batCarry(bat, lead), 0, 0};
     }
     return ball.position + ball.velocity * lead;
@@ -144,6 +135,7 @@ PlayScene::PlayScene(ModelCache& cache, const MaterialLibrary& materials, const 
       flashTexture_(cache.texture(textures.find("Oreols/02.png"))),
       sparkTexture_(cache.texture(textures.find("Particles/PARTICLE.PNG"))),
       facing_(facingGameCamera()),
+      prizes_(cache, materials, textures, batMaterial(bat)),
       effects_(cache, materials, textures) {
     update(session, {}, 0);
 }
@@ -153,6 +145,7 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
     level_.update(time_);
     level_.follow(session.scene());
     effects_.update(session, events, seconds, level_);
+    prizes_.update(events, seconds);
 
     for (const GameEvent& event : events) {
         switch (event.type) {
@@ -172,11 +165,13 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
             case EventType::ActorFell:
                 level_.hide(event.actor);
                 break;
-            case EventType::BallLost:
+            case EventType::BallLost: {
                 // It carries on along its path while it shrinks, turning as it did.
-                vanishing_.push_back({event.position, event.velocity, rolls_[event.ball].turn, 0});
+                const Roll roll = rolls_[event.ball];
+                vanishing_.push_back({event.position, event.velocity, roll.turn, roll.size, roll.look, 0});
                 rolls_.erase(event.ball);
                 break;
+            }
             default:
                 break;
         }
@@ -201,26 +196,32 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
 
     items_.clear();
     level_.appendDrawn(items_);
+    prizes_.appendWall(session, items_);
 
     const BatPose bat = batPose(session.bat(), static_cast<float>(lead));
     if (bat.visible) {
-        const Mat4 place = Mat4::scaling({bat.scale, bat.scale, bat.scale}) * Mat4::rotationY(bat.yaw) *
-                           Mat4::translation(bat.position);
+        const float size = bat.scale * session.batScale();  // the prizes make it wider and narrower
+        const Mat4 place = Mat4::scaling({size, size, size}) * Mat4::rotationY(bat.yaw) * Mat4::translation(bat.position);
         for (DrawItem item : bat_.items()) {
             item.world = item.world * place;
             items_.push_back(item);
         }
+        prizes_.appendMagnet(session, place, items_);
     }
 
     std::erase_if(rolls_, [&](const auto& entry) {
         return std::ranges::none_of(session.balls(), [&](const BallView& ball) { return ball.id == entry.first; });
     });
+    const BallLook look = PrizeScene::ballLook(session);
+    const bool yoyo = session.effect(PrizeKind::YoYo) != nullptr;
     for (const BallView& ball : session.balls()) {
         const Vec3 at = ballPosition(ball, session.bat(), static_cast<float>(lead));
         Roll& roll = rolls_[ball.id];
+        roll.size = ball.radius / kBallRadius;
+        roll.look = look;
         float scale = 1;
-        if (ball.held) {
-            scale = heldBallScale(session.bat());
+        if (ball.held || ball.stuck) {
+            scale = ball.held ? heldBallScale(session.bat()) : 1.0f;
             roll.placed = false;
         } else {
             scale = ball.appear;
@@ -229,29 +230,38 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
                 const float dx = at.x - roll.at.x, dz = at.z - roll.at.z;
                 const float distance = std::hypot(dx, dz);
                 if (distance > 1e-5f && distance < kMostRolledPerFrame) {
-                    roll.turn = roll.turn * Mat4::rotationAxis({dz / distance, 0, -dx / distance}, distance / kBallRadius);
+                    roll.turn = roll.turn * Mat4::rotationAxis({dz / distance, 0, -dx / distance}, distance / ball.radius);
                 }
             }
             roll.at = at;
             roll.placed = true;
+            if (yoyo && bat.visible && !ball.away) {
+                prizes_.appendString(bat.position, at, items_);
+            }
         }
         if (scale > 0) {
-            addBall(at, roll.turn, scale);
+            addBall(at, roll.turn, scale * roll.size, look);
         }
     }
     for (const Vanishing& ball : vanishing_) {
         const float left = 1 - static_cast<float>(ball.age / session.rules().ballVanishTime);
-        addBall(ball.at + ball.velocity * static_cast<float>(ball.age), ball.turn, left);
+        addBall(ball.at + ball.velocity * static_cast<float>(ball.age), ball.turn, left * ball.size, ball.look);
     }
     for (const Explosion& explosion : explosions_) {
         addExplosion(explosion);
     }
     items_.insert(items_.end(), effects_.items().begin(), effects_.items().end());
+    prizes_.appendPrizes(session, lead, items_);
+
+    night_ = session.nightLevel();
+    if (night_ > 0) {
+        dimUnlit(items_, night_);
+    }
 }
 
-void PlayScene::addBall(Vec3 at, const Mat4& turn, float scale) {
+void PlayScene::addBall(Vec3 at, const Mat4& turn, float scale, BallLook look) {
     const Mat4 place = Mat4::scaling({scale, scale, scale}) * turn * Mat4::translation(at);
-    for (DrawItem item : level_.ballItems()) {
+    for (DrawItem item : look == BallLook::Plain ? level_.ballItems() : prizes_.ballItems(look)) {
         item.world = item.world * place;
         items_.push_back(item);
     }
@@ -291,19 +301,7 @@ void PlayScene::addExplosion(const Explosion& explosion) {
 }
 
 void PlayScene::addBillboard(Vec3 at, float size, Color tint, TextureHandle texture, BlendMode blend) {
-    DrawItem item;
-    item.mesh = quad_;
-    item.indexCount = 6;
-    item.world = Mat4::scaling({size, size, 1}) * facing_ * Mat4::translation(at);
-    MaterialParams& m = item.material;
-    m.diffuse = tint;
-    m.texture = texture;
-    m.blend = blend;
-    m.cull = CullMode::None;
-    m.lit = false;
-    m.depthWrite = false;
-    m.depthTest = false;
-    items_.push_back(item);
+    items_.push_back(billboard(quad_, facing_, at, {size, size}, tint, texture, blend));
 }
 
 }  // namespace mb

@@ -128,6 +128,7 @@ SessionOptions options(TargetRule rule = TargetRule::Never) {
     SessionOptions o;
     o.levelEnd = rule;
     o.physicsSettings.threads = 0;  // on the caller, so that a run repeats exactly
+    o.rules.prizes.drops = false;   // the rules of the bricks and the ball alone; the prizes have tests/test_prizes.cpp
     return o;
 }
 
@@ -229,7 +230,7 @@ void testPredicates() {
     check(others && damageable,
           "required: not metal, portals, cannons, dynamite, fireworks, generators, springs, volcanoes, vibros or flickers; a blast "
           "can still destroy them, but for the portals, which nothing hurts (a charge 3.8 units away left one standing: "
-          "docs/GAMEPLAY.md section 15.1)");
+          "docs/GAMEPLAY.md section 17.1)");
 
     // What shrinks away: the materials of exploseType 5.
     check(shrinksAway(materials().find("Pirate.jpg")) && !shrinksAway(&shark) && !shrinksAway(&crate) && !shrinksAway(&steel) &&

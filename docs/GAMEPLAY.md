@@ -297,7 +297,7 @@ A second pass over V1 (all 83 levels: the HUD score read as text every 1/30 s, a
 | natural end | `LevelComplete` as the last required object is gone: with its score, or for a person or an animal (`exploseType` 5) 0.35 s after it, shrinking away meanwhile; the picture holds **0.1 s**, fades out in 0.8 s, and the next level comes up out of the dark |
 | a piece off the board | not a target any more, taken out (`ActorFell`), no points, no explosion |
 | level order | `levels.xml`, as `Campaign` has it |
-| Next Level, prizes | not built (step 5); `GameSession::forceLevelComplete()` is what the star will call |
+| Next Level, prizes | step 5, section 15; `GameSession::forceLevelComplete()` is what the star calls |
 
 ### Still open [?]
 
@@ -402,11 +402,13 @@ the stall rule fires in a quarter of the levels the bot finishes and decides the
 stalls; a person aims, and has the weapons. The 23 levels it does not finish (14 knights', 8 village's and 1 pirates') are slow, not stuck: 19 were
 still destroying bricks in the last 30 s of the run, the other 4 (knight-labirint, knight-nazad-k-mame, knight-za-princessoi and village-logovo-vedmi,
 with 1 to 8 targets left) had stood still for 35 to 81 s, so that the stall rule was about to let go of them; most of the 23 have 100 to 250 targets.
-A person with the prizes will be faster. With step 5's special objects (section 15: the ball no longer destroys metal, cannons, springs and the
+A person with the prizes will be faster. With step 5's special objects (section 17: the ball no longer destroys metal, cannons, springs and the
 like) the same run finishes **62 of 83**, 39 by destroying every target and 23 by the stall rule (it was 46 and 14: the metal stays, and the autopilot
 leaves more levels with a few targets that nothing reaches, which the stall rule lets go). `village-apple`, whose two fences open only through a
-crate of `Box.jpg` and the firework crate that falls into the gap (15.1), is slow for it, not shut: its gaps are open at 40 to 51 s and 265 to 306 s and
-100 of 118 targets are left at 900 s; the rest vary with the paths the ball takes.
+crate of `Box.jpg` and the firework crate that falls into the gap (17.1), is slow for it, not shut: its gaps are open at 40 to 51 s and 265 to 306 s and
+100 of 118 targets are left at 900 s; the rest vary with the paths the ball takes. With the prizes as well (section 15) the run finishes
+**68 of 83**, 53 by destroying every target and 15 by the stall rule; the Next Level star ended 22 of them. Of the 15 left open, 13 were boards with 8
+to 121 targets left and 2 (`knight-nazad-k-mame`, `Piratos-Ygoshenia`) had one.
 
 ## 13. Moving sharks and birds (step 5)
 
@@ -483,7 +485,7 @@ Added after the second study. Same tags: **[M]** measured from video, **[D]** re
 - **Launch [M].** The ball brushed the crate at 1013.33. The rocket came off the crate at **1014.02**, about 0.7 s later. A second small rocket started to lift at 1014.23.
 - **Flight [M].** Height 6.5 u at 1014.20 to 18.9 u at 1014.99: **15.6 u/s**, straight up. Burst at about 20 u at **1015.06**, so about 1.2 s of flight, not the 2.5 s of `lifeTime` [D, inferred]. The burst is a pink particle ball that spreads to about 25 u across by 1015.3 and fades by 1015.6.
 - **Score [M].** None for the launch or the burst: the HUD stayed 76767 from 1013.0 to 1014.76 (F2). The later +17, +17, +180, +36 are other bricks.
-- The crate was not destroyed by that touch [M]; whether a harder hit kills it (energy 1, 120 points [D]) [?; answered in 15.5]. The rocket and the burst did no damage that was visible [M].
+- The crate was not destroyed by that touch [M]; whether a harder hit kills it (energy 1, 120 points [D]) [?; answered in 17.5]. The rocket and the burst did no damage that was visible [M].
 
 **Volcano** (`volcano`, 13 in levels). **[M, weak]** Idle. V1 level 24, 2634-2704 (70 s): a static red cone with lava cracks, no eruption, no particles; a ball passed within about 1 u at 2647.4 with no reaction (F11, F12). Whether a hit or a timer makes it erupt: [?]. Build it as a static prop of 10 points.
 
@@ -570,7 +572,7 @@ F1 `V1-t1013.20-1014.23-L10-firework-crate-ball-passes-rocket-leaves-0.7s-later`
 
 F26 and F49 are plots drawn from the tracked positions (not screenshots).
 
-### 14.7 Still open (answered for the game in 15.8)
+### 14.7 Still open (answered for the game in 17.8)
 
 - Spring: does it kick the ball or just bounce it, and does one hit destroy it (energy 1, 10 points)? Only a graze at 2.6 u (V1 2634.0, level 24) was seen. A clean hit in one of the 21 levels (22, 25, 28, 33, 38, 46 and the cowboys levels have springs near walls or the near half) would settle it.
 - Interactive cannon: how many hits destroy it (energy 2), what damage the cannonball does and how far it flies (a lob with y velocity 3 under gravity would land at about 23 u), whether a very slow ball or a bat shot fires it, and whether a cannon ever fires on a timer (none in 28 s).
@@ -587,22 +589,146 @@ F26 and F49 are plots drawn from the tracked positions (not screenshots).
 - Path movers: do they push the ball, and are the sharks and birds required to end a level (second-study item 2 is disputed)? Two rings of 10 and 9 actors on `po-krugy`: the start phase of each actor is the position of its key in the level data, not checked against footage.
 - Prize catch: the real overlap rule (the 4 u rule here rests on a catch at 1.8 u and misses at 8.8 and 26 u), and whether a second prize of the same kind caught during the first one's timer adds time or replaces it.
 
-## 15. Special objects as built (step 5)
+## 15. Prizes as built (step 5, prizes)
 
-What the game does with section 14. The rules are `SpecialObjects` (`game/SpecialObjects.h`): `GameSession` owns one and calls it at the three places the level's special objects touch the rules of play (a ball with a blow met one, a charge of dynamite was destroyed, once a fixed step), and its numbers are `SpecialObjectRules`, `GameplayRules::objects`. The picture is `ObjectEffects` (`PlayScene` draws it) and the sounds are `PlaySounds`. Tags as before; `[I]` is a choice made where the footage and the data leave room, and each question left open in 14.7 is answered in 15.8. The numbers are in 15.9.
+What the game does with the prizes of sections 7 and 14 where they leave room; `[I]` is a choice made from the footage rather than a measurement. The rules (what drops, how it falls and is caught, what each of the 28 does, and the state and events the picture reads) are `game/Prizes.h` (`PrizeRules`, the table `prizeInfo`) and `GameSession` (`game/src/SessionPrizes.cpp`, called from `Gameplay.cpp` at a few marked places); the sounds, the HUD and the look are the presentation's. Tests: `mb_prize_tests` (made-up levels), `mb_prize_smoke` (the table against the real data), `mb_gameplay_smoke` (the autopilot with the prizes on).
 
-### 15.1 What hurts what
+### 15.1 What drops
 
-The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, one energy a blow, as before (section 5). The other special objects (cannons, springs, volcanoes, generators and metal) react to it and are hurt by other things: a blast (15.2), a cannonball (15.3) and whatever a weapon does through `GameSession::hit()` (the prizes, one energy a hit).
+| rule | in the game |
+|---|---|
+| when | each destroyed object (`BrickDestroyed`, any damageable object: bricks, trees, metal, dynamite...) is rolled once, with a random generator seeded per session (`SessionOptions::prizeSeed`, SplitMix64, the same numbers on every machine); a piece that fell off the board is no kill and leaves nothing; nothing drops once the level is complete; a hit that carries `disablePrize` (`GameSession::hit(actor, at, false)`, for the Thunderbolt and the meteors [D]) leaves nothing |
+| how often | by what the object was worth (`PrizeRules::tiers`): 15.8 % below 80 points, 10 % to 119, 6.5 % to 199, 5 % to 299, 7 % from 300. The second study's fit by value is 13.5, 8.5, 5.5, 4.2 and 5.9 % of the kills that had a caught prize; the numbers here are those raised by 1.18, so that the mean over the 13,231 destroyable objects of the 83 levels (11,282, 889, 789, 210 and 61 in the five tiers) is **14.64 %**, the 14.7 % of all kill events [M, I]. `mb_prize_smoke` prints the mean from the data |
+| bad prizes | the seven with a red halo (Skull, Decrease Bat Size, Increase Ball Speed, Weak Ball, Normal Ball, Drunken Ball, Night) drop from campaign level `PrizeRules::badFromLevel` = 10 on, none before [M]; `SessionOptions::campaignLevel` carries the level's place (the HUD's number) |
+| which | drawn by weight from the table below, over the prizes allowed. There is no weight in the data [D]; the weights are the second study's counts of caught prizes by score jump (levels 2 to 83, 1,320 of its 1,355), a value shared by two prizes split by what the footage shows of each [I]. They give the bad ones 11.5 % of the drops (9 % of the catches of levels 10 to 83 in the footage had a red-only value, a few more with the three that share one) |
+| the Next Level star | **rolled apart from the others**, once for each destroyed object, and left out of the weights: it ended 70 of 83 levels, always with most of the board gone, and was 5 % of the catches [M], so it cannot be a drop of constant chance (that would end levels early, and a fifth of them never). The chance is 0 until fewer than a tenth of the level's targets (at least 6) are left, then rises in a straight line to 0.5 for the last one (`starChance`). A star in the air blocks another, and a level that never ends (`TargetRule::Never`) has none. It falls in nine levels of ten (97 % of the levels of 100 bricks destroyed one by one, never before the last ten; in the 83 levels the autopilot plays for 15 minutes, 66, and the 12 it does not finish are most of the rest: 15.5), and a player who catches nine stars in ten would end four levels in five, the footage's 70 of 83 [I] |
+
+The weights (`PrizeInfo::weight`), their halo and what the footage had: Bonus 146 and Life 7 (777 together: 153 jumps; the hearts rose from 2 to 6 in three hours, two lost), Increase Bat Size 135, Decrease Bat Size 26 and Big Ball 40 (180 together: 66), Increase Ball Speed 83 and Night 5 (the 88 jumps of 280, 5 darkened the scene), Decrease Ball Speed 22 and Normal Ball 17 (the 39 jumps of 120 that are not stars), Wind 87, Explosive Ball 81, Thunderbolt 81, Power Ball 77, Multiball 40 and Earthquake 25 (190 together: 65), Machine Gun 64, Magnet 58, Cannon 54, Surprise 51, Bazooka 45, Wall 39, Laser 39, Yo-Yo 11, Drunken Ball 8, Weak Ball 6, Skull 2 and Meteorite Rain 30 (worth 4 points, which no score jump shows: a guess). The values of 110, 120 and 150 are also the price of bricks, so Increase Bat Size, Explosive Ball and Normal Ball may be too high [?].
+
+### 15.2 Fall and catch
+
+| rule | in the game |
+|---|---|
+| fall | from where the object was (its centre of mass at `BrickDestroyed`: x and z), at y 1.0, straight along -z at **10 u/s**, x unchanged and not homing; several at once. The slower first 0.3 s of the footage (7 u/s, 0.45 u) is left out [I] |
+| catch | each step, if the orb is within **batRadius + 1** of the bat's centre in the plane (4 u for the plain bat; a wider bat reaches farther). The bat must be there: not as it swoops in, once the last ball is lost, or while it flies off. A prize already falling when the level is won is still caught, and pays its score and, for a Life, its heart; nothing else it does |
+| score | the catch adds the prize material's `brickScore` (`PrizeCaught::points`, the material in `PrizeCaught::material`, whose dead sound is the catch's sound). `meteor` names two materials in `materials.json`, the projectile's first (250) and the prize's (4): the prize is the one in the group `Prizes` |
+| missed | at z = -21 (the bat's line) it fizzles (`PrizeMissed`), no score |
+| caption | `prizeInfo(kind).caption`, the key in `languages.json` (`Drunken Ball` has a space, Weak Ball is `Weak`) |
+
+### 15.3 What they do
+
+A **timed** effect starts over from its full time when the prize is caught again (it does not add up, and stays one effect with one icon) and ends with its time or with the bat; **weapons** and **Explosive Ball** count shots and blasts, and a second catch adds them. The footage never watched a second catch [?]. Timers count the session's fixed steps; the HUD shows `ceil(timeLeft)`.
+
+| prize | in the game |
+|---|---|
+| Bonus | the score only |
+| Life | +1 heart, no cap |
+| Skull | the bat dies at the catch: `phase()` is `Lost` at once, the bat flies off 0.4 s later (`BatLeft`), every ball (held ones too) vanishes 1.5 s after the catch (`BallLost`), the heart goes at 1.9 s (`LifeLost`, `BatEntered`) and the ball is ready at 2.43 s: the life sequence of a lost ball, run as if the loss began `skullLead` = 0.2 s before the catch [M, V1 8536.6]. With no heart left it is `GameOver` |
+| Next Level | `forceLevelComplete()` |
+| Increase / Decrease Ball Speed | the ball speed of the session (`ballSpeed()`) times 1.10 or 0.91 for each catch, no timer and no icon; the balls in flight change at once. Limits 0.5 to 2 times [?]. It stays through the loss of a bat and is gone with the level [I: the footage has 15.0 u/s at levels 1 and 65] |
+| Increase / Decrease Bat Size | the bat's collision sphere and its look (`batScale()`, `batRadius()`) times 1.24 or 1/1.24 for each catch, between 0.6 and 1.9 times; the bat is rebuilt at the new size, its outer edge stays inside x = 19 (the walls are at 20: the centre is held to 19 minus the radius when that is under 16) and the held ball sits in front of it. A new bat after a loss is plain |
+| Big Ball / Weak Ball | radius 1.0 / 0.4 (`ballRadius()`, `BallView::radius`) for 20 s; the balls in flight are rebuilt (the same velocity). One replaces the other |
+| Power Ball | 20 s. The footage does not say if it passes through bricks [?]; here every hit of the ball takes **all** the energy of the brick (a bullet, a blast or a thunderbolt still do one). The alternative, a ball that goes through, needs a ball the bricks do not stop |
+| Explosive Ball | one blast: the next brick the ball hurts is hurt as usual and everything damageable within 2.5 u of the contact point (the distance to the box round it) takes a hit as well, from the radius of `explose.xml` [D] (`Blast`, `speed` holds the radius); then it is spent. No icon, no timer |
+| Normal Ball | ends Big Ball, Weak Ball, Power Ball, Explosive Ball, Drunken Ball and Yo-Yo. The speed prizes and the bat's are not ball effects |
+| Drunken Ball | 30 s. Each ball's heading is turned by 20 degrees/s x sin(2 pi t / 1.6 s + a phase of its own) every step, so it wobbles about 10 degrees from side to side with the speed unchanged [M, I] |
+| Multiball | on the ball nearest the bat (not a held or stuck one; with none, nothing happens), two balls beside it, 1.3 u away on headings turned by -20 and +98 degrees from its own [M, one case]; at most 12 balls. A life is still lost only with the last |
+| Magnet | 30 s. A ball that touches the bat sticks where it touched (`BallStuck`, `BallView::stuck`, still, on the bat at the same offset) and goes with it; a click (`GameInput::launch` with no ball held), 4 s without one, or the end of the magnet lets it go along the line from the bat's centre through the ball, and it does not stick again until it has left the bat [M, the release I]. The autopilot clicks |
+| Yo-Yo | 7.5 s. A ball farther than 7 u from the bat's centre and going further is turned back (mirrored about the string's direction) [M, I]. No icon (the footage shows none) |
+| Wall | 30 s. A ball on its way to the near edge turns back at z = -19.04 (the far face of the 0.74 deep rope box at z -20.01 [D], plus the ball's radius), as off a wall (`BoardHit`), anywhere across the board's width |
+| Night | 10 s. `nightLevel()` runs 0 to 1 over the first second, holds, and goes back to 0 over the last 1.5 s (the board's brightness falls to 0.38 of itself within a second and is back at about 80 % at the end [M]) |
+| Earthquake | 3 s. Every 0.1 s each dynamic body, asleep or not, gets a kick of up to 0.5 u/s sideways (x and z) and 1 u/s up [I]; nothing for the camera |
+| Wind | 5 s. Every dynamic body that is awake is accelerated 2.5 u/s^2 along x, to the left or the right (drawn when it is caught); resting pieces and the balls are left alone [I: the footage shows nothing] |
+| Surprise | an instant gift: a random **good** prize that is no Surprise and no Next Level, by the same weights, announced as a second `PrizeCaught` worth 0 [?] |
+| Machine Gun, Cannon, Bazooka, Laser | 12, 6, 7 and 5 shots (`weapon()`, `shotsLeft()`, `useShot()`). The weapons are for wave 3: a weapon is granted and counted, nothing fires. The weapon caught last is the one a click fires; the others keep their shots, as the footage's HUD shows two at once (V2 108-117); the effect ends with its last shot |
+| Thunderbolt, Meteorite Rain | `StrikeGranted` with the prize; the strikes are for wave 3 |
+
+When the **bat is lost** (the last ball, or the Skull) every effect of the bat and the ball ends (`EffectEnded`) and the next bat is plain; the night, the quake and the wind run on, and so does the speed. Timed effects end with the level, which is a new session.
+
+### 15.4 What the presentation reads
+
+- `fallingPrizes()` (`FallingPrize`: kind, position of the orb, age, source), `activeEffects()` (`ActiveEffect`: kind, `timeLeft`, `duration`, `shots`; those with `prizeInfo(kind).icon` go on the HUD, oldest first, as the number `ceil(timeLeft)` or `shots`), `weapon()`, `ballRadius()`, `ballSpeed()`, `batRadius()`, `batScale()`, `nightLevel()`, `BallView::stuck` and `radius`.
+- Events: `PrizeDropped`, `PrizeCaught` (prize, points, material), `PrizeMissed`, `EffectStarted`, `EffectEnded`, `StrikeGranted`, `BallStuck`, `Blast`; `SessionStats::prizesDropped/Caught/Missed`.
+- `GameSession::dropPrize(kind, from)` starts a prize falling and `givePrize(kind)` applies one, for tests and tools.
+
+### 15.5 The autopilot with the prizes
+
+`mb_gameplay_smoke --seconds 900`, each level played as the n-th of the campaign, the prizes on, the autopilot as before (the bat under the ball, no aim, 99 hearts; it clicks to let go of the Magnet and catches prizes only when they fall on the bat by chance):
+
+**71 of 83** levels finished (60 without the prizes): 54 by destroying every target and 17 only because the stall rule let go of the last few (it was 46 and 14), 12 not finished (6 knights', 5 village's and 1 pirates' boards, 1 to 116 targets left; 11 were still destroying bricks in the last 40 s, the 12th, knight-nazad-k-mame, with one target left, stood still for 37 s: slow, not stuck, as before). 2,063 prizes dropped (25 a level, as 14.7 % of about 170 destroyed objects), 709 caught (a third: the bat is under the ball, not under the prize) and 1,339 missed. The Next Level star fell in 66 of the 83 levels, was caught in 25 and ended 25 of the 71 finished (a player who goes for it ends most, section 14.4); the other 46 ended as before. The look at what the ball can reach puts 194 targets out of play (it was 151): a quake or a wind that throws a piece out of reach takes it out of the count, which is the rule working as meant. Three balls were freed from a pin in as many levels. Nothing broke: the ball keeps its speed (the session's, which the speed prizes move) and its plane after every frame, in every level.
+These numbers are without the special objects of section 17; with them the run finishes 68 of 83 (section 12).
+
+## 16. Prizes on screen and in sound (step 5, stage 2)
+
+How the picture and the sound show section 15. The code is `game/PrizeScene.h` (the orbs, the halos, the flashes, the models of the balls, the Magnet's horseshoe, the Wall's rope, the Yo-Yo's string, the night's light), `game/PrizeHud.h` (the icons and their numbers, the caption) and `game/PlaySounds.cpp`, called from `PlayScene`, `PlaySession` and `drawHud` at a few places. `[M]` is measured from the footage (`reference/gameplay`), `[D]` read from the data, `[I]` a choice made where both are silent; every constant is named in `PrizeScene.cpp`, `Hud.cpp` and `PrizeHud.h` with its tag.
+
+### 16.1 The orbs
+
+| what | in the game |
+|---|---|
+| the model | the prize's mesh, `Data/Meshes/prizes/<stem>.glb` (`Prizes/<stem>.x` in the file `Data/Objects/Prizes/<stem>.json`), drawn with its own textures or its material's (`bonus` has none: its mesh's `Dollar.jpg`); the 28 meshes have their own sizes (a coin of 1.85, the Surprise's box and balloons 5.9 tall) and their origins in different places (the floor under a coin, the middle of the Magnet), so the middle of the model's box goes to the orb's centre (y 1.0) and no model goes through the floor [I]. It turns about the vertical at 2.5 rad/s, each prize a little out of step with the next [I] |
+| the halo | the two sprites of `Particles/Oreolblue.xml` (good) or `Oreolred.xml` (bad) [D]: the Oreol, a star that faces the camera and turns at 3.5 rad/s (`Oreols/02.png`, orange; red: `11.png`), drawn additively and behind the model, and the OreolShadow, a mark lying on the floor 0.1 up that turns the other way at 1.5 rad/s (`07.png` blue, red: `09.png`); both about 4 u across, about twice the orb as the frames of V1 134.4 look [I] |
+| caught | the halo swells and fades over 0.3 s where the orb was [I] |
+| missed | at z -21: a ring of light that spreads and 8 blue sparks that fly out, 0.25 s (the footage: a small blue sparkle ring of about 0.2 s) [M, F8] |
+| Explosive Ball | `Blast`: the orange star with the blue arrows (`Oreols/02.png` and `03.png`), the blast's diameter (2 x 2.5) in 0.75 s [M, F35] |
+
+### 16.2 The caption and the icons
+
+The caption is the prize's `languages.json` string (`PrizeInfo::caption`), green, in the bookworm font at 28 on the line of the points, centred, with a dark shadow: **strong for 1 s and gone at 2.2 s, fading in a straight line between** [M, section 6]. A catch replaces the caption on show and starts it over; the gift of a Surprise (a catch worth no points) does not: the footage shows "Surprise" and nothing else [M]. It is cleared with the powers when a level is won.
+
+The icons (`Hud.cpp`, `PrizeHud.h`): one for each effect in force that has one (`PrizeInfo::icon`: Big Ball, Weak Ball, Power Ball, Drunken Ball, Magnet, Wall, Night and the four weapons), oldest first down the right edge, with the number to its right in the same green: `ceil(timeLeft)` for the timed ones (so it reads 20, 19, ... and is 1 for the last second) and the shots left for a weapon [M, V2 61.6-69.6, 87-124]. The ring is the icon's own, green for a good prize and red for a bad one (`mb_prize_smoke` checks that each icon's ring has the colour of its prize's halo); nothing draws a ring. The number is drawn at font size 24, left-aligned 4 reference pixels right of the 48-pixel icon, and 34 pixels of room are kept for it at the edge (1024x768 units), which moves the icons left of where the placeholder HUD had them [I]. Instant prizes, the Explosive Ball, the Earthquake, the Wind and the Yo-Yo have no icon [M].
+
+### 16.3 What the effects look like
+
+| effect | picture |
+|---|---|
+| bat size | the bat's model is drawn `batScale()` times its size, all of it (the collision sphere is round); it was 24 % wider per catch in the footage (section 7) |
+| ball size | the ball and its shadow are drawn `radius / 0.6` times their size, and roll by the distance over their radius |
+| Power Ball, Explosive Ball | `ball-powerfull.x` (a spiked ball) and `ball-explosive.x` (a bomb with a fuse), each as wide as the plain ball's model (the first is 1.9 across, the second 1.3, the plain ball 1.3) [D, I]. The footage has the Power Ball dark and spiked (V2 125.9) and the Explosive Ball looking unchanged [M, weak]; the data has the model, so it is drawn |
+| Magnet | the `Magnit` frame of `bat.x`, a horseshoe red on the left and blue on the right, on the bat as long as the effect lasts (V1 1309.4); a ball it holds goes with the bat |
+| Wall | the rope, `wall.x` (the box of `Bats/wall.XML`: 41.4 x 3.2 x 0.7 at z -20), with its `Bonus-Stena` texture, rises out of the floor in 0.3 s and sinks in the last 0.3 s [I] |
+| Yo-Yo | a string from the top of the bat to each ball in flight, green at the bat to blue at the ball (the `rubber` particle's `colour1` and `colour2` [D]), 0.22 u wide [M, V2 125-131] |
+| Multiball, Drunken Ball | the extra balls and the wobbling path are the session's |
+| Night | the scene's light is dimmed to 0.38 of itself at full night (`nightLevel()`), and the sky, the halos and the flashes, which have no light, to 0.49 [M, section 14.3]; the HUD, drawn over it, is not dimmed |
+| Earthquake, Wind | the session throws the loose pieces about, and that is all there is to see; the camera does not shake [M] |
+| the weapons | **not drawn yet**: the barrels (`Pulemet-*`, `Pushka`, `Bazuka-*`, `lazer-*`) are frames of `bat.x` that the game moves: in its `Common` animation each grows from a tenth of its size to full size in 0.6 s, recoils and shrinks again, and the glTF files keep that animation in `extras.animations` (`ASSET_FORMATS.md`). The picture of a weapon comes with the firing, which needs it |
+
+### 16.4 Sounds
+
+| event | sound |
+|---|---|
+| `PrizeCaught` | the prize material's `dead` sound, panned by where it was caught [D]: `bigball`, `night`, `life`... (`money`, the Bonus's, and `bazuka` name sounds with no file in `sounds.xml`: those catches are silent, as in the original). The Next Level star's `endlevel` is the level's own, which `LevelComplete` plays in the same step. A Surprise plays its own and its gift's |
+| `BallStuck` | `ballMagnited` |
+| `BallRubbered` (new: the Yo-Yo's string turned the ball back) | `ballRubbered` |
+| `Blast` | `explosion_ball` |
+| `PrizeDropped`, `PrizeMissed`, `EffectStarted`, `EffectEnded`, `StrikeGranted` | none: the data names no sound for them |
+
+### 16.5 Looking at it without waiting for the drops
+
+`MuggleBall3 --autoplay [--level <name>] [--drop-prize stem[@seconds[,x]]] [--catch-prize stem[@seconds]]` (repeatable; with `--screenshot out.png --simulate <seconds>` the level is played that long and drawn): `--drop-prize` lets the prize fall from the far end of the board (z 18) at the bat's x, or at `x`, after `seconds` of play; `--catch-prize` puts it on the bat when the bat is there, and it is caught at once (score, caption, sound, effect). `stem` is the file name in `Data/Objects/Prizes` (`bonus life scull incbat decbat speedup slowdown bigball smallball powerfull commonball explosiveball drunken tripple magnit pingpong wall night gun cannon bazuka lazer flash meteor quake wind random endlevel`, any case). The autopilot repeats (its prize seed is the level's number), so the same command draws the same picture. `--hud-state lives,score,level[,icon[:number]...]` takes numbers too (`Cannon:6`).
+
+### 16.6 Still open
+
+- The weapons' barrels (above).
+- The halo's real size, the orbs' spin and the models' height above the floor are not measured.
+- The icons' own place in the original's HUD (the numbers sit right of the icon at the right edge in the footage; the icon's exact x is a guess).
+- Whether the Explosive Ball is the bomb in the original's footage (it looks like the plain ball in the one case seen).
+## 17. Special objects as built (step 5)
+
+What the game does with section 14. The rules are `SpecialObjects` (`game/SpecialObjects.h`): `GameSession` owns one and calls it at the three places the level's special objects touch the rules of play (a ball with a blow met one, a charge of dynamite was destroyed, once a fixed step), and its numbers are `SpecialObjectRules`, `GameplayRules::objects`. The picture is `ObjectEffects` (`PlayScene` draws it) and the sounds are `PlaySounds`. Tags as before; `[I]` is a choice made where the footage and the data leave room, and each question left open in 14.7 is answered in 17.8. The numbers are in 17.9.
+
+### 17.1 What hurts what
+
+The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, one energy a blow, as before (section 5). The other special objects (cannons, springs, volcanoes, generators and metal) react to it and are hurt by other things: a blast (17.2), a cannonball (17.3) and whatever a weapon does through `GameSession::hit()` (the prizes, one energy a hit).
 
 | object (in the 83 levels) | the ball | a blast, a cannonball | a weapon |
 |---|---|---|---|
 | dynamite (116) | sets it off: 0.1 s later (its `exploseDelay`) it goes, 120 points | the same, one fixed step later | the same |
 | cannon (21) | fires it, any touch; no damage | 2 energy: destroyed, 100 points | 1 energy |
-| firework crate (63) | launches a rocket, any touch; a blow destroys it too, 120 points (15.5) | destroyed, 120 points | destroyed |
+| firework crate (63) | launches a rocket, any touch; a blow destroys it too, 120 points (17.5) | destroyed, 120 points | destroyed |
 | spring (21) | kicks it away; no damage | destroyed, 10 points | destroyed |
 | volcano (13), generators (43), metal (452) | bounces off; they make their `hit` sound | destroyed, 10, 77 or 66 and 50 points | destroyed |
-| teleports (22) | passes into a source (15.4), bounces off the rest | nothing | nothing |
+| teleports (22) | passes into a source (17.4), bounces off the rest | nothing | nothing |
 
 **Why the ball does not hurt cannons, springs, volcanoes, generators and metal [M for the standing, I for the rule].**
 - The whole wall of 83 Metall pieces of level 31 (`village-labirint`, the labyrinth of metal walls that the ball is in for the whole level) and an `int_cannon` in level 10 stood at the natural ends (second study, "Settled", 3), and the gift boxes of the generators stood through whole levels (2, 21, 22, 76).
@@ -612,13 +738,13 @@ The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, on
 - The look at what the ball can reach (section 12) does not count metal as a wall, so nothing changes for the levels that can be won.
 - A ball that bounces off one of them has still done nothing as far as the stall rule goes (section 12): its 90 s run on [I]. They are permanent now, so a ball can hit them for ever, and if that restarted the rule it would never end a level whose last target hangs out of reach: with every blow on them counted (tried), the autopilot's last target in `cowboys-banditos` (a bird 5 units up) kept the level open to 900 s, and 4 more levels stayed open besides it (57 of 83 finished, 8 of them by the stall rule, against 62 and 23). The cost: a player who works among metal for 90 s without hurting a thing, with at most 12 targets (or a quarter) left, has them let go.
 
-**Why the firework crate is the exception [I].** It stood on the `Box.jpg` that stops each gap of `village-apple`'s two fences, and falls into the gap when the Box breaks. A crate the ball could not hurt (the first version of this section) plugged the gap for good: the autopilot stood at 117 of 118 targets left from 100 s to 900 s, and balls aimed at the gap turned back from the crate's face. A ball's blow takes the crate as it takes a brick, and the footage's brush that left a crate standing (V1 1013.33) was no blow (15.5). With that the autopilot, which does not aim, opens both gaps (the Box at 40 s and the crate at 51 s, the dynamite behind at 64 s, the second fence at 265 s and 306 s in a 600 s run); the level is slow for it, not shut.
+**Why the firework crate is the exception [I].** It stood on the `Box.jpg` that stops each gap of `village-apple`'s two fences, and falls into the gap when the Box breaks. A crate the ball could not hurt (the first version of this section) plugged the gap for good: the autopilot stood at 117 of 118 targets left from 100 s to 900 s, and balls aimed at the gap turned back from the crate's face. A ball's blow takes the crate as it takes a brick, and the footage's brush that left a crate standing (V1 1013.33) was no blow (17.5). With that the autopilot, which does not aim, opens both gaps (the Box at 40 s and the crate at 51 s, the dynamite behind at 64 s, the second fence at 265 s and 306 s in a 600 s run); the level is slow for it, not shut.
 
 **Why nothing hurts a teleport [M].** In level 67 (`knight-fruktovie-derevia`) the source stands 3.8 units from the nearest charge, which went off with its four neighbours, and a ball went into it again at V1 8213.7 (14.2). So a blast leaves a teleport; it is no brick (it is not a target, "Settled", 3), and `canBeDamaged` says no for both ends.
 
-**How much a blast and a cannonball hurt [I].** 2 energy each (`blastDamage`, `cannonballDamage`): what has one or two energy (metal, dynamite, crates, cannons, the rest) is destroyed at once; a person of three is hurt for two, and lives (the log of V1 8192.9 was pushed and stood). The single blast is not what takes things in a chain: five charges 3.6 units apart overlap, and what is in the reach of several is struck by each. It is the footage's `+1933`: see 15.2.
+**How much a blast and a cannonball hurt [I].** 2 energy each (`blastDamage`, `cannonballDamage`): what has one or two energy (metal, dynamite, crates, cannons, the rest) is destroyed at once; a person of three is hurt for two, and lives (the log of V1 8192.9 was pushed and stood). The single blast is not what takes things in a chain: five charges 3.6 units apart overlap, and what is in the reach of several is struck by each. It is the footage's `+1933`: see 17.2.
 
-### 15.2 Dynamite
+### 17.2 Dynamite
 
 - **Radius [D].** The level's `param`, the bits of a float: 5.0 on the 101 big charges, 3.0 on the 15 small (`GameObject::param`, `target`). A radius outside 0.5 to 30 is 5.
 - **Goes off [M, D].** A ball hit takes the charge's one energy, and 0.1 s later (the material's `exploseDelay`; the footage's hit at 8192.76 and flash at 8192.83) it is destroyed: its 120 points, its `dynamite_dead` sound (two samples), and the blast.
@@ -627,17 +753,17 @@ The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, on
 - **The look.** A flash of `Oreols/02.png`, five times the radius across (explosebig's `size` 25 for the radius 5 [D]), swelling in 0.08 s and fading over 0.5 s [D], and twenty sparks. The ordinary orange flash of a brick goes off with it.
 - **Not required [M].** A level ends with its dynamite standing (second study, "Settled", 3).
 
-### 15.3 Interactive cannon
+### 17.3 Interactive cannon
 
 - **What fires it [M for the ball, I for the rest].** The ball touching it at any speed (the footage's cannons fired for a ball 1.5 to 2 units off, which is a graze), a loose body that hits it as hard as the ball's blow (V1 6446.85, F18), and a cannonball. At most one shot in 0.5 s. It never fires on a timer (none in 28 s).
 - **What leaves it [D, M].** A cannonball of radius 0.59 [D, `yadro.XML`] from the muzzle, (1.99, 1.69, 0) in the cannon's frame, with the velocity (30, 3, 0) in that frame [D; measured 29.4 to 33.3 units/s]: along the cannon's own +x, whatever way the level turned it (the three of level 51 face +z).
 - **Its flight [I].** A lob under the level's gravity: it falls 0.87 s after leaving a cannon on the floor and lands about 26 units on (the footage's tracked flights, 0.3 to 0.7 s, show no arc over 20 units, which this does not show either). It is swept by five rays (the middle and the rim) and bursts on the first actor it meets; balls and the bat it goes through; after 3 s it is gone.
-- **What it does [M for the destroyed, I for the rest].** On impact the target is struck `cannonballDamage` (2) times, so what has one or two energy goes, a cannon of two included (a cannon is "not consumed" by the ball, 15.1), a charge it hits goes off at the next link (V1 6446.8: the chain went off, F17); a loose target is pushed (the two leave together: momentum is kept, the ball's mass 8.65 is its volume times `Telega1.jpg`'s density 10); a cannon it hits and does not destroy fires. A burst of `Oreols/11.png` 10 units across for 0.5 s [D, `exploseyadro`].
+- **What it does [M for the destroyed, I for the rest].** On impact the target is struck `cannonballDamage` (2) times, so what has one or two energy goes, a cannon of two included (a cannon is "not consumed" by the ball, 17.1), a charge it hits goes off at the next link (V1 6446.8: the chain went off, F17); a loose target is pushed (the two leave together: momentum is kept, the ball's mass 8.65 is its volume times `Telega1.jpg`'s density 10); a cannon it hits and does not destroy fires. A burst of `Oreols/11.png` 10 units across for 0.5 s [D, `exploseyadro`].
 - **Hits to destroy [I].** The ball never does. A cannonball or a blast does at once (damage 2 against its energy 2), and a weapon takes it in two hits.
 - **Not required [M].** `canBeDamaged` yes, a target no (second study, "Settled", 3).
 - **Sound.** `brick_cannon_shoot` (`br_cannon.ogg`), at the muzzle; the flash and a puff of smoke there.
 
-### 15.4 Teleports
+### 17.4 Teleports
 
 - **Entry [M].** A ball whose centre is in the source's trigger box (the one box of shape flags 15 of each of the 12 sources: 1.6 x 2 x 2, in the tunnel between its two plates) goes in: its body is taken out, it is no longer drawn, and the game goes on (it is no lost ball; the last ball in a teleport costs no heart).
 - **Gone [M].** 0.2 s (0.13 to 0.25 seen). Then it appears at the exit's middle, growing from a speck in 0.1 s (3 frames), and drifts 0.2 s along the way it will leave (6 units/s; 0.7 units in the first 0.1 s seen), then leaves at the ball's speed, 15 [M: 15 to 17].
@@ -645,41 +771,41 @@ The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, on
 - **Pairs [I].** Two sources (`knight-zoo`, `village-dvorik2`) send their balls to the one exit; with equal numbers the k-th source goes to the k-th exit.
 - **What enters [I].** Only the balls. Debris collides with the pyramid like anything else, and bullets and prizes (step 5's other half) are not asked.
 - **Sound and look.** `teleport` at both ends; a ring on the floor and a glow where it goes in and where it comes out.
-- **Not required, and nothing hurts them [M].** 15.1.
+- **Not required, and nothing hurts them [M].** 17.1.
 
-### 15.5 Firework crates
+### 17.5 Firework crates
 
 - **A touch [M for one, I for any speed].** The ball touching the crate at any speed (V1 1013.33 was a brush) starts a rocket that comes off the crate **0.7 s** later, from its top (3.7 units above the crate's origin: 6.5 units at 0.18 s), rises straight up at **15.6 units/s** and bursts **1.2 s** after it left (about 22 units up; the data's `lifeTime` of 2.5 s is not what the footage shows). A touch while a rocket is coming or up starts no other; after the burst the next touch starts the next. It is never on a timer [I: a crate stood for whole levels with nothing]. One rocket a touch: the small second rocket of F1 is not built.
 - **No score for the rocket [M].** The launch scores nothing and the rocket and the burst hurt nothing.
-- **A touch that is no blow leaves the crate standing [M]; a blow destroys it [I].** The footage's crate stayed after a brush (V1 1013.33). In the game that is a ball whose edge goes no deeper than about 0.05 units into the crate's side: its closing speed along the contact is under a blow's (`hitFraction`, section 5). Any other hit is a blow and takes the crate's one energy as it does a brick's: after the material's 100 ms it is destroyed for its 120 points (a person's `exploseType` 5: it shrinks away). The footage does not say whether a harder hit kills a crate [?]; the first version of this section said never, and `village-apple` could not be won (15.1).
+- **A touch that is no blow leaves the crate standing [M]; a blow destroys it [I].** The footage's crate stayed after a brush (V1 1013.33). In the game that is a ball whose edge goes no deeper than about 0.05 units into the crate's side: its closing speed along the contact is under a blow's (`hitFraction`, section 5). Any other hit is a blow and takes the crate's one energy as it does a brick's: after the material's 100 ms it is destroyed for its 120 points (a person's `exploseType` 5: it shrinks away). The footage does not say whether a harder hit kills a crate [?]; the first version of this section said never, and `village-apple` could not be won (17.1).
 - **A lit crate fires [I].** The rocket is lit by the touch, so a blow that destroys the crate does not stop it: the rocket comes 0.7 s later from where the crate stood, and so does one whose crate a blast took in those 0.7 s. A crate that a blast, a cannonball or a weapon destroys without the ball having touched it gives no rocket.
 - **The look.** The rocket (`Fire-rocket.x`) with a trail of eight sprites and a shadow on the floor; the burst, 30 sparks flying out at speed 30 and slowing, in one of the six colour pairs of `Fireworks.xml` [D], for 0.6 s [M], mostly above the picture's top edge for a crate at the back, as in the footage. The sound is `firerocket_dead` at the burst.
 
-### 15.6 Springs, volcanoes, generators and metal
+### 17.6 Springs, volcanoes, generators and metal
 
 - **Spring [I].** A ball that hits it with a blow leaves **away from its middle**, along the line from the spring's centre to the ball's, at the ball's speed (the pinball bumper: the kick is the direction, since the speed is always 15); the spring gives for 0.25 s (it swells a fifth and settles) and makes its `spring_hit`. The ball does not hurt it, a blast does (10 points). The one clean hit the footage might have had (V1 2634.0, 2.6 units off) was not a hit. Its `loop` sound is not played.
 - **Volcano and generators [M, weak].** Idle: no eruption (70 s), no prize (10 to 38 s). The ball bounces off them and they make their `hit` sound; a blast takes them for 10 (volcano), 77 (good) and 66 (bad). The generators give no prizes in this step (their rate is not in the data).
-- **Metal [M for the standing, I for the rest].** Bounces the ball by its material's own numbers (restitution 0.1, friction 0.999 [D]) and makes `metall_hit`; the ball does not hurt it (15.1); a blast, a cannonball or a weapon destroys it for 50 points (the footage's chain took a fence in one frame).
+- **Metal [M for the standing, I for the rest].** Bounces the ball by its material's own numbers (restitution 0.1, friction 0.999 [D]) and makes `metall_hit`; the ball does not hurt it (17.1); a blast, a cannonball or a weapon destroys it for 50 points (the footage's chain took a fence in one frame).
 
-### 15.7 Vibros and flickers
+### 17.7 Vibros and flickers
 
 - **Vibro [M].** The barrels and rings (kinematic, 23) bob and tilt in place: the body goes up and down by 0.1 unit and tilts 6 degrees [I] about its own origin with a period of 2.4 s, each with a phase of its own, so that the ball is pushed by what it sees. The ball destroys one like a brick (14 to 24 points); it is not required.
 - **Flicker [M, I].** The cauldron and the torches (14) are bricks of the ball's kind (70 points for the cauldron, `exploseDelay` 150). The light "around them changes by 1.4 %" (F13) and the renderer has one directional light, so the point light is left out; each gets a warm glow sprite that wavers (two sines of unrelated rates, a phase of its own), and goes with it.
 
-### 15.8 The open questions of 14.7
+### 17.8 The open questions of 14.7
 
 | question | what the game does | tag |
 |---|---|---|
 | Spring: kick or bounce, one hit destroys? | kicks away from its middle at the ball's speed; the ball does not destroy it | I |
 | Cannon: hits to destroy; the cannonball's damage and range; a slow ball or a bat shot; a timer | the ball never; a cannonball or a blast at once; damage 2; a lob of about 26 units; any touch fires it, however slow (the ball is never slow, and the bat is behind the line); no timer | I |
 | Teleports: the exit angle; prizes, debris, bullets; which exit two sources share | drawn evenly within 45 degrees of straight on toward -z; only balls; the one exit | I |
-| Dynamite: the reach; small dynamite; the +1333 | box to centre within the radius (about 5.9 centre to centre for 5); the same rule for 3; replayed: 1,923 against 1,933 (15.2) | I, M |
+| Dynamite: the reach; small dynamite; the +1333 | box to centre within the radius (about 5.9 centre to centre for 5); the same rule for 3; replayed: 1,923 against 1,933 (17.2) | I, M |
 | Firework: launch by a touch, a timer or a delay; rockets a crate; does a harder hit destroy it | by a touch, 0.7 s later; one a touch, one at a time; yes: a blow does (120 points) and the rocket it lit comes anyway, a brush does not; so do blasts, cannonballs and weapons | I |
 | Volcano and generators: any eruption; can the ball destroy them | none and no; blasts do | M, I |
 | Metal: how the ball bounces; can it destroy it | by its material; no | D, I |
 | Cloth and trees | unchanged: not built here | |
 
-### 15.9 The numbers (`SpecialObjectRules`)
+### 17.9 The numbers (`SpecialObjectRules`)
 
 | constant | value | tag |
 |---|---|---|

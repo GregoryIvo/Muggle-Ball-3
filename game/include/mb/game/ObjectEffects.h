@@ -11,7 +11,7 @@
 
 namespace mb {
 
-// What the level's special objects look like in play (docs/GAMEPLAY.md section 15): the flash of a charge of dynamite, the
+// What the level's special objects look like in play (docs/GAMEPLAY.md section 17): the flash of a charge of dynamite, the
 // cannonball and the puff at the muzzle, the rocket of a firework crate and its burst, the ring where a ball goes into a
 // teleport or comes out, a spring that gives with a hit, the glow of a flicker. It reads the session (SpecialObjects) and the
 // events it reported, and draws billboards and two meshes; it keeps no rules. The full particle systems of the original
