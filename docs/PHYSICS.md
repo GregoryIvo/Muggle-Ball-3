@@ -18,7 +18,7 @@ by its segments), which draws (`SceneDraw::actor`), bodies (`BodyDesc::userData`
 | group 5 (markers of lights, shadow casters, backgrounds) | no shape, so no body (148 actors); they sit inside the board and collide with nothing |
 | group 11 (one box per board at the player's end) | not in the simulation; kept as `PhysicsPlan::zones` for the bat and the lost-ball test (step 4). Trigger shapes (flags 0x7, the teleport sources) are zones too |
 | actors that follow a path (35 sharks and birds, object flag 0x01) | kinematic bodies that `PhysicsScene::step` moves along their path, see "Path actors". Put on the path before the first step |
-| cloth and its 431 segments | kinematic: they keep their saved poses until step 5 simulates them. The 84 joints that hold their corners (75 ball joints, 9 fixed) are planned but not built, or they would pin the ships to where the sails were saved |
+| cloth: 22 sails, their 431 segments and the 22 cloth objects' own actors (453 particles) | kinematic in the plan, with no body of their own: a sail is one cloth body (Jolt's soft body, "Cloth" below) whose particles start at the saved poses. The 84 joints that hold their corners (75 ball joints, 9 fixed) are pins of the cloth, not joints of the world |
 | joint actors | resolved as `LEVEL_FORMAT.md` says (0 = world, else object id, else cloth segment); all 4,895 resolve. Fixed -> fixed, revolute -> hinge, spherical -> ball. `collideConnected` is false |
 | fixed joints to the world that never break | the body is static and the joint is dropped, see "Welded to the world" |
 
@@ -210,11 +210,23 @@ light pieces of wrecked ships); the rest are a documented allowance of the smoke
   sleepers with nothing under them (the look below, run at once instead of within a tenth of a second).
 - **`contacts()`** are the contacts that began in the last step, the same list that breaks joints, for the rules.
 
+## Cloth
+
+The 22 sails of 9 levels are `ClothSet` (`game/Cloth.h`) over `PhysicsWorld::addCloth` (`engine/PhysicsCloth.cpp`), and what the original did, what the game does and why are in `GAMEPLAY.md` section 20. The physics of it:
+
+- **A sail is one soft body** of Jolt: a grid of particles with springs along the grid, across its cells and across its folds. The segments of the level are the particles (their saved places, their sphere of 0.5 as the radius, their 5 grams as the mass); they have no bodies. The body stays at the origin and the particles are in world space, so that nothing can shift them.
+- **The corners are pins**, not joints: a ball joint between a particle of 5 grams and a ship of 100,000 is a ratio of masses (2 x 10^7) that the solver cannot hold. A pinned particle is a kinematic one: each fixed step it is sent to `holder pose * where it is tied` (`PhysicsScene::beforeFixedStep`, so a call of several steps gives each its own target) and the springs follow. A pin lets go when the holder is destroyed (`removeActor`) and when a hit on the holder is as hard as the joint's `maxForce` (`breakByHit`, the rule of the joints, "Breaking joints"). A sail with no pin left falls.
+- **One-way collision.** The cloth has a layer of its own that sees every body, and no body sees it (`ObjectLayerPairs`): a body that moves continuously casts against the faces of a soft body, and a face with a held particle (no mass) takes the whole momentum of the body into its other particles, which go to 10^7 in a step (found on a test ball that struck a collapsing ship's sail near a corner). So the particles collide with the bodies, one by one, with their radius, and a ball smaller than the gap goes between them, as it did the original's spheres; a ray hits the faces. A particle pushes nothing (`mInvMassScale2` 0): Jolt would wake a sleeping brick for the nothing it gave it, and a brick woken settles where the level saved it hanging (16 bodies of `po-volnam` moved 2 cm).
+- **A sail does not touch its own ship** (the bodies joined to the ones that hold it, `clothIgnores`) while any pin holds; the saved sails lie against yards and masts. When the last pin goes it touches everything.
+- **Sleep.** A sail the wind has settled goes to sleep (a few seconds), and costs nothing. It wakes when a pin goes somewhere else or a body that moves comes within a unit of its box (Jolt would do that last by itself if bodies saw the cloth); `mb_cloth_smoke` and `mb_physics_cloth_test` check both.
+- **A guard.** A particle sent beyond 500 units by the solver puts the cloth back where it last was whole; the third time, the cloth is held where it is (`clothResets()`). `mb_cloth_smoke` asserts it never happens in the 22 sails.
+- **Cost.** A fixed step of the nine levels with sails is within ten per cent of what it was with the 453 kinematic spheres (`GAMEPLAY.md` 20.7).
+
 ## Not done yet
 
 The bat's lane (`PhysicsPlan::zones`) is not used: the rules take the bat's line as a number. There are no prizes
-yet, and no render interpolation (a 120 Hz display shows each 60 Hz physics state twice). Step 5: cloth and its 84 joints,
-cannons, teleports, springs, volcanoes (the sharks and birds on paths are in, see above). Several dynamic bodies are saved with
+yet, and no render interpolation (a 120 Hz display shows each 60 Hz physics state twice). Step 5: cannons,
+teleports, springs, volcanoes (the sharks and birds on paths are in, see above, and the sails, see "Cloth"). Several dynamic bodies are saved with
 nothing under them and fall when woken (the pirate of `piratos-po-volnam` at x = 30, outside the board, falls 490
 units; some boulders of `cowboys-samba` and others 11): they need a settle (none of those in the levels with path actors is near one). Not decoded: how the
 original's `ballMaterial` and the board's restitution 1.0 combine on bricks (they bounce at 0.75 here); friction

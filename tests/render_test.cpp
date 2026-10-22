@@ -1061,6 +1061,47 @@ void testNoGrowth(Scene& s) {
                            " KB (a leak grows every window)");
 }
 
+void testUpdateMesh(Scene& s) {
+    std::printf("a mesh that changes shape\n");
+    const Vec3 toward{0, 0, -1};
+    const MeshHandle mesh = s.makeQuad(toward);
+    const DrawItem items[] = {item(mesh, unlitColor({1, 0, 0, 1}), {0, 0, 0})};
+    const auto top = s.project({0, 0.5f, 0}), bottom = s.project({0, -0.5f, 0});
+    const Image whole = s.render(items);
+    expectPixel("the quad as it was made: top", whole, top.x, top.y, {255, 0, 0});
+    expectPixel("the quad as it was made: bottom", whole, bottom.x, bottom.y, {255, 0, 0});
+
+    // The same four corners, the top two brought down to the middle: only the lower half is left.
+    const Vertex lower[] = {{{-1, 0, 0}, toward, {0, 0}}, {{1, 0, 0}, toward, {1, 0}}, {{1, -1, 0}, toward, {1, 1}}, {{-1, -1, 0}, toward, {0, 1}}};
+    s.renderer.updateMesh(mesh, lower);
+    const Image half = s.render(items);
+    save(half, "11_update_mesh.png");
+    expectPixel("rewritten: the top is gone", half, top.x, top.y, rgb8(0.2f, 0.4f, 0.6f));
+    expectPixel("rewritten: the bottom is there", half, bottom.x, bottom.y, {255, 0, 0});
+
+    // What is not a rewrite changes nothing.
+    s.renderer.updateMesh(mesh, std::span<const Vertex>(lower, 3));  // three vertices of four
+    s.renderer.updateMesh(mesh + 1000, lower);                                              // a handle that is none
+    const Image same = s.render(items);
+    expectPixel("a rewrite with the wrong number of vertices is refused", same, top.x, top.y, rgb8(0.2f, 0.4f, 0.6f));
+
+    // A frame's worth of rewrites after another, as a sail has them, with a frame between.
+    for (int frame = 0; frame < 60; ++frame) {
+        Vertex slid[4];
+        std::copy(std::begin(lower), std::end(lower), slid);
+        for (Vertex& v : slid) {
+            v.position.x += 0.01f * static_cast<float>(frame);
+        }
+        s.renderer.updateMesh(mesh, slid);
+        (void)s.render(items);
+    }
+    const Image last = s.render(items);
+    const auto left = s.project({-0.9f, -0.5f, 0}), right = s.project({1.2f, -0.5f, 0});
+    expectPixel("sixty rewrites on: the quad is where the last one put it (its left edge)", last, left.x, left.y, rgb8(0.2f, 0.4f, 0.6f));
+    expectPixel("sixty rewrites on: (and its right)", last, right.x, right.y, {255, 0, 0});
+    s.renderer.destroyMesh(mesh);
+}
+
 void testHandles(Scene& s) {
     std::printf("handles and cleanup\n");
     check(s.renderer.createTexture(Image{}, true) == 0, "an empty image gives handle 0");
@@ -1119,6 +1160,7 @@ int main() {
     testEffects(scene);
     testMipmaps(scene);
     testNoGrowth(scene);
+    testUpdateMesh(scene);
     testHandles(scene);
 
     renderer.reset();

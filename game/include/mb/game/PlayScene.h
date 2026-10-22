@@ -2,6 +2,7 @@
 
 #include "mb/engine/Renderer.h"
 #include "mb/game/BatBarrels.h"
+#include "mb/game/ClothDraw.h"
 #include "mb/game/Gameplay.h"
 #include "mb/game/LevelScene.h"
 #include "mb/game/ModelCache.h"
@@ -88,6 +89,7 @@ private:
     void addBall(Vec3 at, const Mat4& turn, float scale, BallLook look);
 
     LevelScene level_;
+    ClothDraw sails_;  // the sails, which follow their particles
     LevelScene bat_;  // the bat's own frames, at the origin
     MeshHandle quad_ = 0;
     TextureHandle sparkTexture_ = 0;

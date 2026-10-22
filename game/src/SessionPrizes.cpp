@@ -540,7 +540,7 @@ void GameSession::blast(Vec3 at) {
         if (!bricks_[actor].damageable || bricks_[actor].removed || hitAlready) {
             continue;
         }
-        const Bounds box = boundsOf(scene_.plan().actors[actor].body, scene_.actorPose(actor));
+        const Bounds box = scene_.bounds(actor);
         const Vec3 nearest{std::clamp(at.x, box.low.x, box.high.x), std::clamp(at.y, box.low.y, box.high.y),
                            std::clamp(at.z, box.low.z, box.high.z)};
         if (length(nearest - at) <= radius) {

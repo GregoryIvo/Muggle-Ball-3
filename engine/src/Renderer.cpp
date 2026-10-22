@@ -258,6 +258,7 @@ MeshHandle Renderer::Impl::uploadMesh(std::span<const Vertex> vertices, std::spa
 
     GpuMesh mesh;
     mesh.indexCount = static_cast<std::uint32_t>(indices.size());
+    mesh.vertexBytes = static_cast<Uint32>(vertexBytes);
     SDL_GPUBufferCreateInfo bufferInfo{};
     bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
     bufferInfo.size = static_cast<Uint32>(vertexBytes);
@@ -300,6 +301,30 @@ MeshHandle Renderer::Impl::uploadMesh(std::span<const Vertex> vertices, std::spa
     return handle;
 }
 
+void Renderer::Impl::rewriteMesh(MeshHandle handle, std::span<const Vertex> vertices) {
+    const auto found = meshes.find(handle);
+    if (found == meshes.end() || vertices.size_bytes() != found->second.vertexBytes) {
+        logError("updateMesh: {} is not a mesh of {} vertices", handle, found == meshes.end() ? 0 : found->second.vertexBytes / sizeof(Vertex));
+        return;
+    }
+    const Uint32 bytes = found->second.vertexBytes;
+    TransferBufferPtr transfer = createTransferBuffer(SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, bytes);
+    void* mapped = transfer ? SDL_MapGPUTransferBuffer(device, transfer.get(), false) : nullptr;
+    SDL_GPUCommandBuffer* cmd = mapped ? SDL_AcquireGPUCommandBuffer(device) : nullptr;
+    if (!cmd) {
+        logError("updateMesh: upload setup failed: {}", SDL_GetError());
+        return;
+    }
+    std::memcpy(mapped, vertices.data(), bytes);
+    SDL_UnmapGPUTransferBuffer(device, transfer.get());
+    const SDL_GPUTransferBufferLocation source{transfer.get(), 0};
+    const SDL_GPUBufferRegion destination{found->second.vertices, 0, bytes};
+    SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
+    SDL_UploadToGPUBuffer(copy, &source, &destination, true);  // cycled: a frame in flight still reads the old one
+    SDL_EndGPUCopyPass(copy);
+    SDL_SubmitGPUCommandBuffer(cmd);
+}
+
 Renderer::Renderer() : impl_(std::make_unique<Impl>()) {
     impl_->init(nullptr);
 }
@@ -326,6 +351,10 @@ TextureHandle Renderer::createTexture(const Image& image, bool mipmaps) {
     const TextureHandle handle = impl_->nextTexture++;
     impl_->textures.emplace(handle, texture);
     return handle;
+}
+
+void Renderer::updateMesh(MeshHandle mesh, std::span<const Vertex> vertices) {
+    impl_->rewriteMesh(mesh, vertices);
 }
 
 void Renderer::destroyMesh(MeshHandle mesh) {

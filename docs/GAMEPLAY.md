@@ -504,7 +504,7 @@ Added after the second study. Same tags: **[M]** measured from video, **[D]** re
 
 **Metall** (452 in levels). **[M]** Dynamite kills a fence in 0.1 s (above). The second study saw five lightning bolts hit the Metall wall of level 31 with no score (`rules-V1-t3790.9-3793.1-L31-five-lightning-strikes-...`). So metal is hurt by blasts, not by bolts. How the ball bounces off it and whether the ball alone can destroy it: [?].
 
-**Cloth** (sails and flags). **[D]** `wind` (0,0,+-10) and 3-8 particles per side; **[M, second study]** a sail scored +60, a small sail +20. Tearing: not seen [?].
+**Cloth** (sails and flags). **[D]** `wind` (0,0,+-10) and 3-8 particles per side; **[M, second study]** a sail scored +60, a small sail +20. Tearing: not seen [?]. As built (section 20): the +60 is the sail's own material (`Clothmat`, 60); the +20 is `fparus.jpg`, a brick of the mast, and no sail scores 20; a sail does not tear.
 
 **Trees** (128 in levels). **[D]** Trunk energy 5, 130 points, `LeafFall` particles; fruit held by breakable joints (force 10-20 on the apple tree). Not isolated in footage [?].
 
@@ -587,7 +587,7 @@ F26 and F49 are plots drawn from the tracked positions (not screenshots).
 - Dynamite: the blast reach is only bracketed (trigger between 4.0 and 6.9 u centre to centre), small dynamite (radius 3) was not seen, and the +1333 beyond the five 120-point charges in the level 67 chain is not decomposed.
 - Firework: is the launch triggered by the ball touching the crate (one touch at 1013.33 gave a launch 0.7 s later), a periodic timer, or a hit after a delay? How many rockets per crate, and does a harder hit destroy it for its 120 points?
 - Volcano and generators: no eruption in 70 s and no prize from generators in 10-38 s of footage; if they do act, what triggers them? Unknown whether the ball can destroy them.
-- Metall: how the ball bounces off it and whether the ball alone ever destroys it; cloth sails: do they tear; trees: do the fruit fall when the trunk or a fruit is hit.
+- Metall: how the ball bounces off it and whether the ball alone ever destroys it; cloth sails: do they tear (answered in 20: no); trees: do the fruit fall when the trunk or a fruit is hit.
 - Power Ball: does it pass through bricks? Explosive Ball: the blast radius, the number of blasts per catch, and what it damages. Yo-Yo: confirm the caption and the duration (7.5 s in one case) and the 7 u string limit. Magnet: is the release a click or a timer (2.7+ s stuck in one case)?
 - Multiball: the exact angles of the two new balls (one case measured: -20 and +98 degrees about the original) and whether the extra balls spawn at the ball nearest the bat or at the bat.
 - Surprise: which prize it gives, since no icon or effect was visible in 9 s. Wind: any effect on loose pieces. Thunderbolt: strikes per catch, the span in time (bolts up to 12 s after a catch) and what picks the target. Meteor Rain: count (about 5), targets and damage. Earthquake: force and which bodies move.
@@ -726,7 +726,7 @@ What the game does with section 14. The rules are `SpecialObjects` (`game/Specia
 
 ### 17.1 What hurts what
 
-The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, one energy a blow, as before (section 5). The other special objects (cannons, springs, volcanoes, generators and metal) react to it and are hurt by other things: a blast (17.2), a cannonball (17.3) and what a weapon does (the prizes: `SpecialObjects::weaponHit` and `burst`, one to three energy a hit by the projectile, 18.4).
+The ball hurts bricks, trees, dynamite, firework crates, vibros, flickers and sails, one energy a blow, as before (section 5). The other special objects (cannons, springs, volcanoes, generators and metal) react to it and are hurt by other things: a blast (17.2), a cannonball (17.3) and what a weapon does (the prizes: `SpecialObjects::weaponHit` and `burst`, one to three energy a hit by the projectile, 18.4).
 
 | object (in the 83 levels) | the ball | a blast, a cannonball | a weapon |
 |---|---|---|---|
@@ -736,6 +736,7 @@ The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, on
 | spring (21) | kicks it away; no damage | destroyed, 10 points | destroyed |
 | volcano (13), generators (43), metal (452) | bounces off; they make their `hit` sound | destroyed, 10, 77 or 66 and 50 points | destroyed |
 | teleports (22) | passes into a source (17.4), bounces off the rest | nothing | nothing |
+| sails (22) | one energy a blow at a particle: destroyed, 60 to 32 points (20.3) | destroyed | destroyed |
 
 **Why the ball does not hurt cannons, springs, volcanoes, generators and metal [M for the standing, I for the rule].**
 - The whole wall of 83 Metall pieces of level 31 (`village-labirint`, the labyrinth of metal walls that the ball is in for the whole level) and an `int_cannon` in level 10 stood at the natural ends (second study, "Settled", 3), and the gift boxes of the generators stood through whole levels (2, 21, 22, 76).
@@ -810,7 +811,7 @@ The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, on
 | Firework: launch by a touch, a timer or a delay; rockets a crate; does a harder hit destroy it | by a touch, 0.7 s later; one a touch, one at a time; yes: a blow does (120 points) and the rocket it lit comes anyway, a brush does not; so do blasts, cannonballs and weapons | I |
 | Volcano and generators: any eruption; can the ball destroy them | none and no; blasts do | M, I |
 | Metal: how the ball bounces; can it destroy it | by its material; no | D, I |
-| Cloth and trees | cloth unchanged: not built here; a tree that is hit sheds its leaves (`LeafFall`, 19.6) | I |
+| Cloth and trees | a sail is simulated and hurt like a brick of one energy, and does not tear (section 20); a tree that is hit sheds its leaves (`LeafFall`, 19.6) | I |
 
 ### 17.9 The numbers (`SpecialObjectRules`)
 
@@ -1140,3 +1141,101 @@ The cost, on the dynamite chain of `knight-fruktovie-derevia` 0.2 s after the fi
 - **[?]** What `radius_offset` of the Oreol is, and the pulse (`speed`) of the halos; `PrizeScene`'s 4 units stand.
 - **[?]** `Tornado`: how the original draws 1,500 particles of a missing texture over a column 160 tall, and what uses it.
 
+
+## 20. Sails as built (step 5, fx)
+
+The 22 sails of 9 levels (the `cloth` objects: the pirate ships' sails, the boats', the rafts' and the serfs' craft's) as the game simulates, draws and scores them. What the level files say is `LEVEL_FORMAT.md` "Cloth" and `OBJECTS.md` section 4, and is tagged **[D]** here; what the footage shows is **[M]**; the rest is a choice, **[I]**. The code is the engine's `PhysicsWorld::addCloth` (`engine/PhysicsCloth.cpp`; `PHYSICS.md` "Cloth"), `game/ClothPlan.h` (what the level makes of a sail, and `ClothSettings`), `game/Cloth.h` (`ClothSet`: the sails of a `PhysicsScene`) and `game/ClothDraw.h` (the mesh). The rules are `GameSession`'s, as for every brick: the sail's lead actor is the object.
+
+### 20.1 What the original did, from the data
+
+- **A sail is a lattice of sphere actors [D].** The editor expands the `<Cloth>` element into one actor for each particle: a sphere of 0.5 (density 0.01, so 0.0052) in the grid `width` x `height` (3 x 3 seven times, 4 x 3 once, 4 x 4 six, 5 x 5 twice, 5 x 6 four, 7 x 8 twice; 453 particles in all, the 431 nested segments and the 22 cloth objects' own actors). Where they lie follows the trapezoid of `fWidth`, `fWidth2` and `fHeight` exactly (all 22 sails to 7 x 10^-6).
+- **No joint joins two particles; 84 joints hold the corners [D].** 75 ball joints and 9 fixed ones tie the corners to a mast, yard, boat or plot: 4 to each sail, 2 to each of the two half sails of `piratos-bul-bul`. Their breaking strength is 100 (ball) and 200 (fixed); the 4 on `Piratos-Zasada`'s and `piratos-bul-bul`'s rafts do not break. The saved poses of the lowest corners of the ships' sails are 0.15 sideways and 0.25 up from the lattice: the joints had pulled them to the mast.
+- **The wind is in the data [D].** A vector in world space of length 10.000 in all 22, square to the sail, `+-` its normal (the XML's `wind` (0, 0, +-10) turned by the object's pose).
+- **The material is a brick [D].** `Clothmat` (60 points, the skull sail), `Clothmat-white` (65, cream), `Clothmat-green` (62) and `Clothmat-half` (32, the two half sails): brick type 0, one energy, `exploseType` 3, `exploseDelay` 10 ms, the sounds `sea_cloth_hit` and `sea_cloth_dead`, friction 0.9, restitution 0.5. The second study's "+60 sail" is `Clothmat`; its "+20 small sail" is `fparus.jpg`, a brick of the mast (and "flag 40" is `Flag`, another); no sail scores 20.
+- **The data has no cloth solver parameters.** Nothing in it says how stiff, how damped or how thick the original's cloth was, or how it took the wind: only the lattice, the wind, the material and the corners.
+- **What the footage shows [M].** A sail bellied out a little and hung nearly upright (`original-level1-pirates.jpg`), whole while its ship stands, and, once the ship breaks, in the water among the planks (`chillcalex-...-t100-178-level1-overview`; "planks and sails fly after hits", section 5.7).
+
+**The decision [I].** The original's cloth was not rigid segments linked by joints (nothing links the particles, and a ball joint between a particle of 5 grams and a ship of 100,000 is not something a solver holds; dynamic segment bodies with a spring joint between neighbours were weighed and rejected for that, and for the cost of the world's 100 velocity iterations over about 1,800 joints a step). It is a sheet of particles with springs of its own, which is what PhysX 2.x's `NxCloth` is and what Jolt's soft body is: the game uses the soft body, with the particles on the lattice, the corners pinned where the joints held them, the data's wind, and the spheres as the particles' collision shape. The springs, the damping and how the wind blows are ours (20.5); the rest is the data's.
+
+### 20.2 What the game does with a sail
+
+| rule | in the game |
+|---|---|
+| one body | each sail is one cloth body of the physics world (`ClothSet`, over `PhysicsWorld::addCloth`); the particles start where the level saved them, with the springs as the saved distances, 5 % longer (below); the segments have no bodies, and the lead actor's body is the cloth's, so that contacts, rays and the rules name the sail by its lead actor [I] |
+| the corners | the 84 joints are **pins**: each fixed step a pinned particle goes to the holder's pose times the place it is tied at, whatever the holder does (a ship tilting, a mast falling), and the springs carry the rest. A pin lets go when the holder is destroyed, and when a hit on the holder is as hard as the joint's `maxForce` (the rule that breaks the ship's own joints, `PHYSICS.md` "Breaking joints": the ball's hit on a yard frees every sail on it, the weight of the ball being what it is). A sail that has lost its pins falls [I] |
+| the wind | the data's wind times 0.4, as an acceleration along the sheet's normal: each face takes the part of the wind that is square to it (a sheet edge-on to the wind feels none) and gives it to its particles [I] |
+| the slack | the springs are 5 % longer than the distance between their particles where the level saved them, and grow to that length over 1.5 s: pinned at its corners where it stood, a sail cut with slack bellies out the way the wind goes, 1.2 to 1.7 units for the sails of `piratos-ostrovok` (10 to 14 wide), and a sail with none lies flat as a board whatever the wind. Growing it in is what keeps the first frames still: all at once, a 5 x 6 sail has more than half of its bow (1.05 of 1.9 units) in 0.1 s, grown in 0.04. The first frame is the saved pose; the sails fill out over the first second and a half and then hold [I] |
+| what a sail does not touch | the bodies joined to the ones that hold it (its ship), while a pin holds: the saved sails lie against yards and masts. A sail with no pin left touches everything: it falls on the deck, the water or the floor, and stays there, "afloat" (section 5.7) [I] |
+| what it touches | everything else, particle by particle, with the particle's radius 0.5: a ball (0.6) meets a particle when its centre is within 1.1 of it, which is 31 to 50 % of a 4 x 4 sail's area (`piratos-ostrovok`: 2.75 to 3.5 between particles), 79 % of a 5 x 6 sail's (`Piratos-Chyu-u-dishe`: 2.2) and all of a 7 x 8 sail's (2.0); between them it goes through, as it did the original's spheres [I]. A ray (the laser) hits the surface itself |
+| what it moves | nothing: a particle of 5 grams moves no brick, and wakes none. Whatever touches it pushes it |
+| sleep | a sail the wind and the pins have settled lies still after 2 to 7 s, and costs nothing; a pin that goes somewhere else, or a body that moves within a unit of it, wakes it |
+| gone | a sail whose centre falls below `fallLimitY` (-5) has left the board: `ActorFell`, nothing scored, taken out like any piece (the sails of `piratos-birthday`, `piratos-po-volnam` and `Piratos-Kartejniki` fell off in 400 s of autoplay) |
+
+### 20.3 The rules
+
+| rule | in the game |
+|---|---|
+| what hurts a sail | the ball (a blow: a particle touched at 4.5 units/s or more, as for a brick), a blast (the dynamite's radius against the particles, not against the lead actor), a cannonball and whatever a weapon does through `GameSession::hit()`: one energy each, and a sail has one [D]. A ray's hit names the sail by the lead actor (`PhysicsWorld::userData` of the cloth body), so the weapons need nothing of their own |
+| what happens | the hit is a `BrickHit` (the sound `sea_cloth_hit`); `exploseDelay` 10 ms later the sail is destroyed: `BrickDestroyed` at its centre, its material's score (60, 65, 62 or 32 [D]), `sea_cloth_dead`, the small flash `exploseball` of its `exploseType` 3 (19.5), and it is gone, whole: no tear, no pieces [I] (tearing was not seen [?]; one energy leaves nothing to tear) |
+| a target? | no: a sail is not required to end a level (section 5.10: cloth was never seen to decide an end). `isTarget()` says no, and `targetsLeft()` and the look at what the ball can reach do not count it |
+| prizes | a destroyed sail is rolled for a prize like any destroyed object (15.1: 15.8 % below 80 points) |
+| its segments | are no objects: only the lead actor has energy (`hit()` on a segment is nothing) |
+
+### 20.4 Drawing
+
+- **The surface is the lattice itself**: one quad a cell, two triangles each, `(width - 1) x (height - 1)` cells, so a sail is as big as its particle grid [I] (the original's may reach half a cell past the particles [?]). The texture (the material's first: `Parus`, `parus-1`, `parus-2`, `parus-2a`) goes over all of it once, its top on the highest row, its left on the first column [I].
+- **Lit like every model**: per pixel, with the material's colours (`Clothmat-white` and `-green` glow at half, as the data says); the normal at a particle is the mean of the faces round it. The mesh is two halves, the surface and its back with the normals turned round, drawn with culling, so that both sides are lit.
+- **Moving**: the mesh's vertices are written again each frame (`Renderer::updateMesh`, a new engine call: the same vertex count, a cycled buffer) from the particles' positions, and only when a sail has moved; a sail that sleeps costs the picture nothing. `PlayScene` takes the items of `ClothDraw`; so does the level viewer, which shows the saved pose at `--simulate 0` and the sails filling out after.
+- **At rest it is today's picture.** The level viewer's picture at t = 0 is the lattice as saved (nothing drew a sail before: the cloth's own mesh is `arbuz.x`, a watermelon, in all 22); `mb_cloth_view_smoke` checks that drawing the sails changes no pixel outside the box round their particles, and the two screenshots of `piratos-ostrovok` at t = 0 of `--autoplay`, before this step and after, differ in 19,127 pixels, all inside a box of 170 x 270 round the sails (the picture before had none).
+
+### 20.5 The numbers
+
+`ClothSettings` (`PhysicsOptions::cloth`) and the constants of `PhysicsCloth.cpp` and `Cloth.cpp`.
+
+| constant | value | tag |
+|---|---|---|
+| particles: radius, mass | 0.5, 0.0052 (the segment's sphere and body) | D |
+| the wind | the level's (length 10) | D |
+| friction, restitution of a particle | 0.9, 0.5 (`Clothmat`) | D |
+| wind taken (`windShare`) | 0.4: a sail held at its four corners bellies out by its slack, the same at 0.4 and at the whole wind (1.2 to 1.7 units on `piratos-ostrovok`); the wind decides how far a sail held by two corners swings from its yard (the half sails of `piratos-bul-bul`: 2.3 units at 0.4, 3.4 at the whole wind), and the footage's sails hang nearly upright | I |
+| slack, grown in over | 5 %, 1.5 s | I |
+| spring compliances (XPBD): along, across a cell, across a fold | 10^-4, 10^-3, 0.05 | I |
+| damping | 0.8 per second | I |
+| solver passes a step | 5 | I |
+| pin released by a hit | the joint's `maxForce` (100, 200, or never) | D, I |
+| what a sail does not touch | the bodies joined to its holders, at most 256 | I |
+| wakes a sleeping sail | a pin 1 mm off, a moving body within 1 unit of its box | I |
+| the solver's guard | a particle beyond 500 units puts the sail back where it was; the third time it is held | I |
+| the sail has left the board | its centre below -5 (`fallLimitY`) | I |
+
+### 20.6 Tested, and looked at
+
+- `mb_physics_cloth_test` (the engine alone: pinned corners hold; slack bows a sheet and the ramp does not snap it; wind blows a sheet and not across its plane; a ball pushes it, a touch is reported once and its normal and speed are right; pins carry it and let go; a violent pin does not blow it up; bodies it is told to go through; rays from both sides; sleep and waking; the guard; bad input), `mb_cloth_tests` (a sail in a made-up level: the plan, the pins in the holder's frame, the world's pin, a cloth that is not its grid; the scene: counts, bodies, bounds and centre; pins that hold and follow a turned holder; the wind; sleep; a holder taken out, a holder hit hard, a sail taken out; its own ship and a plank; a ball's touch; the rules: not a target, hurt by the ball, a weapon and a blast, 60 points, 10 ms, a fall off the board; the mesh), `mb_cloth_smoke` (all 22 sails of the real levels: 453 particles and 84 pins, 10 s alone, finite, within 2.3 of where they were saved, no spring more than 8 % off, every pin at its holder, a ball on each, a holder taken out, a sail taken out), `mb_cloth_view_smoke` (the 22 draws, the picture of `piratos-ostrovok` with and without the sails, the sails after 4 s, a destroyed one gone, on the GPU), `mb_render_test` (`updateMesh`), `mb_tests` (the level loader reads the grid and the wind), and `mb_gameplay_smoke`, which now fails a level whose sail has a particle that is not finite or was put back.
+- Looked at: `piratos-ostrovok` at 0, 0.1, 0.2, 0.35, 0.5, 0.8, 1.2, 2, 4 and 8 s (the same picture at 0 and 0.1 s, the sails full by 2 s, still after); `Piratos-Chyu-u-dishe`, `piratos-bul-bul`, `piratos-po-volnam`, `Piratos-Zasada`, `Piratos-Kartejniki` and `piratos-bad-night` at 5 s; the autopilot's runs of `piratos-ostrovok` (sails fall with the broken mast at 26 to 36 s and are taken by the ball by 44) and `Piratos-Kartejniki` (the ship breaks at 45 to 60 s, the sail lies on the water at 60 to 90 s, gone by 120). Two 24 s windowed runs (`piratos-ostrovok`, `piratos-bul-bul`) with the Metal validation layer on held the display's 120 frames a second with nothing reported.
+- The wind, the slack and the damping were tuned by eye against `original-level1-pirates.jpg` on `Piratos-Chyu-u-dishe` (the whole wind, none, 0.15 and 0.4; slack 0, 3, 5 and 8 %): 0.4 and 5 % are the sails of the footage, the first a hanging flag, the second a bellied sail.
+
+### 20.7 Cost
+
+The fixed step of the nine levels with sails (`mb_physics_smoke --shots 4 <level>`, the mean over 40 s of play with a test ball and the slowest run, in milliseconds; before is the base commit, which kept the 453 segments as kinematic bodies, after is the mean of four runs):
+
+| level | sails | before | after |
+|---|---|---|---|
+| `Piratos-Chyu-u-dishe` | 3 (142 particles) | 0.151 / 0.281 | 0.172 / 0.324 |
+| `piratos-ostrovok` | 3 (48) | 0.104 / 0.191 | 0.097 / 0.263 |
+| `piratos-po-volnam` | 3 (27) | 0.136 / 0.208 | 0.146 / 0.202 |
+| `piratos-bad-night` | 3 (30) | 0.063 / 0.103 | 0.072 / 0.121 |
+| `Piratos-Zasada` | 1 (30) | 0.035 / 0.068 | 0.060 / 0.080 |
+| `Piratos-Kartejniki` | 3 (48) | 0.036 / 0.082 | 0.044 / 0.093 |
+| `piratos-birthday` | 1 (9) | 0.024 / 0.045 | 0.026 / 0.053 |
+| `piratos-bul-bul` | 4 (110) | 0.019 / 0.021 | 0.038 / 0.069 |
+| `Piratos-Logovo` | 1 (9) | 0.024 / 0.062 | 0.019 / 0.038 |
+
+Within 0.025 ms of what it was (0.15 % of a frame at 60 Hz): a sail costs 0.03 to 0.07 ms a step while it moves (the first seconds, and while a ship breaks) and next to nothing asleep, which the 453 kinematic bodies did not do. All 83 levels (`mb_gameplay_smoke`, 60 s of autopilot) took 0.079 and 0.103 ms a step on average in two runs, against 0.096 before: the machine's load differs from run to run by more than the sails' share, which is in the nine levels above. The windowed update of a ship level is 0.06 to 0.3 ms a frame.
+
+### 20.8 Still open
+
+- **[?]** How the original's cloth took the wind (its drag and lift, a PhysX 2.x cloth's own numbers) and how stiff it was: the data has none. The game's sails belly out by a slack, not by the wind's strength.
+- **[?]** Whether the ball goes through a sail's gaps in the original (spheres of 0.5 at 1.8 to 3.5 apart leave the wider sails gaps of 1.3 to 2.5 for a ball of 1.2) and whether a ball bounces off a sail it hits (a sphere of 5 grams in PhysX bounces nothing of 0.9).
+- **[?]** Whether a sail reaches half a cell past its particles, and how its texture is laid on it.
+- **[?]** Whether sails are blown by the Wind prize (they are not here; 15.3) or shaken by the Earthquake.
+- **[?]** Sail flutter: the original's wind is constant, so a sail that has settled lies still; if the original's sails moved in the footage, a gust is a small addition (the engine's `setClothWind` can be called every frame).

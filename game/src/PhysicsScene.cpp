@@ -105,8 +105,18 @@ PhysicsScene::PhysicsScene(const Level& level, const MaterialLibrary& materials,
     }
 
     bodies_.assign(plan_.actors.size(), 0);
+    std::vector<bool> inSail(plan_.actors.size(), false);  // the cloth bodies come with the sails, not with the actors
+    for (const ClothPlan& cloth : plan_.cloths) {
+        for (const ActorIndex actor : cloth.actors) {
+            inSail[actor] = true;
+        }
+    }
     for (std::size_t i = 0; i < plan_.actors.size(); ++i) {
         const ActorPlan& actor = plan_.actors[i];
+        if (inSail[i]) {
+            ++counts_.clothParticles;
+            continue;
+        }
         if (!actor.simulated) {
             ++counts_.withoutBody;
             continue;
@@ -129,6 +139,9 @@ PhysicsScene::PhysicsScene(const Level& level, const MaterialLibrary& materials,
             case MotionType::Static: ++counts_.staticBodies; break;
         }
     }
+
+    cloths_.emplace(plan_, world_, bodies_, options.cloth);
+    counts_.cloths = cloths_->size();
 
     // A path actor starts where its path has it, not where it was saved: the poses were saved a frame or two behind
     // the path, and a key can lie a few units off a path that was edited afterwards.
@@ -153,8 +166,8 @@ PhysicsScene::PhysicsScene(const Level& level, const MaterialLibrary& materials,
         const BodyDesc& body = plan_.actors[i].body;
         // Only a body that gravity pulls can be left asleep in the air (one that has none, or is held at its height,
         // is meant to hover).
-        if (bodies_[i] != 0 && world_.motionType(bodies_[i]) == MotionType::Dynamic && body.gravity &&
-            !body.lockTranslation[1]) {
+        if (bodies_[i] != 0 && cloths_->clothOf(i) < 0 && world_.motionType(bodies_[i]) == MotionType::Dynamic &&
+            body.gravity && !body.lockTranslation[1]) {
             fallingActors_.push_back(i);
             wasAwake_[i] = world_.isAwake(bodies_[i]);
             restsOn_[i] = supported(i);
@@ -197,7 +210,19 @@ PhysicsScene::PhysicsScene(const Level& level, const MaterialLibrary& materials,
 }
 
 Mat4 PhysicsScene::actorPose(ActorIndex actor) const {
-    return bodies_[actor] != 0 ? world_.pose(bodies_[actor]) : plan_.actors[actor].pose;
+    return bodies_[actor] != 0 && cloths_->clothOf(actor) < 0 ? world_.pose(bodies_[actor]) : plan_.actors[actor].pose;
+}
+
+Bounds PhysicsScene::bounds(ActorIndex actor) const {
+    const int cloth = cloths_->clothOf(actor);
+    return cloth >= 0 ? cloths_->bounds(static_cast<std::size_t>(cloth)) : boundsOf(plan_.actors[actor].body, actorPose(actor));
+}
+
+Vec3 PhysicsScene::centreOf(ActorIndex actor) const {
+    // The pose is the model's origin, which can be well away from the pieces (a ship's is on the water line).
+    const int cloth = cloths_->clothOf(actor);
+    return cloth >= 0 ? cloths_->centre(static_cast<std::size_t>(cloth))
+                      : transformPoint(plan_.actors[actor].body.massLocalPose.translationPart(), actorPose(actor));
 }
 
 bool PhysicsScene::supported(ActorIndex actor) const {
@@ -297,6 +322,7 @@ void PhysicsScene::breakByHit(const ContactEvent& contact) {
         if (!isActor(userData)) {
             continue;
         }
+        cloths_->holderHit(static_cast<ActorIndex>(userData), force);  // the sails it holds are joints too
         for (const std::size_t joint : jointsOfActor_[userData]) {
             if (jointIds_[joint] != 0 && force > plan_.joints[joint].desc.breakForce) {
                 breakJoint(joint);
@@ -314,8 +340,13 @@ void PhysicsScene::movePathActors() {
     }
 }
 
+void PhysicsScene::beforeFixedStep() {
+    movePathActors();
+    cloths_->carryPins(*this);
+}
+
 void PhysicsScene::step(float dt) {
-    world_.step(dt, [this] { movePathActors(); });
+    world_.step(dt, [this] { beforeFixedStep(); });
     wakeUnsupported();
 
     contacts_ = world_.takeContacts();
@@ -349,9 +380,15 @@ void PhysicsScene::removeActor(ActorIndex actor) {
     if (bodies_[actor] == 0) {
         return;
     }
+    if (const int cloth = cloths_->clothOf(actor); cloth >= 0) {  // a sail: it supports nothing, and nothing joins it
+        cloths_->remove(static_cast<std::size_t>(cloth));
+        bodies_[actor] = 0;
+        return;
+    }
     const Bounds gone = boundsOf(plan_.actors[actor].body, actorPose(actor));
     world_.removeBody(bodies_[actor]);  // its joints go with it
     bodies_[actor] = 0;
+    cloths_->holderGone(actor);  // the sails it held fall free
     std::erase(fallingActors_, actor);
     for (const std::size_t joint : jointsOfActor_[actor]) {
         if (jointIds_[joint] != 0) {

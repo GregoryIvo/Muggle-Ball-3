@@ -203,9 +203,14 @@ GameObject object(const json& j) {
     o.param = j.value("param", 0u);
     if (j.contains("extra")) o.extra = hexBytes(j["extra"].get<std::string>());
     if (j.contains("cloth")) {
-        for (const json& seg : j["cloth"].at("segments")) {
+        const json& cloth = j["cloth"];
+        for (const json& seg : cloth.at("segments")) {
             o.clothSegments.push_back(actor(seg));
         }
+        o.cloth.width = cloth.value("width", 0);
+        o.cloth.height = cloth.value("height", 0);
+        // The converter calls the extra after the grid an "anchor" (an index and a point); it is the wind, see LEVEL_FORMAT.md.
+        if (cloth.contains("anchor")) o.cloth.wind = vec3(cloth["anchor"].at("offset"));
     }
     return o;
 }

@@ -408,7 +408,13 @@ A `<cloth>` element: `cloth="1"`, `wind` (0 0 10 or 0 0 -10), `width` and `heigh
 (particles, 3 to 8), `fWidth`, `fWidth2` (top and bottom widths), `fHeight`,
 `translation`, and the names of the objects in the same file that pin its
 corners: `lu`, `ru`, `ld`, `rd` (left or right, up or down). **Inferred**. The
-level holds the sail as width x height - 1 nested actors.
+level holds the sail as width x height - 1 nested actors. **Data** (`LEVEL_FORMAT.md`, "Cloth"): the editor
+expands the element into the lattice of its particles (one sphere actor each, `fWidth`, `fWidth2`, `fHeight`
+and `translation` giving their places exactly), keeps `wind` turned by the object's pose as a world vector of length 10,
+and turns the named corners into the 84 joints; the material is the `Clothmat` family (60, 65, 62 and 32 points,
+one energy, `exploseType` 3, the sounds `sea_cloth_hit` and `sea_cloth_dead`). The 22 sails are in 9 levels, 9 on the pirate ships (`pirateship.x`), 3 on boats (`boat-water.x`), 3 on rafts (`plot.x`)
+and 7 on serfs' craft (`serf.x`), and the game simulates them (`GAMEPLAY.md` section 20).
+The footage's "sail +20" is not one of them: `fparus.jpg` (20) and `Flag` (40) are bricks of the masts.
 
 ## 8. Particle systems (`Particles/*`)
 

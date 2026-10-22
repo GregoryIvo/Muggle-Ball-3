@@ -27,6 +27,7 @@ struct GpuMesh {
     SDL_GPUBuffer* vertices = nullptr;
     SDL_GPUBuffer* indices = nullptr;
     std::uint32_t indexCount = 0;
+    Uint32 vertexBytes = 0;
 };
 
 // A depth buffer that follows the window's size.
@@ -123,6 +124,7 @@ struct Renderer::Impl {
     TransferBufferPtr createTransferBuffer(SDL_GPUTransferBufferUsage usage, Uint32 size);
     SDL_GPUTexture* uploadTexture(const Image& image, bool mipmaps);
     MeshHandle uploadMesh(std::span<const Vertex> vertices, std::span<const std::uint32_t> indices);
+    void rewriteMesh(MeshHandle handle, std::span<const Vertex> vertices);
     SDL_GPUTexture* createDepthTexture(Uint32 width, Uint32 height);
     bool ensureWindowDepth(Uint32 width, Uint32 height);
     bool ensureOffscreen(Uint32 width, Uint32 height);

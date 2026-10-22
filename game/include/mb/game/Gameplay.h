@@ -346,10 +346,10 @@ struct GameInput {
 // Whether something can hurt an actor of this object type with this material: it has a brick material (brickType other
 // than 2, which the ball, bullets, board, water and the fallback have, and energy above 0). The board and markers never
 // do, and neither do the teleports, which a charge of dynamite 3.8 units away left standing (docs/GAMEPLAY.md section
-// 17.1). The ball itself hurts only bricks, trees, dynamite, firework crates, vibros and flickers (SpecialObjects); the
-// rest of the objects are hurt by blasts, cannonballs and weapons. A cloth is a placeholder for a sail the cloth simulation has yet to build (step 5),
-// so a ball goes by it, though the original scored sails (60 each: piratos-ostrovok's 62 bricks and 3 sails are the 65
-// bricks, 4,231 points of docs/GAMEPLAY.md), and they are not targets here.
+// 17.1). The ball itself hurts bricks, trees, dynamite, firework crates, vibros, flickers and sails (SpecialObjects); the
+// rest of the objects are hurt by blasts, cannonballs and weapons. A sail (cloth) is one object, its lead actor: the original
+// scored them (60 each: piratos-ostrovok's 62 bricks and 3 sails are the 65 bricks, 4,231 points of docs/GAMEPLAY.md), but they
+// are not targets (section 20).
 bool canBeDamaged(ObjectType type, const GameMaterial* material);
 
 // Whether a destroyed object of this material shrinks away instead of being gone with its score: exploseType 5, the

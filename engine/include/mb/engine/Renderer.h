@@ -160,6 +160,10 @@ public:
     // GPU resources live until the Renderer is destroyed (or destroy*() is called).
     MeshHandle createMesh(std::span<const Vertex> vertices, std::span<const std::uint32_t> indices);
     TextureHandle createTexture(const Image& image, bool mipmaps = true);
+    // Writes new vertices into a mesh that exists: as many as it was made with, the same indices. For a mesh that changes shape every
+    // frame (cloth); the frames already in flight keep drawing what they were given. Logs and changes nothing for a handle that is not
+    // one or a different number of vertices.
+    void updateMesh(MeshHandle mesh, std::span<const Vertex> vertices);
     void destroyMesh(MeshHandle mesh);
     void destroyTexture(TextureHandle texture);
 

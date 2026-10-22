@@ -120,6 +120,7 @@ Vec3 ballPosition(const BallView& ball, const BatView& bat, float lead) {
 PlayScene::PlayScene(ModelCache& cache, const MaterialLibrary& materials, const TextureIndex& textures,
                      const ParticleLibrary& particles, const Level& level, const GameSession& session, int bat)
     : level_(cache, materials, textures, level, session.scene().plan()),
+      sails_(cache, materials, textures, level, session.scene()),
       bat_(cache, materials, textures, batLevel(bat), PhysicsPlan{}),
       quad_(cache.quad()),
       sparkTexture_(cache.texture(textures.find("Particles/PARTICLE.PNG"))),
@@ -141,6 +142,7 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
     time_ += seconds;
     level_.update(time_);
     level_.follow(session.scene());
+    sails_.update(session.scene());
     effects_.update(session, events, seconds, level_);
     prizes_.update(events, seconds);
     barrels_.update(session, events, seconds);
@@ -196,6 +198,7 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
 
     items_.clear();
     level_.appendDrawn(items_);
+    sails_.appendDrawn(session.scene(), items_);
     prizes_.appendWall(session, items_);
 
     const BatPose bat = batPose(session.bat(), static_cast<float>(lead));
