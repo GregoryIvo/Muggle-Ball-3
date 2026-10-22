@@ -3,6 +3,7 @@
 #include "mb/engine/Renderer.h"
 #include "mb/engine/Window.h"
 #include "mb/game/Campaign.h"
+#include "mb/game/GameFlow.h"
 #include "mb/game/Hud.h"
 #include "mb/game/Menu.h"
 #include "mb/game/SaveData.h"
@@ -18,9 +19,8 @@
 
 namespace mb_app {
 
-// What the front end needs from the code that owns the 3D scene (today the level viewer in main.cpp; later the game
-// with its physics and rules). The front end decides when a level starts, pauses and ends; the session does the
-// work of the level.
+// What the front end needs from the code that owns the 3D scene (PlaySession: the game's physics and rules). The front
+// end decides when a level starts and pauses; the session does the work of the level, and says when it is over.
 class LevelSession {
 public:
     virtual ~LevelSession() = default;
@@ -30,10 +30,12 @@ public:
 
     // Builds the scene for this level (a name from the campaign, any case); false if it cannot be shown, with the
     // reason logged. Blocks until the level is ready; `progress` may be called any number of times while it works.
-    virtual bool start(std::string_view levelName, const Progress& progress) = 0;
+    // `hud` has the lives and the points the player brings into the level (a new game's, or those of the level before).
+    virtual bool start(std::string_view levelName, const mb::GameHud& hud, const Progress& progress) = 0;
     // One frame of play, `seconds` after the last: not called while paused. `input` is what the window polled.
-    // Changes to `hud` (lives, points, bonuses) show at once.
-    virtual void update(const mb::InputEvents& input, double seconds, mb::GameHud& hud) = 0;
+    // Changes to `hud` (lives, points, bonuses) show at once. Returns how the level ended once it is over (its own
+    // fade out included), else Playing; the front end then moves on and does not call update() again for this level.
+    virtual mb::LevelOutcome update(const mb::InputEvents& input, double seconds, mb::GameHud& hud) = 0;
     // Draws the scene into the window with the 2D overlay (the HUD, the pause screen) on top.
     virtual void render(mb::Renderer& renderer, std::span<const mb::Sprite> overlay) = 0;
 };
@@ -59,12 +61,16 @@ struct FrontEndOptions {
     FrontEndEvents events;
     // Whether the stage screens lock the levels the saved progress has not opened (Menu::setLevelsLocked).
     bool lockLevels = true;
+    // A level's name (a campaign's, any case): the game opens on it as if it had been chosen in the menus. Empty opens
+    // the main menu; a name the campaign does not have is logged and ignored.
+    std::string startLevel;
 };
 
 // The game as the player meets it: the main menu on the window, from which levels are started, played with the
-// HUD, paused and left. The menus show and change `save` (options, bat, high scores) and write it. Open the window
-// with its video settings: from then on the settings follow the window as the player resizes it or goes fullscreen,
-// and Options moves the window to the choices made there. Returns when the player quits or closes the window.
+// HUD, paused and left; a level that is won leads to the next, one that is lost to the high scores. The menus show and
+// change `save` (options, bat, progress, high scores) and write it. The system cursor is hidden while a level plays. Open
+// the window with its video settings: from then on the settings follow the window as the player resizes it or goes
+// fullscreen, and Options moves the window to the choices made there. Returns when the player quits or closes the window.
 int runFrontEnd(mb::Window& window, mb::Renderer& renderer, LevelSession& session, mb::SaveData& save,
                 const FrontEndOptions& options);
 

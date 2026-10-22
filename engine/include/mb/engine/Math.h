@@ -105,6 +105,24 @@ struct Mat4 {
         return r;
     }
 
+    // D3DXMatrixRotationAxis: about the unit vector `axis`, turning the way rotationX/Y/Z do for a positive angle
+    // (about z, x towards y).
+    static Mat4 rotationAxis(Vec3 axis, float radians) {
+        const float c = std::cos(radians), s = std::sin(radians), t = 1 - c;
+        const Vec3 a = axis;
+        Mat4 r;
+        r.m[0][0] = c + t * a.x * a.x;
+        r.m[0][1] = t * a.x * a.y + s * a.z;
+        r.m[0][2] = t * a.x * a.z - s * a.y;
+        r.m[1][0] = t * a.y * a.x - s * a.z;
+        r.m[1][1] = c + t * a.y * a.y;
+        r.m[1][2] = t * a.y * a.z + s * a.x;
+        r.m[2][0] = t * a.z * a.x + s * a.y;
+        r.m[2][1] = t * a.z * a.y - s * a.x;
+        r.m[2][2] = c + t * a.z * a.z;
+        return r;
+    }
+
     // A PhysX 2.x pose: NxMat33 stored row-major for column vectors (world = R * p + t).
     // The row-vector form is the transpose, which is what the game got from
     // NxActor::getGlobalPose().getColumnMajor44() before handing it to Direct3D.

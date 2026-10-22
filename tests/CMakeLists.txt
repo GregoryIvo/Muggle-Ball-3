@@ -133,3 +133,18 @@ set_tests_properties(mb_gameplay_smoke PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(mb_gameplay_tests test_gameplay.cpp)
 target_link_libraries(mb_gameplay_tests PRIVATE mb_game)
 add_test(NAME mb_gameplay_tests COMMAND mb_gameplay_tests)
+
+# A level of the real game data played by the game's PlaySession on the GPU without a window: the scene (bricks hidden and
+# damaged), the bat and the ball drawn, the fades, a level won by the autopilot. Exits 77 (skipped) without MB3_ASSETS or a GPU.
+add_executable(mb_play_smoke play_smoke.cpp ${PROJECT_SOURCE_DIR}/app/PlaySession.cpp ${PROJECT_SOURCE_DIR}/app/PlayerInput.cpp
+               ${PROJECT_SOURCE_DIR}/app/GameAudio.cpp)
+target_include_directories(mb_play_smoke PRIVATE ${PROJECT_SOURCE_DIR}/app)
+target_link_libraries(mb_play_smoke PRIVATE mb_game)
+add_test(NAME mb_play_smoke COMMAND mb_play_smoke)
+set_tests_properties(mb_play_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# The mouse and Space as a player's input: the cursor as the bat's target, the click as the launch. CPU only.
+add_executable(mb_player_input_tests test_player_input.cpp ${PROJECT_SOURCE_DIR}/app/PlayerInput.cpp)
+target_include_directories(mb_player_input_tests PRIVATE ${PROJECT_SOURCE_DIR}/app)
+target_link_libraries(mb_player_input_tests PRIVATE mb_game)
+add_test(NAME mb_player_input_tests COMMAND mb_player_input_tests)

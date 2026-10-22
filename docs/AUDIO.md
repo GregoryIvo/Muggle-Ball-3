@@ -108,6 +108,26 @@ the menus come back, or their first hover sound would wait: the front end announ
 the menus' sounds play after it, and `tests/frontend_smoke.cpp` checks the sequence through the real front end. A
 sound that must play during a pause would need a mixer that pauses only the game's voices; this one cannot.
 
+### In play
+
+`PlaySession` plays the events of a `GameSession` through `PlaySounds` (`game/PlaySounds.h`), panned by where on the board they
+happened (x over half the board's width, within -1 and 1) and at the sound's own volume; the library's replay delays
+hold back a pile of the same sound in one frame.
+
+| Event | Sound | How sure |
+|---|---|---|
+| `BrickHit` | the material's `hit` sound | data (`sounds` of the material) |
+| `BrickDestroyed` | the material's `dead` sound | data |
+| `ActorFell` with points | the material's `dead` sound (a piece that was scored was destroyed) | inferred |
+| `BatHit`, `BallLaunched` | `ballHitBat` (the launch is the bat's hit on the ball) | name in `sounds.xml`, use inferred |
+| `BoardHit` | `ballHitBoard` (the ball material's own `hit` sound) | data |
+| `BallsHit` | `ballHitBall` (the ball material's `period` sound) | data |
+| `BatLeft` | `bat_dead`: the bat flies off after the last ball is lost | inferred |
+| `LevelComplete` | `endlevel` (also the Next Level prize's sound) | inferred |
+| `BallLost`, `BallFreed`, `LifeLost`, `BatEntered`, `GameOver` | none | |
+
+`ballMagnited`, `ballRubbered`, `explosion_ball` and the prizes' sounds wait for the prizes (step 5).
+
 ## Trying it without speakers
 
 ```sh

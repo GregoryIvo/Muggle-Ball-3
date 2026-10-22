@@ -30,9 +30,9 @@ Menus, text and (later) the HUD are drawn as screen-space quads after the 3D sce
 | `game/` `UiAssets` | Finds and uploads the images, fonts and strings below the assets folder; loads forms by name. |
 | `game/` `UiDraw` | `drawForm`: a form to sprites, with each widget's state frame, shadows, hover growth, press offset, text and fade; the scrolling sky and a text field's caret. |
 | `game/` `Menu` | The screens: owns the current form and the background behind it, turns pointer samples and keys into the original's behaviour (below), shows and changes the `SaveData` it is given (settings, progress, high scores) and writes it. No GPU. |
-| `game/` `GameFlow` | Where the player is: menu, loading, playing, paused. No GPU or window, so the whole flow is tested. |
+| `game/` `GameFlow` | Where the player is: menu, loading, playing, paused; and what a level's end leads to (the next level, Game Over, the ending), with the progress and the scores saved. No GPU or window, so the whole flow is tested. |
 | `game/` `Hud`, `Campaign` | The in-game overlay and the pause screen; the level list in stages (`Data/xml/levels.json`). |
-| `app/` `FrontEnd` | The game as the player meets it: the window loop that drives `GameFlow`, `LevelSession` (what the scene code provides), `FrontEndEvents` (menus, level start, pause: the music and the pause of the sound follow them, `FrontEndAudio`), and `HudOverlay` for `--hud`. |
+| `app/` `FrontEnd` | The game as the player meets it: the window loop that drives `GameFlow`, `LevelSession` (what the scene code provides: `PlaySession`), `FrontEndEvents` (menus, level start, pause: the music and the pause of the sound follow them, `FrontEndAudio`), the cursor (hidden while a level plays), and `HudOverlay` for `--hud`. |
 
 Below the foundation, one form on its own (this is the model `Menu` is built on):
 
@@ -65,11 +65,17 @@ Window::pollEvents ──InputEvents──► toUiInput ──UiInput──► G
   (`setTextInput`), and the window's size, fullscreen state and display size.
 - `Menu` does the work of the screens. It is given a form loader, the `Campaign`, the `SaveData` and `MenuHooks`, and each frame
   `update(input, dt, layout, imageSizes)` returns `StartLevel(index)`, `Quit` or nothing.
-- `GameFlow` adds the level: choosing one shows the Loading form for a frame, then asks the app to build the scene
-  (`Step::loadLevel`; `loaded(ok)` answers), then plays with the HUD. Escape pauses; Escape again goes to the main menu,
-  any other key or a mouse button resumes. A level that fails to build returns to its stage's form.
+- `GameFlow` adds the level: choosing one starts a game (the hearts of a new game, no points), shows the Loading form
+  for a frame, then asks the app to build the scene (`Step::loadLevel`; `loaded(ok)` answers), then plays with the HUD.
+  Escape pauses; Escape again goes to the main menu, any other key or a mouse button resumes. A level that fails to
+  build returns to its stage's form. When the level says it has ended (`levelEnded`): a level won is saved
+  (`Progress::recordCompletion`) and the next level of the campaign is asked for at once, with the hearts and the points
+  in the HUD carried on and no Loading form (the original has none); after the last level the ending forms
+  (`Menu::openEnding`) open; a game lost goes to Game Over or the name entry (`Menu::openGameOver`), and its points are
+  the level's best score.
 - `FrontEnd` (in `app/`) owns the loop and the GPU. The scene code implements `LevelSession` (`start`, `update`,
-  `render`); in this tree that is a small adapter over the level viewer in `main.cpp`.
+  `render`): `PlaySession` for the game. `runFrontEnd` hides the system cursor while a level plays (`Window::setCursorHidden`,
+  which also keeps the pointer in the window) and can open straight on a level (`FrontEndOptions::startLevel`).
 
 What the forms do (`Menu::intentOf` says what a widget is; every button of every shipped form has one, and the smoke test
 checks that):
@@ -103,8 +109,8 @@ Everything outside the screens plugs in through `MenuHooks` (set in `FrontEndOpt
 | `playSound(name)` | Once as the pointer enters a widget that has `sound_mouse_in`, once as the button goes down on one with `sound_mouse_down`. The names are `Data/xml/sounds.xml` entries. The game plays them through `GameAudio` (`AUDIO.md`). |
 | `settingsChanged(settings)` | Every change of a setting as it happens, to set a volume live; `FrontEnd` also calls it once at the start with the saved settings. |
 | `applyVideo(settings)` | Options left with a changed window size or fullscreen. The app adds its own (it resizes the window) in front of the caller's. |
-| `LevelSession::start(name, progress)` | The campaign name of a level (`piratos-ostrovok`, any case) is to be built; blocks, may report progress. |
-| `LevelSession::update(input, dt, hud)` | Each frame of play, not while paused. The game changes `GameHud` here (lives, points, bonuses). |
+| `LevelSession::start(name, hud, progress)` | The campaign name of a level (`piratos-ostrovok`, any case) is to be built; blocks, may report progress. `hud` has the hearts and points the player brings in. |
+| `LevelSession::update(input, dt, hud)` | Each frame of play, not while paused. The game changes `GameHud` here (lives, points, bonuses). Returns how the level ended (`LevelOutcome::Complete` or `GameOver`, once its fade out is over), else `Playing`. |
 | `LevelSession::render(renderer, overlay)` | Draw the scene, then the overlay sprites (HUD, pause screen) over it. |
 
 What the player keeps needs no hook: the `Menu` changes the `SaveData` it was made with and writes it (Options left, a bat picked, a score entered). `FrontEndEvents` (in `FrontEndOptions::events`) tell the program where the game is, for the sound:
@@ -127,9 +133,10 @@ all in 1024x768 units, scaled by the target's height) and anchored to the edges 
 The bonus icons' place is a guess: no screenshot shows one. `drawPause` draws the pause screen from `Pause`,
 `PressAnyKey` and `PressEscape`.
 
-`GameHud` is filled with placeholders (three lives, no points, the level's number counting from 1, no bonuses) when a
-level starts, until the game updates it. `MuggleBall3 --level <name> --hud [--hud-state 3,1529,1,Cannon]` shows it on the
-level viewer or a screenshot.
+In the game the `GameHud` is the game's: `GameFlow` sets the hearts of a new game (`GameplayRules::startHearts`), no points
+and the level's number counting from 1 when a game starts, `PlaySession` keeps the hearts and the points of the rules in
+it, and it carries over to the next level. `MuggleBall3 --level <name> --hud [--hud-state 3,1529,1,Cannon]` shows
+placeholders on the level viewer or a screenshot.
 
 ## Gameplay
 
@@ -150,13 +157,43 @@ for (const GameEvent& e : session.takeEvents()) { /* BrickHit, BrickDestroyed, B
 |---|---|
 | Every number the rules use, each with its source in `GAMEPLAY.md` and how well it is known | `GameplayRules` |
 | What happens, for the sound and the look | `GameEvent`: `BallLaunched`, `BatHit`, `BoardHit`, `BallsHit`, `BrickHit`, `BrickDestroyed`, `ActorFell`, `BallLost`, `LifeLost`, `BatLeft`, `BatEntered`, `LevelComplete`, `GameOver` |
-| Which bricks are hurt, and which must go for the level to end | `canBeDamaged`, `isTarget`, `TargetRule` (H-dyn and H-type of `OBJECTS.md`; one is chosen in `SessionOptions::levelEnd`, the smoke test counts both) |
+| Which bricks are hurt, and which must go for the level to end | `canBeDamaged`, `isTarget`, `TargetRule` (H-dyn and H-type of `OBJECTS.md`; one is chosen in `SessionOptions::levelEnd`, the smoke test counts both); targets out of the ball's reach do not count (below) |
 | The cursor as a bat position | `cursorOnPlane`, `batTargetX` |
 | A player that needs no hands | `Autopilot`, `autoplay()` (returns the events; `mb_gameplay_smoke --log <level>` prints them) |
 
+Which targets count: whatever the `TargetRule`, a target does not once the ball cannot get at it
+(`SessionOptions::ignoreUnreachable`, on). `BallReach` cuts the plane the ball moves on into a grid and fills it from the bat's end of the
+board around the immovable parts of the plan (walls, platforms, pinned buildings: static bodies that are no brick), a
+ball's radius from each; a target within the ball's height with no such ground within a ball's radius of it (behind a wall,
+past the board's edge, in a slot narrower than the ball), or above it and pinned or over no such ground, is out of play. It is
+looked at when the level starts and twice a second at the targets that are loose bodies, and stays out
+(`ActorStatus::outOfPlay`, `SessionStats::targetsOutOfPlay`). What the look cannot see (a piece that stays up where the physics left it) is
+let go when balls have flown for 90 s without touching a brick and few targets are left (`GameplayRules::stallSeconds`,
+`SessionStats::targetsLetGo`). No level can then be impossible for want of such a target (`GAMEPLAY.md` section 12 has what the autopilot
+makes of it).
+
 Tests: `mb_gameplay_tests` on made-up levels (the bat's law, the life sequence, damage and explosions, the end of the
-level under each reading, bricks that wake what they held, the cursor); `mb_gameplay_smoke` plays all 83 levels with the
-autopilot against the real data and checks only that nothing breaks and that the ball keeps its speed and its plane.
+level under each reading, the targets out of the ball's reach, bricks that wake what they held, the cursor); `mb_gameplay_smoke`
+plays all 83 levels with the autopilot against the real data and checks only that nothing breaks and that the ball keeps its speed
+and its plane.
+
+## Playing
+
+`PlaySession` (`app/`) is the game's `LevelSession`: it builds a level's `GameSession` and its picture, feeds the rules the mouse and
+the click each frame, and turns what they report into what is seen and heard.
+
+| Part | What it does |
+|---|---|
+| `GameSession` + `Autopilot` | The rules; with `--autoplay` the autopilot's input replaces the mouse's. `PlayerInput` (`app/`, the keys are SDL's) turns the mouse into the bat's target through `batTargetX` and the drawable size; a click (the button going down, not held) or Space launches. |
+| `PlayScene` (`game/`) | The picture of a session as a list of draws: `LevelScene` for the level (actors at their physics poses, what exploded or fell hidden, a hit brick retextured by its damage state), the bat (the frames of `bat.x` that make the default bat, with the texture of `Settings::bat`), the balls (rolling by the distance over the radius, a soft shadow, shrinking away over 0.25 s when lost), and the flash and sparks at each `BrickDestroyed`. Reads the session and its events; no window. |
+| `PlaySounds` (`game/`) | An event as its sound through the `SoundLibrary`, panned by x (the table is in `AUDIO.md`). |
+| the fades | A level comes up out of the dark in 0.6 s; when the last target is gone (or the game is lost) the picture holds for 0.3 s and fades out in 0.8 s, under the HUD; then `update` reports the outcome. |
+
+The session steps by 1/60 s; the picture carries the balls and the bat on by their velocities for the time the frame is ahead of the
+last step, so a display at 120 Hz moves smoothly. Tests: `mb_play_smoke` plays real levels on the GPU without a window (a crate shows
+its damage textures, a brick leaves the picture, the autopilot wins a level and its fade out is reported), `mb_frontend_smoke` drives the
+front end in a window and has a stand-in level win, then lose, to see the next level start with the hearts and points carried and
+the files written, `test_menu` does the same flow without a window.
 
 ## Rules
 

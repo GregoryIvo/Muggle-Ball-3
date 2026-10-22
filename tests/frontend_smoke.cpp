@@ -4,8 +4,11 @@
 // GameAudio, wired as the game wires it) on SDL's disk audio driver, and the player's files are the real ones too, in a
 // folder of their own (MB3_USER_DATA): the test checks that sounds were asked for and music chosen for the menus and the
 // level, that the saved volumes were set at the start and follow the slider, that the pause freezes the sound and the
-// way back to the menus unfreezes it, and that settings changed in Options are in the files afterwards. Needs a window
-// system and a GPU, and skips (exit code 77) without them or without the data. The window is on screen for a few seconds.
+// way back to the menus unfreezes it, and that settings changed in Options are in the files afterwards. The stand-in
+// also ends its levels as told: a level won leads to the next of the campaign with the hearts and points carried and the
+// progress saved, a lost game to the name entry and the high scores, and the system cursor is hidden while a level plays.
+// Needs a window system and a GPU, and skips (exit code 77) without them or without the data. The window is on screen
+// for a few seconds.
 
 #include "FrontEnd.h"
 #include "FrontEndAudio.h"
@@ -14,6 +17,7 @@
 #include "mb/engine/Files.h"
 #include "mb/engine/Paths.h"
 #include "mb/engine/Window.h"
+#include "mb/game/Campaign.h"
 #include "mb/game/SaveData.h"
 #include "mb/game/UiLayout.h"
 
@@ -50,18 +54,26 @@ void check(bool ok, const std::string& what) {
 // Stands in for the scene code: no scene, but it counts the calls and draws the overlay on a black window.
 class FakeSession : public mb_app::LevelSession {
 public:
-    bool start(std::string_view levelName, const Progress& progress) override {
+    bool start(std::string_view levelName, const mb::GameHud& hud, const Progress& progress) override {
         progress(0.5f);
         {
             std::lock_guard lock(mutex);
-            started = levelName;
+            started.emplace_back(levelName);
+            startedWith.push_back(hud);
         }
         ++starts;
         return true;
     }
-    void update(const mb::InputEvents&, double, mb::GameHud& hud) override {
+    mb::LevelOutcome update(const mb::InputEvents&, double, mb::GameHud& hud) override {
         hud.score += 10;
+        hud.lives = 1;
         ++updates;
+        cursorHiddenWhilePlaying = cursorHiddenWhilePlaying && !SDL_CursorVisible();
+        {
+            std::lock_guard lock(mutex);
+            lastHud = hud;
+        }
+        return static_cast<mb::LevelOutcome>(ending.exchange(static_cast<int>(mb::LevelOutcome::Playing)));
     }
     void render(mb::Renderer& renderer, std::span<const mb::Sprite> overlay) override {
         overlaySprites = overlay.size();
@@ -70,9 +82,13 @@ public:
     }
 
     std::atomic<int> starts{0}, updates{0}, renders{0};
+    std::atomic<int> ending{static_cast<int>(mb::LevelOutcome::Playing)};  // what the next update() reports
+    std::atomic<bool> cursorHiddenWhilePlaying{true};
     std::atomic<std::size_t> overlaySprites{0};
     std::mutex mutex;
-    std::string started;
+    std::vector<std::string> started;      // the levels built, in order
+    std::vector<mb::GameHud> startedWith;  // and the hearts and points each was given
+    mb::GameHud lastHud;                   // as the last update left it
 };
 
 // The folder the player's files go to for this test.
@@ -112,6 +128,13 @@ void click(mb::Vec2 at) {
     push(e);
     e.type = SDL_EVENT_MOUSE_BUTTON_UP;
     e.button.down = false;
+    push(e);
+}
+
+void typeText(const char* text) {
+    SDL_Event e{};
+    e.type = SDL_EVENT_TEXT_INPUT;
+    e.text.text = text;
     push(e);
 }
 
@@ -203,6 +226,8 @@ int main() {
         const mb::Vec2 blueBat = centerOf(root, strings, sizes, "selectstage", "Metall-Raketka-Blue.jpg", points, pointsHigh);
         const mb::Vec2 knights = centerOf(root, strings, sizes, "selectstage", "StageKnights", points, pointsHigh);
         const mb::Vec2 level = centerOf(root, strings, sizes, "stageknights", "70", points, pointsHigh);
+        const mb::Campaign campaign = mb::Campaign::load(root / "Data" / "xml" / "levels.json");
+        const std::string first = *campaign.levelName(70), second = *campaign.levelName(71);
         const mb::Vec2 exit = centerOf(root, strings, sizes, "MainMenu", "Exit", points, pointsHigh);
 
         // The player's files, and the sound as the game has it: the real GameAudio, wired by the code the game uses,
@@ -256,7 +281,8 @@ int main() {
 
         std::atomic<bool> finished{false};
         std::atomic<int> peakVoices{0}, updatesAtPause{-1}, updatesWhilePaused{-1}, updatesResumed{-1};
-        std::atomic<bool> musicFollowedSlider{false}, settingsWritten{false};
+        std::atomic<bool> musicFollowedSlider{false}, settingsWritten{false}, cursorShownWhilePaused{false};
+        std::atomic<bool> progressSaved{false}, scoreSaved{false};
         std::thread sampler([&] {  // a click's sound is a voice of the mixer for a moment
             while (!finished) {
                 peakVoices = std::max(peakVoices.load(), mixer.activeVoices());
@@ -298,14 +324,30 @@ int main() {
             key(SDLK_ESCAPE);
             std::this_thread::sleep_for(300ms);
             updatesAtPause = session.updates.load();
+            cursorShownWhilePaused = SDL_CursorVisible();
             std::this_thread::sleep_for(300ms);
             updatesWhilePaused = session.updates.load();
             key(SDLK_SPACE);
             std::this_thread::sleep_for(300ms);
             updatesResumed = session.updates.load();
 
-            key(SDLK_ESCAPE);
-            std::this_thread::sleep_for(200ms);
+            // The level is won: the next of the campaign is built at once, and the progress is saved.
+            session.ending = static_cast<int>(mb::LevelOutcome::Complete);
+            check(waitFor([&] { return session.starts == 2; }), "a level that is won is followed by the next");
+            progressSaved = waitFor(
+                [&] { return mb::readTextFile(userData.path / "progress.json").value_or("").find(first) != std::string::npos; }, 3000ms);
+            const int updatesAtNext = session.updates.load();
+            check(waitFor([&] { return session.updates > updatesAtNext + 5; }), "and it plays");
+
+            // The game is lost: the name entry, then the table with the new line.
+            session.ending = static_cast<int>(mb::LevelOutcome::GameOver);
+            std::this_thread::sleep_for(500ms);
+            typeText("Gregory");
+            std::this_thread::sleep_for(100ms);
+            key(SDLK_RETURN);
+            scoreSaved = waitFor(
+                [&] { return mb::readTextFile(userData.path / "highscores.json").value_or("").find("Gregory") != std::string::npos; }, 3000ms);
+            std::this_thread::sleep_for(300ms);
             key(SDLK_ESCAPE);
             std::this_thread::sleep_for(500ms);
             click(exit);
@@ -325,12 +367,22 @@ int main() {
         check(result == 0, "runFrontEnd returns 0");
         {
             std::lock_guard lock(session.mutex);
-            check(session.started == "knight-miss-1457", "the level started was knight-miss-1457, the eighth of the knights (button 70), not " + session.started);
+            check(session.started == std::vector<std::string>({first, second}) && first == "knight-miss-1457",
+                  "the levels built were knight-miss-1457, the eighth of the knights (button 70), and the one after it in the campaign");
+            check(session.startedWith.size() == 2 && session.startedWith[0].lives == 2 && session.startedWith[0].score == 0 &&
+                      session.startedWith[0].level == 71,
+                  "the first level starts with the hearts of a new game and no points");
+            check(session.startedWith.size() == 2 && session.startedWith[1].lives == 1 && session.startedWith[1].score >= 10 &&
+                      session.startedWith[1].score % 10 == 0 && session.startedWith[1].level == 72,
+                  "the next starts with the hearts and the points the first ended with, and its own number");
         }
-        check(session.starts == 1, "the level was built exactly once");
+        check(progressSaved, "the finished level was written to the progress file");
+        check(scoreSaved, "and the lost game's name entry to the high scores");
+        check(session.cursorHiddenWhilePlaying && cursorShownWhilePaused && SDL_CursorVisible(),
+              "the system cursor is hidden while a level plays and back for the pause and the menus");
         check(updatesAtPause >= 0 && updatesWhilePaused == updatesAtPause, "the level stops updating while paused");
         check(updatesResumed > updatesWhilePaused, "any key resumes it");
-        check(session.renders > 10 && session.overlaySprites > 20, "the level was drawn with the HUD (three hearts and two lines of text) over it");
+        check(session.renders > 10 && session.overlaySprites > 12, "the level was drawn with the HUD (a heart and two lines of text) over it");
 
         // Sound.
         check(hoverSounds > 0 && downSounds > 0, "the menu sounds were asked for through the hook");
@@ -340,14 +392,13 @@ int main() {
         check(mixer.musicVolume() == 0.35f && mixer.sfxVolume() == 0.6f, "and stays there");
         const std::vector<std::string> expected = {
             "menu music=menu paused=0",
-            "level knight-miss-1457 music=knights",
+            "level " + first + " music=knights",
             "pause 1 mixer paused=1",
             "pause 0 mixer paused=0",
-            "pause 1 mixer paused=1",
-            "pause 0 mixer paused=0",
+            "level " + second + " music=knights",
             "menu music=menu paused=0",
         };
-        check(events == expected, "the menu music, the level's music, the pause and its end, and the menu music again, in that order");
+        check(events == expected, "the menu music, the level's music, the pause and its end, the next level's music and the menu music again, in that order");
         if (events != expected) {
             for (const std::string& e : events) {
                 std::fprintf(stderr, "  event: %s\n", e.c_str());
@@ -362,7 +413,11 @@ int main() {
         check(kept.settings.musicVolume == 0.35f && kept.settings.soundVolume == 0.6f && kept.settings.smartCamera && kept.settings.bat == 1,
               "the files have the volume, the check box and the bat that were set");
         check(kept.settings.windowWidth == 900 && kept.settings.windowHeight == 700, "and the window size the player left");
-        check(!fs::exists(userData.path / "highscores.json") && !fs::exists(userData.path / "progress.json"), "and nothing else was written");
+        const std::string table = mb::readTextFile(userData.path / "highscores.json").value_or("");
+        check(table.find("Gregory") != std::string::npos && table.find(second) != std::string::npos,
+              "and the high score has the name typed and the level the game was lost on");
+        check(kept.progress.isCompleted("knights", first) && kept.progress.unlockedLevels("knights") == 9,
+              "and the progress the finished level, with the next of the knights open");
     } catch (const std::exception& e) {
         std::fprintf(stderr, "FAIL: exception: %s\n", e.what());
         return 1;

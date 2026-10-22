@@ -202,6 +202,13 @@ void Window::setTitle(const std::string& title) {
     SDL_SetWindowTitle(window_, title.c_str());
 }
 
+void Window::setCursorHidden(bool hidden) {
+    if (hidden ? !SDL_HideCursor() : !SDL_ShowCursor()) {
+        logWarn("cannot {} the cursor: {}", hidden ? "hide" : "show", SDL_GetError());
+    }
+    SDL_SetWindowMouseGrab(window_, hidden);
+}
+
 void Window::setSize(int width, int height) {
     SDL_SetWindowSize(window_, width, height);
 }

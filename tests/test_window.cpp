@@ -177,6 +177,15 @@ void testCreation() {
     }
 }
 
+void testCursor() {
+    mb::Window window("test", 640, 480);
+    check(SDL_CursorVisible() && !SDL_GetWindowMouseGrab(window.handle()), "a new window has a cursor and does not hold it");
+    window.setCursorHidden(true);
+    check(!SDL_CursorVisible() && SDL_GetWindowMouseGrab(window.handle()), "playing hides the cursor and keeps it in the window");
+    window.setCursorHidden(false);
+    check(SDL_CursorVisible() && !SDL_GetWindowMouseGrab(window.handle()), "the menus have it back, free");
+}
+
 }  // namespace
 
 int main() {
@@ -188,6 +197,7 @@ int main() {
         testWindowedSize();
         testResizeBeforeTheSwitchHasFinished();
         testCreation();
+        testCursor();
     } catch (const std::exception& e) {
         std::printf("SKIP: no window on the dummy video driver (%s)\n", e.what());
         return 77;

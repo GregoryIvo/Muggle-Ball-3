@@ -293,3 +293,47 @@ A second agent re-measured the most consequential claims from the same footage. 
 - Level flow: `...-t52-level1-fade-in-bat-flies-in.jpg`, `...-t145.5-149.5-level2-start-ball-waits-on-bat.jpg`, `...-t142.6-145.0-level-end-fade.jpg`, `...-t11060-11110-game-ending-after-level83.jpg`.
 - Prizes and HUD: the `...prize-captions...`, `...hud-*...`, `...magnet-hud-timer-30s.jpg`, `...laser-prize-score-plus360.jpg`, `...bonus-score-plus777.jpg`, `...earthquake-no-camera-shake.jpg`, `...wind-prize.jpg` frames.
 - Numbers: `measurements-ball-bat-tracking.txt` (speeds, launches, hit table, wall and far-wall points, lost-ball point, prize fall).
+
+## 12. As built in the game (step 4)
+
+What the game does with the notes above where they leave room. `[I]` is a choice made from the footage rather than a measurement; the
+numbers are the constants of `GameplayRules` (the rules) and of `PlayScene` and `PlaySession` (the picture).
+
+**The life cycle on screen.**
+- A level comes up out of the dark in 0.6 s and the bat swoops in over 0.7 s from beyond the lower left, hopping and spinning once and a
+  half, to land under the cursor; the held ball grows on it as it lands (V1 52.2-52.9, 7876.50-7876.73) [I].
+- A ball that is lost carries on along its path and shrinks away in 0.25 s ("Corrections") [M]. 0.6 s later the bat flies off for 0.4 s
+  towards the corner on its side of the board, spinning and getting smaller (it left to the right from the right edge at 7874.5, and to the
+  lower left from the left at 8537.0) [M for the side, I for the path]; the heart is spent and the new bat swoops in as before (0.53 s).
+- When the last target is gone, or the game is lost, the picture holds for 0.3 s, fades to black in 0.8 s with the HUD left in sight, and
+  the next level (or the end of the game) follows at once: no tally and no Loading form (V1 144.4-145.5) [M, I for the times].
+
+**Bricks and the ball.**
+- A brick that is hit shows the texture of its damage state (`damageTextureIndex`): a crate (Box.jpg) goes from whole to cracked, smashed and
+  black as its energy falls from 4 to 1 [D]; one that explodes is gone at that moment, with an orange flash (`Oreols/02.png`, 0.4 s, swelling and
+  fading) and twelve sparks thrown up and out [I: the footage's flash is orange and short, V1 54.40; which particle file an `exploseType` would
+  pick is not known, so every brick has this one].
+- The ball rolls, turned about the horizontal axis across its path by the distance over its radius, and has a soft blob of shadow on the floor
+  [I; the footage has a "soft shadow" under it, section 2].
+- The sounds are in `AUDIO.md`; `ballHitBat`, `bat_dead` and `endlevel` are names in `sounds.xml` that no material uses, so which event plays them is
+  inferred.
+
+**A level that cannot be finished.** Whichever of H-dyn and H-type ends the level (the choice is still open), a target that nothing can touch would
+make the level impossible. Two things are done about it, both in `GameSession` (`SessionOptions::ignoreUnreachable`, `GameplayRules::stallSeconds`):
+- A target the ball cannot get at is not one (`BallReach`): the plane the ball moves on is flood-filled from the bat's end of the board around the
+  walls, platforms and pinned buildings, a ball's radius from each; a target at the ball's height with no such ground near it (beyond a wall or the
+  board's edge, in a slot narrower than the ball) is out, and so is one above the ball that is pinned, on a path, has no gravity or has no such
+  ground under it (on a platform or a wall top). The look is made at the start and twice a second for the loose ones. In the real levels it finds 135
+  targets in 38 of the 83 (15 in knight-castle, 11 in knight-river, 10 in knight-nazad-k-mame, the others by ones and twos).
+- When balls have been in flight for 90 s without touching a brick and at most 12 targets (or a quarter of those the level began with) are left,
+  they are let go. This is for what the look cannot see: a mast held in the air by joints with nothing left to hold them, a cactus that settled
+  10 cm above the ball's reach, a bird that hangs where the physics left it [?]. It is generous (a player could stall a level out), but only with
+  few targets left and after a minute and a half.
+
+How many levels the autopilot finishes in 900 s of play (`mb_gameplay_smoke --seconds 900 --rule type|dyn`; it launches at once and keeps the
+bat under the ball with no aim, and aiming at the nearest brick or among the four nearest cleared about the same number): **66 of 83 under
+H-type and 63 under H-dyn**, the median level in 7 minutes. 12 and 15 of those ended by the second rule, the rest by destroying every target.
+Without either rule (`--strict`) it finishes 57 and 55, and the six that stood still (the 1 to 6 targets that nothing could touch: a mast, a cactus,
+a bird, two cauldrons) would never end. The 17 (H-type) and 20 (H-dyn) levels it does not finish, mostly knights' and village levels, are slow, not
+stuck: each was still destroying bricks in the last 40 s of the run (but village-tennis under H-dyn, with one target left for 80 s), and most have
+100 to 300 targets. A person with the prizes will be faster.

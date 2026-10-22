@@ -1,4 +1,4 @@
-add_executable(MuggleBall3 main.cpp FormViewer.cpp FrontEnd.cpp FrontEndAudio.cpp GameAudio.cpp)
+add_executable(MuggleBall3 main.cpp FormViewer.cpp FrontEnd.cpp FrontEndAudio.cpp GameAudio.cpp PlayerInput.cpp PlaySession.cpp)
 target_link_libraries(MuggleBall3 PRIVATE mb_engine mb_game)
 
 if(APPLE)

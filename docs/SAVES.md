@@ -69,9 +69,11 @@ are mine, not the original's; they are `Settings`' and the menus show no others.
 The menus name a stage by its `Stage::name` in the campaign (`Data/xml/levels.json`), in lower case: `pirates`, `village`,
 `cowboys`, `knights`. The campaign numbers its 83 levels 0 to 82 across the stages; `unlockedLevels` counts within
 a stage, so level `i` of the campaign, number `i - Stage::first` in its stage, can be started when that is below
-`unlockedLevels`. The first level of every stage is always open, so every stage can be entered from the start. Nothing
-in the game finishes a level yet, so the app tells the stage screens not to lock anything
-(`Menu::setLevelsLocked(false)` in `runGame`); the day `recordCompletion` is called, that line goes and the locks work.
+`unlockedLevels`. The first level of every stage is always open, so every stage can be entered from the start. A level
+is finished when its last target is gone (`GAMEPLAY.md`): `GameFlow` then calls `recordCompletion` and writes the file, which
+opens the next level of the stage, and the stage screens lock the levels that are not open yet (`Menu::setLevelsLocked`,
+on). `bestScores` are the points made on the level itself (what the HUD gained from the level's start to its end, not the
+total the game was carrying), kept when it is finished and, as `recordScore`, when the game was lost on it.
 
 `highscores.json`
 
@@ -116,7 +118,8 @@ The game (`runGame` in `app/main.cpp`) loads one `SaveData`, opens the window at
 hands it to the front end, whose `Menu` shows it and changes it: the Options form edits `settings` (the sliders,
 check boxes and video list), the stage screens read `progress` and `settings.bat`, the high-score form shows
 `highScores`. The `Menu` writes what it changed when the player leaves Options (settings), picks a bat (settings) and
-enters a score (high scores), and nothing else; the front end keeps `settings` in step with the window while the
+enters a score (high scores); `GameFlow` writes `progress` when a level ends, won or lost, and `PlaySession` reads
+`settings.bat` for the bat's colour whenever a level starts; the front end keeps `settings` in step with the window while the
 player resizes it or goes fullscreen (not while Options is up, which holds choices not applied yet), and
 `runGame`, like the level viewer's `runWindow`, saves the window state when the window closes. The form viewer
 (`--form`) gives the menus a `SaveData` with no folder instead, so it never touches the real files.

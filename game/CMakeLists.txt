@@ -8,10 +8,13 @@ add_library(mb_game
   src/SceneBuilder.cpp
   src/PhysicsPlan.cpp
   src/PhysicsScene.cpp
+  src/BallReach.cpp
   src/Gameplay.cpp
   src/Autopilot.cpp
   src/ModelCache.cpp
   src/LevelScene.cpp
+  src/PlayScene.cpp
+  src/PlaySounds.cpp
   src/LevelCatalog.cpp
   src/GameCamera.cpp
   src/UiLayout.cpp

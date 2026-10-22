@@ -4,6 +4,7 @@
 
 #include "mb/game/Campaign.h"
 #include "mb/game/GameFlow.h"
+#include "mb/game/Gameplay.h"
 #include "mb/game/Menu.h"
 #include "mb/game/SaveData.h"
 #include "mb/game/StringTable.h"
@@ -841,7 +842,7 @@ void testLoadingAndFades() {
 void testFlow() {
     Harness h;
     const Campaign levels = campaign();
-    GameFlow flow(h.menu, levels);
+    GameFlow flow(h.menu, levels, h.save);
     const auto step = [&](const UiInput& in = {}, double seconds = 0.016) { return flow.update(in, seconds, h.layout, h.sizes); };
     const auto clickNamed = [&](const char* name) {
         UiInput in;
@@ -858,6 +859,9 @@ void testFlow() {
     clickNamed("SelectStage");
     clickNamed("StagePiratos");
     check(flow.mode() == GameFlow::Mode::Menu && h.menu.formName() == "stagepiratos", "flow: menus lead to a stage");
+    flow.hud().score = 99;  // leftovers of a previous game must not survive
+    flow.hud().lives = 7;
+    flow.hud().powerUps = {"Gun"};
     GameFlow::Step s = clickNamed("1");
     check(flow.mode() == GameFlow::Mode::Loading && h.menu.formName() == "loading" && !s.loadLevel && !s.quit,
           "flow: choosing a level shows Loading, and waits a frame so that it is drawn before the build");
@@ -866,10 +870,9 @@ void testFlow() {
     check(s.loadLevel && *s.loadLevel == 1 && flow.mode() == GameFlow::Mode::Loading, "flow: the next frame asks the app to build level 1");
     s = step();
     check(!s.loadLevel && flow.mode() == GameFlow::Mode::Loading, "flow: ... only once");
-    flow.hud().score = 99;  // leftovers of a previous game must not survive
     flow.loaded(true);
-    check(flow.hud().lives == 3 && flow.hud().score == 0 && flow.hud().level == 2 && flow.hud().powerUps.empty(),
-          "flow: the HUD gets its placeholders: three lives, no points, the level's number counting from 1");
+    check(flow.hud().lives == GameplayRules{}.startHearts && flow.hud().score == 0 && flow.hud().level == 2 && flow.hud().powerUps.empty(),
+          "flow: a new game's HUD has its hearts, no points and the level's number counting from 1");
     check(near(h.widget("Progress").value, 10), "flow: the loading bar is full when the level is ready");
     step();
     check(flow.mode() == GameFlow::Mode::Loading || flow.mode() == GameFlow::Mode::Playing, "flow: on to play");
@@ -928,6 +931,103 @@ void testFlow() {
     check(clickNamed("Exit").quit, "flow: the Exit button quits");
 }
 
+// How a level ends: won (progress saved, the next level at once, hearts and points carried on), lost (Game Over or the
+// name entry, then the scores), or the last level won (the ending).
+void testFlowLevelEnd() {
+    const Campaign levels = campaign();
+    const auto start = [&](Harness& h, GameFlow& flow, int level) {
+        flow.startGame(level);
+        flow.update({}, 0.016, h.layout, h.sizes);  // asks for the build
+        flow.loaded(true);
+        flow.update({}, 0.016, h.layout, h.sizes);
+        flow.update({}, 0.5, h.layout, h.sizes);
+        check(flow.mode() == GameFlow::Mode::Playing && flow.level() == level, "end: a game is playing");
+    };
+
+    Harness h;
+    GameFlow flow(h.menu, levels, h.save);
+    start(h, flow, 1);
+    check(flow.hud().lives == GameplayRules{}.startHearts && flow.hud().score == 0 && flow.hud().level == 2, "end: a game starts with its hearts and no points");
+    check(!flow.levelEnded(LevelOutcome::Playing).loadLevel && flow.mode() == GameFlow::Mode::Playing, "end: a level still playing changes nothing");
+
+    flow.hud().lives = 1;
+    flow.hud().score = 500;
+    flow.hud().powerUps = {"Gun"};
+    GameFlow::Step next = flow.levelEnded(LevelOutcome::Complete);
+    check(next.loadLevel && *next.loadLevel == 2 && flow.level() == 2 && flow.mode() == GameFlow::Mode::Playing,
+          "end: a level that is won leads straight to the next of the campaign, with no Loading form");
+    check(flow.hud().lives == 1 && flow.hud().score == 500 && flow.hud().level == 3 && flow.hud().powerUps.empty(),
+          "end: the hearts and the points go on with the player, the bonuses do not, the number is the next level's");
+    SaveData stored = h.reloaded();
+    check(stored.progress.isCompleted("pirates", "piratos-b") && stored.progress.unlockedLevels("pirates") == 3 &&
+              stored.progress.bestScore("piratos-b") == 500,
+          "end: the finished level is saved, the next one is open, and the points made on it are its best");
+    flow.loaded(true);
+    check(flow.mode() == GameFlow::Mode::Playing && h.menu.formName() == "loading", "end: the build of the next level changes nothing on screen");
+    check(!flow.levelEnded(LevelOutcome::Playing).loadLevel, "end: and the level is playing");
+
+    // The next level is in another stage; what was made on it is what counts for its best score.
+    flow.hud().score = 800;
+    next = flow.levelEnded(LevelOutcome::Complete);
+    check(next.loadLevel && *next.loadLevel == 3 && flow.hud().level == 4 && flow.hud().score == 800, "end: and on into the next stage");
+    flow.loaded(true);
+    stored = h.reloaded();
+    check(stored.progress.isCompleted("pirates", "Piratos-C") && stored.progress.bestScore("piratos-c") == 300 &&
+              stored.progress.unlockedLevels("village") == 1,
+          "end: the points of a level are those made in it, not the total");
+
+    // The last level won: the story, and then the score.
+    flow.hud().score = 1000;
+    next = flow.levelEnded(LevelOutcome::Complete);
+    check(next.loadLevel && *next.loadLevel == 4, "end: the last level is asked for");
+    flow.loaded(true);
+    flow.hud().score = 2500;
+    next = flow.levelEnded(LevelOutcome::Complete);
+    check(!next.loadLevel && flow.mode() == GameFlow::Mode::Menu && h.menu.formName() == "endgame", "end: after the last level the ending is shown");
+    h.click("GameOver");
+    check(h.menu.formName() == "entername" && h.widget("Score").text == "2500", "end: and its last button leads to the name entry with the score");
+    check(h.reloaded().progress.isCompleted("village", "village-e"), "end: the last level is saved as finished");
+
+    // A game that is lost.
+    Harness g;
+    GameFlow lost(g.menu, levels, g.save);
+    start(g, lost, 2);
+    lost.hud().lives = 0;
+    lost.hud().score = 4200;
+    next = lost.levelEnded(LevelOutcome::GameOver);
+    check(!next.loadLevel && lost.mode() == GameFlow::Mode::Menu && g.menu.formName() == "entername" && g.widget("Score").text == "4200",
+          "end: a lost game with a score for the table goes to the name entry");
+    typeInto(g, "Gregory");
+    g.click("ApplyRecord");
+    check(g.menu.formName() == "highscores", "end: the name entered leads to the high scores");
+    const SaveData scores = g.reloaded();
+    check(scores.highScores.entries.size() == 1 && scores.highScores.entries[0].name == "Gregory" && scores.highScores.entries[0].score == 4200 &&
+              scores.highScores.entries[0].level == "Piratos-C",
+          "end: the entry, with the level the game was lost on, is saved");
+    check(!scores.progress.isCompleted("pirates", "Piratos-C") && scores.progress.bestScore("piratos-c") == 4200,
+          "end: a level that was lost is not finished, but keeps its best score");
+
+    Harness z;
+    GameFlow nothing(z.menu, levels, z.save);
+    start(z, nothing, 0);
+    nothing.levelEnded(LevelOutcome::GameOver);
+    check(z.menu.formName() == "gameover", "end: a lost game with no points goes to Game Over");
+
+    // The menus do not end a level.
+    Harness m;
+    GameFlow idle(m.menu, levels, m.save);
+    check(!idle.levelEnded(LevelOutcome::Complete).loadLevel && idle.mode() == GameFlow::Mode::Menu && !m.wrote("progress.json"),
+          "end: nothing happens when no level is playing");
+
+    // The next level cannot be built: back to its stage.
+    Harness f;
+    GameFlow failing(f.menu, levels, f.save);
+    start(f, failing, 1);
+    next = failing.levelEnded(LevelOutcome::Complete);
+    failing.loaded(false);
+    check(failing.mode() == GameFlow::Mode::Menu && f.menu.formName() == "stagepiratos", "end: a next level that fails to build returns to its stage's form");
+}
+
 }  // namespace
 
 int main() {
@@ -945,6 +1045,7 @@ int main() {
     testNameEntry();
     testLoadingAndFades();
     testFlow();
+    testFlowLevelEnd();
     if (failures == 0) {
         std::puts("all menu tests passed");
     }

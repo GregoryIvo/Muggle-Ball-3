@@ -865,6 +865,162 @@ void testLevelEndRules() {
     check(forced.count(EventType::LevelComplete) == 1, "end: once");
 }
 
+// A target the ball cannot get at does not count, so that a level cannot be one that never ends.
+void testUnreachableTargets() {
+    const auto steel = [](Vec3 at, Vec3 half) { return brick(at, "Steel.jpg", kStatic, half); };
+    const auto level = [&] {
+        return levelOf({
+            board(),
+            brick({0, 1, 12}, "Shark.jpg"),                  // 1: in the open
+            brick({27, 1, 5}, "Shark.jpg"),                  // 2: beyond a side wall
+            brick({0, 1, 27}, "Shark.jpg"),                  // 3: beyond the far wall
+            brick({-10, 8, 5}, "Shark.jpg", kStatic),        // 4: pinned in mid-air, out of the ball's height
+            steel({10, 2, 10}, {3, 2, 3}),                   // 5: a platform (top at y = 4) of something no ball breaks
+            brick({10, 5.5f, 10}, "Shark.jpg"),              // 6: standing on it
+            brick({-10, 1, 15}, "Crate.jpg"),                // 7: a crate
+            brick({-10, 3.5f, 15}, "Shark.jpg"),             // 8: with a shark on it, which falls if the crate goes
+            steel({-17.5f, 1, 9}, {1, 1, 3}),                // 9, 10: a slot 1 wide, open to the front, that the ball
+            steel({-15.5f, 1, 9}, {1, 1, 3}),                //     cannot enter ...
+            brick({-16.5f, 1, 11.5f}, "Shark.jpg", kDynamic, {0.4f, 0.4f, 0.4f}, 5),  // 11: ... with a shark at the back
+        });
+    };
+    constexpr int kInTheOpen = 1, kBeyondSide = 2, kBeyondFar = 3, kPinned = 4, kOnPlatform = 6, kOnCrate = 8, kInSlot = 11;
+
+    Game g(level(), options(TargetRule::BrickType));
+    check(g.session.targetsLeft(TargetRule::BrickType) == 2 && g.session.stats().targetsOutOfPlay == 5,
+          "reach: of the seven sharks the two the ball can get at count, five are out of play");
+    check(g.session.isTarget(kInTheOpen, TargetRule::BrickType) && g.session.isTarget(kOnCrate, TargetRule::BrickType),
+          "reach: one in the open, and one that stands on a crate, which falls if the crate is broken");
+    for (const int out : {kBeyondSide, kBeyondFar, kPinned, kOnPlatform, kInSlot}) {
+        const ActorStatus status = g.session.actor(static_cast<ActorIndex>(out));
+        check(status.outOfPlay && !status.target && !g.session.isTarget(static_cast<ActorIndex>(out), TargetRule::BrickType) &&
+                  g.session.isTarget(static_cast<ActorIndex>(out), TargetRule::DynamicBricks) == false,
+              "reach: actor " + std::to_string(out) + " is out of play and no target");
+    }
+    check(g.session.targetsLeft(TargetRule::DynamicBricks) == 3, "reach: the other rule drops them too (the sharks, and the crate that holds one)");
+
+    // The level ends with the two that can be reached; the others stand.
+    g.session.hit(kInTheOpen, {});
+    g.session.hit(kOnCrate, {});
+    g.run(0.8);
+    check(g.count(EventType::LevelComplete) == 1 && !g.session.actor(kOnPlatform).removed,
+          "reach: the level is done when what can be reached is gone, with the shark on the platform still standing");
+
+    // Switched off, every target counts.
+    SessionOptions all = options(TargetRule::BrickType);
+    all.ignoreUnreachable = false;
+    Game strict(level(), all);
+    check(strict.session.targetsLeft(TargetRule::BrickType) == 7 && strict.session.stats().targetsOutOfPlay == 0 &&
+              !strict.session.actor(kBeyondSide).outOfPlay,
+          "reach: with ignoreUnreachable off all seven count");
+
+    // A loose target that leaves the board later is let go at the next look: thrown over the side wall.
+    Actor flung = brick({18, 6, 10}, "Shark.jpg");
+    flung.body->linearVelocity = {5, 7, 0};
+    SessionOptions moving = options(TargetRule::BrickType);
+    moving.physics.start = StartState::SavedVelocities;
+    Game thrown(levelOf({board(), flung}), moving);
+    check(thrown.session.targetsLeft(TargetRule::BrickType) == 1, "reach: a shark above the board counts");
+    thrown.run(3);
+    check(thrown.where(1).x > 22.5f && thrown.session.targetsLeft(TargetRule::BrickType) == 0 &&
+              thrown.session.actor(1).outOfPlay && thrown.count(EventType::LevelComplete) == 1,
+          "reach: one thrown beyond the wall is out of play at the next look, and the level ends");
+}
+
+// Targets nothing can touch that the look at the level did not find: the level stood still, so they are let go.
+void testStalledLevel() {
+    const auto pinned = [](float x) { return brick({x, 8, 10}, "Shark.jpg", kStatic); };  // above the ball for good
+    SessionOptions blind = options(TargetRule::BrickType);
+    blind.ignoreUnreachable = false;
+
+    // One target left, out of reach: the ball flies for 90 s without touching a brick and the level ends.
+    {
+        Game g(levelOf({board(), pinned(0)}), blind);
+        const PlayResult played = autoplay(g.session, 200);
+        const double stalled = g.session.rules().stallSeconds;
+        check(g.session.phase() == SessionPhase::Complete && g.session.stats().targetsLetGo == 1 &&
+                  g.session.targetsLeft(TargetRule::BrickType) == 0,
+              "stall: a level with a target nothing can touch is complete, and the target is let go");
+        check(played.seconds > stalled && played.seconds < stalled + 5, "stall: after ninety seconds of play (and the swoop of the bat)");
+        check(!g.session.actor(1).removed && g.session.actor(1).outOfPlay, "stall: it stays on the board");
+    }
+
+    // A brick that is hit starts the time again.
+    {
+        Game g(levelOf({board(), brick({-8, 1, 10}, "Shark.jpg"), pinned(5)}), blind);
+        const PlayResult played = autoplay(g.session, 300);
+        double lastTouched = 0;
+        for (const GameEvent& event : played.events) {
+            if (event.type == EventType::BrickHit || event.type == EventType::BrickDestroyed) {
+                lastTouched = event.time;
+            }
+        }
+        check(g.session.phase() == SessionPhase::Complete && g.session.stats().targetsLetGo == 1 && lastTouched > 1 &&
+                  played.seconds > lastTouched + g.session.rules().stallSeconds - 1,
+              "stall: ninety seconds after the last brick that was touched, not after the start");
+    }
+
+    // Many targets left: the level is not over however long it takes.
+    {
+        std::vector<Actor> actors = {board()};
+        for (int i = 0; i < 20; ++i) {
+            actors.push_back(pinned(static_cast<float>(i - 10)));
+        }
+        Game g(levelOf(std::move(actors)), blind);
+        autoplay(g.session, 150);
+        check(g.session.phase() != SessionPhase::Complete && g.session.stats().targetsLetGo == 0,
+              "stall: too many targets left for it to be a stray one: the level goes on");
+    }
+
+    // Nothing to let go under Never.
+    {
+        SessionOptions never = options(TargetRule::Never);
+        Game g(levelOf({board(), pinned(0)}), never);
+        autoplay(g.session, 150);
+        check(g.session.phase() != SessionPhase::Complete, "stall: a level that never ends does not end");
+    }
+
+    // A body that floats (no gravity) above the ball is out of play at once, with the look on.
+    {
+        Actor bird = brick({0, 5, 10}, "Shark.jpg");
+        bird.body->flags = kDynamic | Body::kDisableGravity;
+        Game g(levelOf({board(), bird}), options(TargetRule::BrickType));
+        check(g.session.targetsLeft(TargetRule::BrickType) == 0 && g.session.actor(1).outOfPlay,
+              "reach: a bird that hangs in the air above the ball is no target");
+    }
+}
+
+// The ground of the ball's plane: the board's inside, around what stands in it.
+void testBallReach() {
+    const Level level = levelOf({board(), brick({10, 2, 10}, "Steel.jpg", kStatic, {3, 2, 3}),
+                                 brick({-17.5f, 1, 9}, "Steel.jpg", kStatic, {1, 1, 3}),
+                                 brick({-15.5f, 1, 9}, "Steel.jpg", kStatic, {1, 1, 3}),
+                                 brick({0, 8, 10}, "Steel.jpg", kStatic)});  // out of the ball's height: no obstacle
+    const PhysicsPlan plan = planPhysics(level, materials());
+    const BallReach reach(plan, [&](ActorIndex actor) { return plan.actors[actor].motion == MotionType::Static; },
+                          {0, 0.6f, -17.3f}, {});
+    check(reach.contains(0, -17.3f) && reach.contains(0, 10) && reach.contains(-19.5f, 21.5f), "reach: the board's floor is ground, to a ball's radius from the walls");
+    check(!reach.contains(-20.0f, 10) && !reach.contains(20.0f, 10) && !reach.contains(0, 22.5f),
+          "reach: not within a ball's radius of a wall (the inner faces are at 20.4 and 22.6)");
+    check(!reach.contains(25, 5) && !reach.contains(0, 28) && !reach.contains(-30, 0), "reach: nor beyond the walls");
+    check(!reach.contains(10, 10) && !reach.contains(12.5f, 12.5f) && reach.contains(14.0f, 10),
+          "reach: not on the platform, nor within a radius of it, and open ground beyond that");
+    check(reach.contains(0, 8) && reach.contains(0, 10), "reach: what is over the ball's height blocks nothing");
+    check(!reach.contains(-16.5f, 11.5f) && !reach.contains(-16.5f, 6) && reach.contains(-16.5f, 3),
+          "reach: a slot 1 wide between two blocks is not ground, a ball does not fit");
+    check(reach.touches(-3, 5, 3, 6) && !reach.touches(24, 5, 30, 8) && reach.touches(19, 5, 30, 8) &&
+              !reach.touches(10.5f, 10.5f, 11, 11),
+          "reach: a rectangle touches it where any ground is in it");
+    check(reach.groundCells() > 0 && reach.groundCells() < reach.cells(), "reach: and the ground is part of the plane");
+
+    // Where the ball begins is blocked: the nearest open ground is the start.
+    const Level walled = levelOf({board(), brick({0, 1, -17.3f}, "Steel.jpg", kStatic, {2, 1, 2})});
+    const PhysicsPlan walledPlan = planPhysics(walled, materials());
+    const BallReach nearest(walledPlan, [&](ActorIndex actor) { return walledPlan.actors[actor].motion == MotionType::Static; },
+                            {0, 0.6f, -17.3f}, {});
+    check(nearest.contains(0, -13) && !nearest.contains(0, -17.3f), "reach: a start inside a block is moved to the nearest open ground");
+}
+
 void testHitOnOthers() {
     Game g(levelOf({board(), brick({0, 1, 10}, "Steel.jpg"), brick({4, 1, 10}, "Tough.jpg")}));
     check(!g.session.hit(1, {}) && !g.session.hit(0, {}) && !g.session.hit(99, {}), "hit: steel, the board and nothing cannot be hit");
@@ -1217,6 +1373,9 @@ int main() {
     testRollingIsNoHit();
     testCompoundBrickHitOnce();
     testLevelEndRules();
+    testUnreachableTargets();
+    testStalledLevel();
+    testBallReach();
     testHitOnOthers();
     testRemovedBrickLetsGoOfWhatItHeld();
     testFallenActors();

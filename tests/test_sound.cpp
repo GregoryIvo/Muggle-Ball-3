@@ -2,6 +2,7 @@
 // looping sounds, material helpers and music selection. The audio engine is replaced by a recorder,
 // so no audio device and no game data are needed.
 
+#include "mb/game/PlaySounds.h"
 #include "mb/game/SoundLibrary.h"
 
 #include <SDL3/SDL.h>
@@ -316,6 +317,72 @@ void testLoopsAndMaterials() {
     check(library.startLoop(material) != 0 && audio.sounds.back().params.loop, "its loop sound");
 }
 
+// The sounds of a game's events.
+void testPlaySounds() {
+    constexpr const char* soundsJson = R"({"version": 1, "sounds": [
+      {"name": "ballHitBat", "samples": [{"file": "hitbat.ogg"}]},
+      {"name": "ballHitBoard", "samples": [{"file": "board.ogg"}]},
+      {"name": "ballHitBall", "samples": [{"file": "balls.ogg"}]},
+      {"name": "bat_dead", "samples": [{"file": "batdead.ogg"}]},
+      {"name": "endlevel", "samples": [{"file": "end.ogg"}]},
+      {"name": "box_hit", "samples": [{"file": "boxhit.ogg"}]},
+      {"name": "box_dead", "samples": [{"file": "boxdead.ogg"}]}]})";
+    RecordingAudio audio;
+    SoundLibrary library(audio, SoundCatalog::parse(soundsJson, kMusicsJson, kSounds, kMusics), 3);
+    PlaySounds sounds(library);
+    GameMaterial box;
+    box.hitSound = "box_hit";
+    box.deadSound = "box_dead";
+    GameMaterial silent;  // names no sounds
+
+    const auto play = [&](EventType type, float x = 0, const GameMaterial* material = nullptr, int points = 0) {
+        audio.sounds.clear();
+        GameEvent event;
+        event.type = type;
+        event.position = {x, 0.6f, 5};
+        event.material = material;
+        event.points = points;
+        sounds.play(event);
+    };
+    const auto heard = [&]() { return audio.sounds.size() == 1 ? audio.sounds[0].file.filename().string() : std::string("-"); };
+
+    play(EventType::BatHit);
+    check(heard() == "hitbat.ogg", "the ball is hit by the bat");
+    play(EventType::BallLaunched);
+    check(heard() == "hitbat.ogg", "and launched by it, which is its hit");
+    play(EventType::BoardHit);
+    check(heard() == "board.ogg", "the ball meets a wall");
+    play(EventType::BallsHit);
+    check(heard() == "balls.ogg", "two balls meet");
+    play(EventType::BrickHit, 0, &box);
+    check(heard() == "boxhit.ogg", "a brick that is hit makes its material's hit sound");
+    play(EventType::BrickDestroyed, 0, &box, 30);
+    check(heard() == "boxdead.ogg", "one that is destroyed, its dead sound");
+    play(EventType::ActorFell, 0, &box, 30);
+    check(heard() == "boxdead.ogg", "so is one that fell off the board and was worth points");
+    play(EventType::ActorFell, 0, &box, 0);
+    check(audio.sounds.empty(), "but a piece worth none is not a brick and is silent");
+    play(EventType::BrickHit, 0, &silent);
+    check(audio.sounds.empty(), "a material with no sound makes none");
+    play(EventType::BrickHit);
+    check(audio.sounds.empty(), "nor does a hit that names no material");
+    play(EventType::BatLeft);
+    check(heard() == "batdead.ogg", "the bat flies off after the last ball");
+    play(EventType::LevelComplete);
+    check(heard() == "end.ogg", "the level is won");
+    for (const EventType quiet : {EventType::BallLost, EventType::BallFreed, EventType::LifeLost, EventType::BatEntered, EventType::GameOver}) {
+        play(quiet);
+        check(audio.sounds.empty(), "these events make no sound");
+    }
+
+    play(EventType::BoardHit, -20);
+    check(audio.sounds.size() == 1 && audio.sounds[0].params.pan == -1, "a sound on the left wall is all left");
+    play(EventType::BoardHit, 40);
+    check(audio.sounds[0].params.pan == 1, "and the pan stays within -1 and 1");
+    play(EventType::BoardHit, 10);
+    check(std::fabs(audio.sounds[0].params.pan - 0.5f) < 1e-6f, "half way along the board is half way over");
+}
+
 void testMusic() {
     check(SoundLibrary::musicForLevel("piratos-ostrovok") == "Pirates", "piratos");
     check(SoundLibrary::musicForLevel("Piratos-Chyu-u-dishe") == "Pirates", "...in any case");
@@ -355,6 +422,7 @@ int main() {
     testReplayDelay();
     testPeriodic();
     testLoopsAndMaterials();
+    testPlaySounds();
     testMusic();
     if (failures == 0) {
         std::puts("sound tests passed");

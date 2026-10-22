@@ -45,4 +45,17 @@ TextureHandle ModelCache::texture(const std::filesystem::path& file) {
     return handle;
 }
 
+MeshHandle ModelCache::quad() {
+    if (quad_ == 0) {
+        const Vec3 facing{0, 0, -1};
+        const Vertex corners[4] = {{{-0.5f, 0.5f, 0}, facing, {0, 0}},
+                                   {{0.5f, 0.5f, 0}, facing, {1, 0}},
+                                   {{0.5f, -0.5f, 0}, facing, {1, 1}},
+                                   {{-0.5f, -0.5f, 0}, facing, {0, 1}}};
+        const std::uint32_t indices[6] = {0, 1, 2, 0, 2, 3};
+        quad_ = renderer_.createMesh(corners, indices);
+    }
+    return quad_;
+}
+
 }  // namespace mb

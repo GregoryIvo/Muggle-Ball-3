@@ -51,6 +51,10 @@ struct SceneDraw {
     // the frames of an animation, each shown for animTimeMs.
     std::vector<std::filesystem::path> textures;
     int animTimeMs = 0;
+    // The textures a brick shows as it is damaged, from the most damaged to the intact one (the material's textures: see
+    // damageTextureIndex() in Gameplay.h for which shows at what energy); an empty path where one was not found. Empty
+    // for a draw that has one texture throughout.
+    std::vector<std::filesystem::path> damageTextures;
 };
 
 // Where a primitive stands when its actor is at `actorPose`: its transform in the actor's frame (SceneDraw::local),

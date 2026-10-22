@@ -49,7 +49,7 @@ public:
           assets_(renderer, mb::assetRoot(), options.language),
           campaign_(mb::Campaign::load(assets_.root() / "Data" / "xml" / "levels.json")),
           menu_([this](std::string_view name) { return assets_.loadForm(name); }, campaign_, save, hooksFor(window, options.hooks)),
-          flow_(menu_, campaign_) {
+          flow_(menu_, campaign_, save) {
         menu_.setVideoModes(videoModes(window));
         menu_.setLevelsLocked(options.lockLevels);
         window.windowedSize(seenWidth_, seenHeight_);
@@ -57,7 +57,14 @@ public:
         if (options.hooks.settingsChanged) {
             options.hooks.settingsChanged(save.settings);  // whoever listens (the volume) starts from the saved settings
         }
-        menu_.open("MainMenu");
+        if (const std::optional<int> level = campaign_.indexOf(options.startLevel); level && !options.startLevel.empty()) {
+            flow_.startGame(*level);
+        } else {
+            if (!options.startLevel.empty()) {
+                mb::logError("the campaign has no level \"{}\"", options.startLevel);
+            }
+            menu_.open("MainMenu");
+        }
     }
 
     int run() {
@@ -94,7 +101,10 @@ public:
                 textInput = wantsText;
             }
             if (flow_.mode() == mb::GameFlow::Mode::Playing) {
-                session_.update(input, seconds, flow_.hud());
+                const mb::LevelOutcome outcome = session_.update(input, seconds, flow_.hud());
+                if (const mb::GameFlow::Step next = flow_.levelEnded(outcome); next.loadLevel) {
+                    loadLevel(*next.loadLevel);  // straight on: the fade out was the loading screen
+                }
             }
             draw(width, height);
             if (events_.frame) {
@@ -161,23 +171,31 @@ private:
         if (now == Mode::Menu && events_.menuShown) {
             events_.menuShown();
         }
+        window_.setCursorHidden(now == Mode::Playing);  // the pointer is the bat while a level plays
     }
 
     void loadLevel(int index) {
+        // After a level that was won the next comes at once, from the dark, with no Loading form.
+        const bool next = flow_.mode() == mb::GameFlow::Mode::Playing;
         const std::string* name = campaign_.levelName(index);
         bool ok = name != nullptr;
         if (ok) {
             mb::logInfo("starting level {}: {}", index + 1, *name);
             window_.setTitle("Muggle Ball 3 - " + *name);
-            ok = session_.start(*name, [this](float fraction) {
-                menu_.setProgress(fraction);
-                drawMenu();
+            ok = session_.start(*name, flow_.hud(), [this, next](float fraction) {
+                if (!next) {
+                    menu_.setProgress(fraction);
+                    drawMenu();
+                }
             });
         }
         if (!ok) {
             window_.setTitle("Muggle Ball 3");
         }
         flow_.loaded(ok);
+        if (ok && next && events_.levelStarted) {
+            events_.levelStarted(*name);  // the music of the world the level is in
+        }
     }
 
     void drawMenu() {

@@ -10,13 +10,14 @@
 
 #include <cstdint>
 #include <span>
+#include <unordered_map>
 #include <vector>
 
 namespace mb {
 
 // A level ready to draw: the draw items, the physics shape wireframes and the light. Textures animate
 // (update()) and whatever the physics can move follows it (follow(), followShapes()); the rest stands
-// as the level saved it.
+// as the level saved it. A game also takes bricks out of the picture (hide()) and shows them damaged (setDamage()).
 class LevelScene {
 public:
     // `physics` says which actors can move; it is not kept.
@@ -32,7 +33,20 @@ public:
     // The same for the shape wireframes (including the balls'), which only need it while they are shown.
     void followShapes(const PhysicsScene& physics);
 
+    // Takes an actor out of the picture for good: a brick that exploded, a piece that fell off the board.
+    void hide(ActorIndex actor);
+    // Shows an actor in its damage state `index` (damageTextureIndex() in Gameplay.h): each of its draws that has damage
+    // textures (SceneDraw::damageTextures) takes the one at that place. Other draws and states whose texture is
+    // missing stay as they are.
+    void setDamage(ActorIndex actor, int index);
+
+    // Every draw of the level as it stands, those of hidden actors included, then the test balls' after follow(): what
+    // the level viewer, which hides nothing, draws.
     std::span<const DrawItem> items() const { return items_; }
+    // Appends what is to be shown: the draws of the actors that are not hidden, then the test balls'.
+    void appendDrawn(std::vector<DrawItem>& out) const;
+    // The draws of one ball at the origin (the game's ball.x), for a game that places its own balls.
+    std::span<const DrawItem> ballItems() const { return ballItems_; }
     std::span<const DebugLine> shapeLines() const { return shapeLines_; }
     const DirectionalLight& light() const { return light_; }
     const SceneReport& report() const { return report_; }
@@ -62,6 +76,11 @@ private:
     std::vector<DebugLine> ballLines_;
     std::vector<Animation> animations_;
     std::vector<Follower> followers_;
+    // The level's draws by actor (a table of offsets into actorItems_), what a hidden actor does not show, and the
+    // textures of the damage states of the draws that have some.
+    std::vector<std::uint32_t> actorStart_, actorItems_;
+    std::vector<bool> hidden_;  // by item
+    std::unordered_map<std::size_t, std::vector<TextureHandle>> damage_;  // by item
     std::vector<MovingLines> movingLines_;
     DirectionalLight light_;
     SceneReport report_;
