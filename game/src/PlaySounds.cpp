@@ -59,7 +59,7 @@ void PlaySounds::play(const GameEvent& event) {
         case EventType::LevelComplete:
             sounds_.play("endlevel");
             break;
-        case EventType::Blast:  // (the charge makes its own sound as it is destroyed)
+        case EventType::DynamiteBlast:  // (the charge makes its own sound as it is destroyed)
         case EventType::ShotHit:
         case EventType::RocketLaunched:
         case EventType::BallLost:

@@ -3,6 +3,7 @@
 // vibros and flickers, run in a GameSession with the physics on the calling thread. Needs neither a GPU nor game data. The
 // same objects in the real levels: mb_special_object_smoke.
 
+#include "mb/game/Autopilot.h"
 #include "mb/game/Gameplay.h"
 
 #include <algorithm>
@@ -245,8 +246,8 @@ void testBlast(float radius) {
                     actor(ObjectType::Brick, {-3, 0.5f, 10}, kDynamic, 30, {box({0.5f, 0.5f, 0.5f})}, "Steel.jpg"),  // 5: loose
                     brick({0, 1, 17.5f}, "Shark.jpg", kStatic)}));                 // 6: out of reach of both
     g.shoot({0, 0.6f, 0}, {0, 0, 1});
-    check(g.runUntil([&] { return g.count(EventType::Blast) > 0; }, 2), name + " dynamite: a ball sets it off");
-    const std::optional<GameEvent> blast = g.first(EventType::Blast);
+    check(g.runUntil([&] { return g.count(EventType::DynamiteBlast) > 0; }, 2), name + " dynamite: a ball sets it off");
+    const std::optional<GameEvent> blast = g.first(EventType::DynamiteBlast);
     if (!blast) {
         return;
     }
@@ -284,7 +285,7 @@ void testChain() {
     Game g(levelOf(actors));
     g.shoot({-16, 0.6f, 0}, {0, 0, 1});
     g.run(2.0);
-    const auto blasts = g.all(EventType::Blast);
+    const auto blasts = g.all(EventType::DynamiteBlast);
     check(blasts.size() == 4, "chain: the four charges of the first group go off (" + std::to_string(blasts.size()) + ")");
     bool linked = blasts.size() == 4;
     for (std::size_t i = 1; i < blasts.size(); ++i) {
@@ -309,7 +310,7 @@ void testChain() {
     Game big(levelOf(crowd));
     big.shoot({-6, 0.6f, 0}, {0, 0, 1});
     big.run(3.0);
-    check(big.count(EventType::Blast) == 25 && big.count(EventType::BrickDestroyed) == 25 && big.session.score() == 25 * 120,
+    check(big.count(EventType::DynamiteBlast) == 25 && big.count(EventType::BrickDestroyed) == 25 && big.session.score() == 25 * 120,
           "chain: twenty-five charges in a block each go off once");
 }
 
@@ -355,6 +356,23 @@ void testHurtByBlastsOnly() {
     check(!b.session.actor(6).removed && !b.session.actor(7).removed && !b.session.actor(6).damageable,
           "blast: the portals 3.8 units away stand, as in V1 8192.8 (level 67)");
     check(b.session.hit(2, {}) == false, "blast: and the metal is gone, so a second hit on it does nothing");
+}
+
+// The ball does not hurt metal, so a ball that only bounces off it has done nothing, to the stall rule: a last target that nothing
+// reaches (a bird hanging 5 units up in cowboys-banditos) is let go after 90 s, however often the ball hits the metal (docs/GAMEPLAY.md
+// 15.1).
+void testStallAmongMetal() {
+    SessionOptions blind = options(TargetRule::BrickType);
+    blind.ignoreUnreachable = false;
+    const Actor wall = actor(ObjectType::Metall, {0, 0, 4}, kStatic, 1000, {box({20.4f, 2, 0.5f}, {0, 2, 0})}, "Metall.jpg");
+    const Actor pinned = brick({0, 8, 15}, "Shark.jpg", kStatic);  // above the ball for good: nothing can touch it
+    Game g(levelOf({board(), wall, pinned}), blind);
+    const PlayResult played = autoplay(g.session, 200);
+    check(std::ranges::count(played.events, EventType::BrickHit, &GameEvent::type) > 5 && g.session.stats().bricksHit == 0,
+          "stall: the ball hits the wall again and again and hurts nothing");
+    check(g.session.phase() == SessionPhase::Complete && g.session.stats().targetsLetGo == 1 &&
+              played.seconds > g.session.rules().stallSeconds && played.seconds < g.session.rules().stallSeconds + 5,
+          "stall: the ball bounced off metal for ninety seconds, and the target it cannot reach is let go");
 }
 
 // ---- Cannons -----------------------------------------------------------------------------------------------------
@@ -435,7 +453,7 @@ void testGraze() {
     g.shoot({1.4f, 0.6f, -4}, {0, 0, 1});  // along the cannon's flank, a hair into it
     g.run(1.0);
     check(g.count(EventType::CannonFired) == 1 && g.session.actor(1).energy == 2, "graze: a ball along a cannon's side sets it off");
-    g.shoot({11.45f, 0.6f, 4}, {0, 0, 1});
+    g.shoot({11.58f, 0.6f, 4}, {0, 0, 1});
     g.run(2.5);
     check(g.count(EventType::RocketLaunched) == 1 && !g.session.actor(2).removed, "graze: and one along a crate's side launches a rocket");
 }
@@ -534,10 +552,18 @@ void testTeleportKeepsTheBall() {
 
 // ---- Fireworks ---------------------------------------------------------------------------------------------------
 
+// A ball sent past the side of a crate (half width 1, the ball 0.59), toward the bat's side, with its edge a hair off it: a touch without a
+// blow (one that goes in by more than 0.05 is a blow, and destroys the crate), once (the ball leaves the board, which has no near wall,
+// and is lost). Its id.
+int graze(Game& g, ActorIndex crate) {
+    const Vec3 at = g.where(crate);
+    return g.shoot({at.x + 1.58f, 0.6f, at.z + 8}, {0, 0, -1});
+}
+
 void testFirework() {
-    Game g(levelOf({board(), firework({0, 0, 10})}));
-    const int id = g.shoot({0, 0.6f, 0}, {0, 0, 1});
-    check(g.runUntil([&] { return g.ball(id) != nullptr && g.ball(id)->velocity.z < 0; }, 2), "firework: the ball reaches the crate");
+    Game g(levelOf({board(false), firework({0, 0, 10})}));
+    const int id = graze(g, 1);
+    check(g.runUntil([&] { return g.ball(id) != nullptr && g.ball(id)->position.z < 11.3f; }, 2), "firework: the ball reaches the crate");
     const double touchedAt = g.session.time();
     check(g.runUntil([&] { return g.count(EventType::RocketLaunched) > 0; }, 2), "firework: a rocket leaves the crate");
     const std::optional<GameEvent> launched = g.first(EventType::RocketLaunched);
@@ -558,27 +584,57 @@ void testFirework() {
           "firework: 1.2 s after launching, some 20 units up");
     check(g.session.objects().rockets().empty(), "firework: the rocket is spent");
     check(g.session.score() == 0 && !g.session.actor(1).removed && g.session.actor(1).energy == 1 && g.destroyed(1) == nullptr,
-          "firework: no score, and the crate stays");
+          "firework: no score, and a touch that is no blow leaves the crate standing");
 
     // While one is up another touch starts nothing; once it burst, a touch does.
-    const auto touch = [&] {
-        const Vec3 crate = g.where(1);
-        g.shoot({crate.x, 0.6f, crate.z - 10}, {0, 0, 1});
-    };
     g.log.clear();
-    touch();
-    g.run(1.0);  // the first ball is on its way, the second's touch comes with the rocket pending
-    touch();
-    g.run(0.3);
-    touch();  // and with it up
-    g.run(2.5);
+    graze(g, 1);
+    g.run(0.4);
+    graze(g, 1);  // touches while the rocket is pending
+    g.run(0.7);
+    graze(g, 1);  // and with it up
+    g.run(3.0);
     check(g.count(EventType::RocketLaunched) == 1 && g.count(EventType::RocketBurst) == 1,
           "firework: touched while a rocket is pending or up, a crate starts no other");
-    touch();
-    g.run(2.5);
+    graze(g, 1);
+    g.run(3.0);
     check(g.count(EventType::RocketLaunched) == 2 && g.count(EventType::RocketBurst) == 2,
           "firework: once it burst, a touch starts the next");
     check(g.session.stats().bricksDestroyed == 0, "firework: and nothing is destroyed");
+}
+
+// A ball that hits the crate squarely hurts it as it hurts a brick (energy 1: destroyed for 120 points). The touch lit the rocket,
+// and it comes all the same; a crate that only a blast reached was never lit, and gives none (docs/GAMEPLAY.md 15.5).
+void testFireworkBlow() {
+    Game g(levelOf({board(), firework({0, 0, 10})}));
+    g.shoot({0, 0.6f, 0}, {0, 0, 1});
+    g.run(3.5);
+    const GameEvent* gone = g.destroyed(1);
+    check(gone != nullptr && gone->points == 120 && g.session.score() == 120 && g.session.actor(1).removed,
+          "firework blow: a ball that hits the crate squarely destroys it, for 120 points");
+    check(g.count(EventType::RocketLaunched) == 1 && g.count(EventType::RocketBurst) == 1,
+          "firework blow: and the rocket that the touch lit comes all the same");
+
+    Game b(levelOf({board(), dynamite({0, 0, 8}), firework({4, 0, 8})}));
+    b.session.hit(1, {});
+    b.run(3.0);
+    check(b.destroyed(2) != nullptr && b.count(EventType::RocketLaunched) == 0,
+          "firework blow: a crate that a blast destroys, never touched, gives no rocket");
+}
+
+// The crate that stood on the plug of a gap in a wall and fell into the gap when the plug broke (village-apple's two metal
+// fences): the ball takes it out. When the ball did not hurt a crate it sat in the gap for good, and the level could not be won.
+void testFireworkInAGap() {
+    const auto wall = [](float low, float high) {
+        return actor(ObjectType::Metall, {(low + high) / 2, 0, 10}, kStatic, 1000, {box({(high - low) / 2, 2, 0.5f}, {0, 2, 0})}, "Metall.jpg");
+    };
+    Game g(levelOf({board(), wall(-20.4f, -1.25f), wall(1.25f, 20.4f), firework({0, 0, 10})}));  // a gap of 2.5; the crate is 2 wide
+    g.shoot({0, 0.6f, 0}, {0, 0, 1});
+    g.run(2.0);
+    check(g.session.actor(3).removed, "firework in a gap: the ball destroyed the crate that filled it");
+    const int through = g.shoot({0, 0.6f, 0}, {0, 0, 1});
+    check(g.runUntil([&] { return g.ball(through) != nullptr && g.ball(through)->position.z > 12; }, 2),
+          "firework in a gap: and the next ball goes through");
 }
 
 // ---- Springs, vibros, flickers ------------------------------------------------------------------------------------
@@ -650,7 +706,7 @@ void testEnd() {
 }
 
 void testDescribe() {
-    for (const EventType type : {EventType::Blast, EventType::CannonFired, EventType::ShotHit, EventType::RocketLaunched,
+    for (const EventType type : {EventType::DynamiteBlast, EventType::CannonFired, EventType::ShotHit, EventType::RocketLaunched,
                                  EventType::RocketBurst, EventType::BallEntered, EventType::BallEmerged}) {
         GameEvent event;
         event.type = type;
@@ -666,6 +722,7 @@ int main() {
     testBlast(3.0f);
     testChain();
     testHurtByBlastsOnly();
+    testStallAmongMetal();
     testCannon();
     testCooldown();
     testGraze();
@@ -673,6 +730,8 @@ int main() {
     testTeleport();
     testTeleportKeepsTheBall();
     testFirework();
+    testFireworkBlow();
+    testFireworkInAGap();
     testSpring();
     testVibro();
     testFlicker();

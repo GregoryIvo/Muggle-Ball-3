@@ -17,11 +17,11 @@ class GameSession;
 // comment says where it comes from: [M] measured from footage, [D] read from the game's data, [I] inferred, [?] a guess.
 struct SpecialObjectRules {
     // ---- What hurts what (15.1)
-    // The ball hurts only bricks, trees, vibros and flickers. Everything else of the level's objects reacts to it and is
-    // hurt by blasts and cannonballs (and by whatever a weapon does through GameSession::hit()). A blast and a cannonball
-    // take this much energy off what they reach: what has one or two (metal, dynamite, fireworks, cannons, the springs,
-    // volcanoes and generators) is destroyed, a person's three are not [I: the log that the chain of V1 8192.9 pushed
-    // lived; the cannon's energy 2 [D] is then one cannonball].
+    // The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers. The rest of the level's objects (cannons,
+    // springs, volcanoes, generators and metal) react to it and are hurt by blasts and cannonballs (and by whatever a weapon
+    // does through GameSession::hit()). A blast and a cannonball take this much energy off what they reach: what has one or
+    // two (metal, dynamite, fireworks, cannons, the springs, volcanoes and generators) is destroyed, a person's three are not
+    // [I: the log that the chain of V1 8192.9 pushed lived; the cannon's energy 2 [D] is then one cannonball].
     int blastDamage = 2;
     int cannonballDamage = 2;
 
@@ -136,7 +136,7 @@ private:
         None,      // the ball hurts it as it hurts a brick: bricks, trees, flickers and vibros
         Dynamite,  // a brick of one energy that blasts when it goes
         Cannon,
-        Firework,
+        Firework,  // the ball hurts it as a brick, and any touch of it sets a rocket off
         Spring,
         Inert,     // volcanoes, generators and metal: the ball bounces off them, nothing more
         Vibro,

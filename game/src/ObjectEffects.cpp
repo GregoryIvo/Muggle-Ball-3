@@ -136,7 +136,7 @@ void ObjectEffects::update(const GameSession& session, std::span<const GameEvent
         flash.at = event.position;
         flash.seed = seedOf(event.position, event.time);
         switch (event.type) {
-            case EventType::Blast:
+            case EventType::DynamiteBlast:
                 flash.kind = Kind::Blast;
                 flash.size = event.speed;
                 break;

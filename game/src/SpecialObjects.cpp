@@ -122,31 +122,28 @@ float SpecialObjects::random01() {
 // ---- Hooks
 
 bool SpecialObjects::ballHit(GameSession& session, ActorIndex actor, const ContactEvent& contact, int ball) {
-    switch (kindOf(actor)) {
-        case Kind::Cannon:  // (a touch sets them off, a blow or not: touches())
-        case Kind::Firework:
-            return true;
-        case Kind::Spring:
-        case Kind::Inert: {
-            if (kindOf(actor) == Kind::Spring) {
-                kick(session, actor, ball);
-            }
-            // The ball hurts none of these, but it hit them: they make their sound.
-            const GameSession::Brick& brick = session.bricks_[actor];
-            GameEvent event;
-            event.type = EventType::BrickHit;
-            event.ball = ball;
-            event.actor = actor;
-            event.position = contact.point;
-            event.speed = contact.normalSpeed;
-            event.energy = brick.energy;
-            event.material = brick.material;
-            session.emit(event);
-            return true;
-        }
-        default:
-            return false;
+    const Kind kind = kindOf(actor);
+    if (kind != Kind::Cannon && kind != Kind::Spring && kind != Kind::Inert) {
+        return false;  // the ball hurts it as it hurts a brick (a firework crate too: its touch is touches()'s, not this)
     }
+    if (kind == Kind::Cannon) {  // (a touch sets them off, a blow or not: touches())
+        return true;
+    }
+    if (kind == Kind::Spring) {
+        kick(session, actor, ball);
+    }
+    // The ball hurts none of these, but it hit them: they make their sound.
+    const GameSession::Brick& brick = session.bricks_[actor];
+    GameEvent event;
+    event.type = EventType::BrickHit;
+    event.ball = ball;
+    event.actor = actor;
+    event.position = contact.point;
+    event.speed = contact.normalSpeed;
+    event.energy = brick.energy;
+    event.material = brick.material;
+    session.emit(event);
+    return true;
 }
 
 void SpecialObjects::destroyed(GameSession& session, ActorIndex actor, Vec3 at) {
@@ -183,7 +180,7 @@ bool SpecialObjects::strike(GameSession& session, ActorIndex actor, Vec3 at, int
 void SpecialObjects::blast(GameSession& session, ActorIndex source, Vec3 centre, float radius, float power) {
     ++stats_.blasts;
     GameEvent event;
-    event.type = EventType::Blast;
+    event.type = EventType::DynamiteBlast;
     event.actor = source;
     event.position = centre;
     event.speed = radius;

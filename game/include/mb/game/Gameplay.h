@@ -140,7 +140,8 @@ enum class TargetRule {
     // motion: dynamic, kinematic (floor tiles, sharks, birds) or bound to a path. Not required: every object of a type
     // other than brick and tree: metall, teleports and cannons (left on the board at natural ends), and, never seen to
     // decide a level's end, dynamite, fireworks, generators, springs, volcanoes, cloth and vibro. Those can still be
-    // destroyed for their points, by a blast, a cannonball or a weapon (not by the ball: docs/GAMEPLAY.md section 15.1).
+    // destroyed for their points: dynamite and fireworks by the ball, the rest by a blast, a cannonball or a weapon (not by
+    // the ball: docs/GAMEPLAY.md section 15.1).
     Bricks,
     // Every brick whose material has brickType 0, moving or not; crates, rocks, animals, ground (type 4) and trees (5) do
     // not count. The footage refutes it: a level did not end before its type 4 gorilla was destroyed.
@@ -192,7 +193,7 @@ enum class EventType {
     ActorFell,       // actor, position (centre of mass), points (only with fallScores), material: it left the board
     // The special objects (SpecialObjects; docs/GAMEPLAY.md section 15). Dynamite that goes off also reports its
     // BrickDestroyed, with the charge's points and sound.
-    Blast,           // actor (the charge), position (its centre), speed (the blast's radius)
+    DynamiteBlast,   // actor (the charge), position (its centre), speed (the blast's radius)
     CannonFired,     // actor (the cannon), position (the muzzle), velocity (the cannonball's)
     ShotHit,         // actor (what the cannonball struck: a brick, the board ...), position: it bursts
     RocketLaunched,  // actor (the crate), position: a firework rocket leaves a crate
@@ -303,8 +304,8 @@ struct GameInput {
 // Whether something can hurt an actor of this object type with this material: it has a brick material (brickType other
 // than 2, which the ball, bullets, board, water and the fallback have, and energy above 0). The board and markers never
 // do, and neither do the teleports, which a charge of dynamite 3.8 units away left standing (docs/GAMEPLAY.md section
-// 15.1). The ball itself hurts only bricks, trees, vibros and flickers (SpecialObjects); the rest of the objects are hurt
-// by blasts, cannonballs and weapons. A cloth is a placeholder for a sail the cloth simulation has yet to build (step 5),
+// 15.1). The ball itself hurts only bricks, trees, dynamite, firework crates, vibros and flickers (SpecialObjects); the
+// rest of the objects are hurt by blasts, cannonballs and weapons. A cloth is a placeholder for a sail the cloth simulation has yet to build (step 5),
 // so a ball goes by it, though the original scored sails (60 each: piratos-ostrovok's 62 bricks and 3 sails are the 65
 // bricks, 4,231 points of docs/GAMEPLAY.md), and they are not targets here.
 bool canBeDamaged(ObjectType type, const GameMaterial* material);

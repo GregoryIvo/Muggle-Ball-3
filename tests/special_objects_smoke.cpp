@@ -69,7 +69,7 @@ bool isSpecial(EventType type) {
         return true;
     }
     switch (type) {
-        case EventType::Blast:
+        case EventType::DynamiteBlast:
         case EventType::CannonFired:
         case EventType::ShotHit:
         case EventType::RocketLaunched:
@@ -213,7 +213,7 @@ void pokedSession(const Level& level, const MaterialLibrary& materials, Outcome&
                 continue;
             }
             out.events.push_back(event);
-            if (event.type == EventType::Blast) {
+            if (event.type == EventType::DynamiteBlast) {
                 if (event.speed != 5.0f && event.speed != 3.0f) {  // the big charge and the small
                     out.problems.push_back(std::format("poked: a blast of radius {}", static_cast<double>(event.speed)));
                 }

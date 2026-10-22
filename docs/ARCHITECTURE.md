@@ -156,7 +156,7 @@ for (const GameEvent& e : session.takeEvents()) { /* BrickHit, BrickDestroyed, B
 | What | Where |
 |---|---|
 | Every number the rules use, each with its source in `GAMEPLAY.md` and how well it is known | `GameplayRules` |
-| What happens, for the sound and the look | `GameEvent`: `BallLaunched`, `BatHit`, `BoardHit`, `BallsHit`, `BrickHit`, `BrickDestroyed`, `ActorFell`, the special objects' `Blast`, `CannonFired`, `ShotHit`, `RocketLaunched`, `RocketBurst`, `BallEntered`, `BallEmerged`, then `BallLost`, `LifeLost`, `BatLeft`, `BatEntered`, `LevelComplete`, `GameOver` |
+| What happens, for the sound and the look | `GameEvent`: `BallLaunched`, `BatHit`, `BoardHit`, `BallsHit`, `BrickHit`, `BrickDestroyed`, `ActorFell`, the special objects' `DynamiteBlast`, `CannonFired`, `ShotHit`, `RocketLaunched`, `RocketBurst`, `BallEntered`, `BallEmerged`, then `BallLost`, `LifeLost`, `BatLeft`, `BatEntered`, `LevelComplete`, `GameOver` |
 | Which bricks are hurt, and which must go for the level to end | `canBeDamaged`, `isTarget`, `TargetRule` (the default `Bricks`, every brick and tree whatever its motion, is the rule of the footage, `GAMEPLAY.md` "Rules settled by the second study"; `BrickType`, H-type of `OBJECTS.md`, is refuted and kept for comparing and for tests; chosen in `SessionOptions::levelEnd`); targets out of the ball's reach do not count (below) |
 | The cursor as a bat position | `cursorOnPlane`, `batTargetX` |
 | A player that needs no hands | `Autopilot`, `autoplay()` (returns the events; `mb_gameplay_smoke --log <level>` prints them) |

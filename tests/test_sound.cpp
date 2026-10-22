@@ -383,7 +383,7 @@ void testPlaySounds() {
     play(EventType::BallEmerged);
     check(heard() == "teleport.ogg", "and comes out");
     for (const EventType quiet : {EventType::BallLost, EventType::BallFreed, EventType::LifeLost, EventType::BatEntered, EventType::GameOver,
-                                  EventType::Blast, EventType::ShotHit, EventType::RocketLaunched}) {
+                                  EventType::DynamiteBlast, EventType::ShotHit, EventType::RocketLaunched}) {
         play(quiet);
         check(audio.sounds.empty(), "these events make no sound");
     }
