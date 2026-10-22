@@ -81,16 +81,17 @@ struct Stage {
         return out;
     }
 
-    Image picture(Renderer& renderer, bool withSails) const {
+    Image render(Renderer& renderer, const std::vector<DrawItem>& drawn) const {
         FrameParams frame;
         frame.view = camera.view();
         frame.projection = camera.projection(static_cast<float>(kWidth) / kHeight);
         frame.eye = camera.eye();
         frame.light = scene->light();
         frame.clear = {0, 0, 0, 1};
-        const std::vector<DrawItem> drawn = items(withSails);
         return renderer.renderToImage(kWidth, kHeight, frame, drawn);
     }
+
+    Image picture(Renderer& renderer, bool withSails) const { return render(renderer, items(withSails)); }
 
     // Where the sails' particles are on the picture: the box round all of them, and a margin of the particles' size.
     void box(Pixel& low, Pixel& high) const {
@@ -184,6 +185,25 @@ void testThePictureOfAShip(Renderer& renderer, mb_app::Assets& assets) {
     check(stage.items(true).size() + 1 == before && !cloths.alive(0) && cloths.alive(1), "ship: the sail that is destroyed is no longer drawn, the others are");
 }
 
+// A level's sails give their meshes back when the level is left: the draws that were kept show nothing of them after the ClothDraw is gone (a
+// mesh that was destroyed is skipped by the renderer), where a leak would go on drawing them.
+void testTheMeshesAreGivenBack(Renderer& renderer, mb_app::Assets& assets) {
+    const LevelEntry& entry = assets.catalog.levels()[*assets.catalog.find("piratos-ostrovok")];
+    Stage stage(renderer, assets, entry);
+    stage.play(0.001);
+    const std::vector<DrawItem> kept = stage.items(true);
+    const Image with = stage.render(renderer, kept);
+    stage.sails.reset();
+    const Image gone = stage.render(renderer, kept), plain = stage.picture(renderer, false);
+    Pixel low{}, high{};
+    stage.box(low, high);
+    std::size_t inside = 0, outside = 0;
+    difference(plain, with, low, high, inside, outside);
+    check(inside > kLeastSailPixels, "meshes: the sails were drawn: " + std::to_string(inside) + " pixels");
+    difference(plain, gone, low, high, inside, outside);
+    check(inside == 0 && outside == 0, "meshes: and after the ClothDraw is gone the kept draws show none of them: " + std::to_string(inside + outside) + " pixels differ");
+}
+
 }  // namespace
 
 int main() {
@@ -207,6 +227,7 @@ int main() {
         mb_app::Assets assets;
         testEveryLevelsSails(*renderer, assets);
         testThePictureOfAShip(*renderer, assets);
+        testTheMeshesAreGivenBack(*renderer, assets);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "FAIL: exception: %s\n", e.what());
         return 1;

@@ -6,6 +6,7 @@
 #include "mb/game/Gameplay.h"
 #include "mb/game/ParticleDef.h"
 #include "mb/game/ParticleSystem.h"
+#include "mb/game/PlayScene.h"
 #include "mb/game/PrizeHud.h"
 #include "mb/game/WeaponEffects.h"
 
@@ -15,9 +16,15 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 using namespace mb;
+
+// The parts of a PlayScene draw into its own particle system through references: a copy or a move would leave them drawing into the original's.
+static_assert(!std::is_copy_constructible_v<PlayScene> && !std::is_move_constructible_v<PlayScene> && !std::is_copy_assignable_v<PlayScene> &&
+                  !std::is_move_assignable_v<PlayScene>,
+              "a PlayScene is not copied or moved");
 
 namespace {
 
@@ -361,15 +368,19 @@ void testTrails() {
     for (int i = 1; i <= 30; ++i) {
         show.step({}, {projectile(1, ProjectileKind::Rocket, {0, 1.4f, 5 + 52.5f * static_cast<float>(i * kStep)}, velocity)});
     }
-    check(show.particles.effectCount() == 1 && quadsOfFile(show.particles, "Trail") >= 10, "trails: one trail that goes on, with its particles");
+    check(show.particles.effectCount() == 1 && quadsOfFile(show.particles, "Trail") >= 10, "trails: one trail that goes on, with its particles (a short glow of 30)");
     std::vector<ParticleQuad> quads = quadsOf(show.particles);
     float nearest = 1e9f, farthest = -1e9f;
     for (const ParticleQuad& q : quads) {
         nearest = std::min(nearest, q.centre.z);
         farthest = std::max(farthest, q.centre.z);
     }
-    check(farthest < 5 + 52.5f * 0.5f && farthest > 5 + 52.5f * 0.5f - 1.5f && nearest < farthest - 5,
+    check(farthest < 5 + 52.5f * 0.5f && farthest > 5 + 52.5f * 0.5f - 1.5f,
           "trails: out of its tail, which is a little behind its middle, along the way it went: " + std::to_string(nearest) + " to " + std::to_string(farthest));
+    // The footage has a small glow behind the rocket and no streak: the file's half a second of life would be a line 26 units long at 52.5 units
+    // a second, so the glow is out for a twentieth of that, about 3 units.
+    check(farthest - nearest > 1.5f && farthest - nearest < 5.0f, "trails: a short glow, not a line (" + std::to_string(farthest - nearest) + " units long)");
+    check(std::ranges::all_of(quads, [](const ParticleQuad& q) { return length(q.halfRight) * 2 < 1.0f; }), "trails: and small (35 % of the file's 2.5)");
     // Carried on with the lead.
     Show lead;
     lead.step({}, {projectile(1, ProjectileKind::Rocket, {0, 1.4f, 5}, velocity)}, kStep, 0.01);

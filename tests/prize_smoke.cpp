@@ -35,6 +35,9 @@ using json = nlohmann::json;
 
 namespace {
 
+// The destroyable objects of the 83 shipped levels (GAMEPLAY.md 15.1) and the ones worth less than 80 points among them.
+constexpr std::size_t kObjects = 13231, kFirstTier = 11282;
+
 int failures = 0;
 
 void check(bool ok, const std::string& what) {
@@ -146,7 +149,8 @@ int run(const fs::path& assets) {
     for (const LevelEntry& entry : catalog.levels()) {
         const Level level = loadLevelJson(entry.path);
         for (const ActorRef& ref : flattenActors(level)) {
-            if (ref.owner == nullptr || ref.owner->material.empty()) {
+            // A sail is one object, its lead actor; its 431 segments (owner: the sail) are none (GAMEPLAY.md 20.3).
+            if (!ref.actor->object || ref.owner->material.empty()) {
                 continue;
             }
             const GameMaterial* material = materials.find(ref.owner->material);
@@ -164,7 +168,8 @@ int run(const fs::path& assets) {
                 objects, catalog.levels().size(), byTier[0], byTier[1], byTier[2], byTier[3], byTier[4]);
     std::printf("mean chance that a destroyed object leaves a prize: %.2f %% (%.1f prizes a level if all are destroyed); the footage has 14.7 %%\n",
                 100 * mean, chance / static_cast<double>(catalog.levels().size()));
-    check(objects > 10000 && std::fabs(mean - 0.147) < 0.004, "the mean chance of a drop is 14.7 %");
+    check(objects == kObjects && byTier[0] == kFirstTier, "the shipped levels have 13,231 destroyable objects, the 22 sails among them once each");
+    check(std::fabs(mean - 0.147) < 0.004, "the mean chance of a drop is 14.7 %");
     if (failures == 0) {
         std::puts("all prize checks passed");
     }

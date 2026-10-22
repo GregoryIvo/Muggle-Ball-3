@@ -82,6 +82,8 @@ Outcome play(const Level& level, const MaterialLibrary& materials, double second
     SessionOptions options;
     options.hearts = 99;
     options.campaignLevel = campaignLevel;
+    // Each level has prizes of its own: the default seed would drop the same first dozen in every level (see gameplay_smoke.cpp).
+    options.prizeSeed = 0x9E3779B97F4A7C15ull + static_cast<std::uint64_t>(campaignLevel);
     GameSession session(level, materials, options);
     Outcome out;
     const auto problem = [&](const std::string& what) {

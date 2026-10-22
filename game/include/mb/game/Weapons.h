@@ -10,6 +10,7 @@
 #include <array>
 #include <cstdint>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace mb {
@@ -146,6 +147,13 @@ struct LaserBeam {
     int hits = 0;        // the actors it reached
 };
 
+// Where a point of the bat's frame is on the board (x across, y up from the floor, z up the board): the bat's model stands on the floor
+// under the centre of the bat's sphere (y = `ballPlaneY` - kBallRadius there) and is drawn `batScale` times its size. A shot's spawn point is
+// one, so the weapons and whoever aims them (the Autopilot) work it out the same way.
+inline Vec3 onBat(float ballPlaneY, Vec3 batPosition, float batScale, Vec3 offset) {
+    return Vec3{batPosition.x, ballPlaneY - kBallRadius, batPosition.z} + offset * batScale;
+}
+
 // The height at which the vertical line through `below` leaves the picture at its top edge, as the game's camera
 // (GameCamera.h) sees it: where a thunderbolt starts above a target. The window's aspect makes no difference to the top edge.
 float screenTopHeight(Vec3 below);
@@ -198,6 +206,7 @@ private:
     struct Strike {
         double at = 0;  // GameSession::time() it is thrown at
         PrizeKind kind = PrizeKind::Thunderbolt;
+        int burst = -1;  // the number of the catch for the bolts that strike together, -1 for the others
     };
 
     WeaponRules rules_;
@@ -208,6 +217,8 @@ private:
     std::vector<LaserBeam> beams_;
     std::vector<Strike> pending_;
     std::vector<ActorIndex> candidates_;
+    std::vector<std::pair<int, ActorIndex>> burstTargets_;  // what the bolts of a burst that are thrown already struck, by burst
+    int nextBurst_ = 0;
     double lastShot_ = -1e9;
     int nextId_ = 0;
     bool over_ = false;  // the level is done: nothing flies any more
@@ -218,12 +229,12 @@ private:
     // Makes the body and the entry; false if the world refused it.
     bool launch(GameSession& session, ProjectileKind kind, PrizeKind prize, Vec3 position, Vec3 velocity, int barrel = 0);
     void fireLaser(GameSession& session, Vec3 from);
-    void throwBolt(GameSession& session);
+    void throwBolt(GameSession& session, int burst);
     void throwMeteor(GameSession& session);
     // The projectile at `index` touched `actor` at `at`: it is spent, and does its work.
     void land(GameSession& session, std::size_t index, ActorIndex actor, Vec3 at);
-    // Hurts the actor and counts it.
-    bool hurt(GameSession& session, ActorIndex actor, Vec3 at, int damage, bool dropsPrize);
+    // Hurts the actor and counts it; `by` is the weapon or strike (what BrickDestroyed names if this destroys it).
+    bool hurt(GameSession& session, ActorIndex actor, Vec3 at, int damage, bool dropsPrize, PrizeKind by);
     void clearAll(GameSession& session);
 };
 

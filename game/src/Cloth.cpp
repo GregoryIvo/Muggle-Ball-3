@@ -3,6 +3,7 @@
 #include "mb/game/PhysicsScene.h"
 
 #include <algorithm>
+#include <limits>
 
 namespace mb {
 
@@ -116,6 +117,14 @@ Vec3 ClothSet::centre(std::size_t cloth) const {
         sum = sum + p;
     }
     return sum / static_cast<float>(points.size());
+}
+
+float ClothSet::distanceTo(std::size_t cloth, Vec3 point) const {
+    float nearest = std::numeric_limits<float>::infinity();
+    for (const Vec3 p : positions(cloth)) {
+        nearest = std::min(nearest, length(p - point) - plan_.cloths[cloth].particleRadius);
+    }
+    return std::max(nearest, 0.0f);
 }
 
 void ClothSet::carryPins(const PhysicsScene& scene) {

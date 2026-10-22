@@ -5,6 +5,9 @@
 #include "mb/game/ParticleDef.h"
 
 #include <cstdint>
+#include <functional>
+#include <set>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -41,12 +44,14 @@ struct EffectOptions {
     // `fade_time_msec`. beam(): how long it stays at full strength, after it is made and after each aim(), before it fades.
     float seconds = 0;
     // beam(): how long it takes to fade out, for one that must be gone sooner (or later) than the definition's `fade_time_msec`
-    // says; 0: the definition's.
+    // says; 0: the definition's. A Trail's particles: how long each lives, so how long a trail is behind what it follows (it still keeps
+    // `num` of them alive); 0: the definition's.
     float fade = 0;
     // beam() of a Laser: how long its front takes to run from `from` to `to`, whatever the length; 0: it runs at the definition's
     // `speed`. The colours then run over the part that is out, so the tip is the far colour from the first moment.
     float grow = 0;
     std::uint32_t seed = 0;  // 0: the next of the system's own sequence
+    // (A scale, seconds, fade or grow that is not a number is the default: 1 for the scale, 0 for the rest.)
 };
 
 // Where the camera looks from: unit vectors, in the world, of its right, up and forward.
@@ -143,6 +148,8 @@ private:
         std::uint32_t draws = 0;   // how many numbers of the seed's sequence are used
     };
 
+    // The definition of a name, which is logged once if the library has none.
+    const ParticleDef* definition(std::string_view effect);
     EffectId make(const ParticleDef* def, Vec3 at, const EffectOptions& options);
     Effect* find(EffectId id);
     const Effect* find(EffectId id) const;
@@ -154,6 +161,7 @@ private:
     void quadsOf(const Effect& effect, const ParticleView& view, std::vector<ParticleQuad>& out) const;
 
     const ParticleLibrary& library_;
+    std::set<std::string, std::less<>> missing_;  // the names asked for that the library lacks, said once each
     std::uint32_t seed_;
     EffectId nextId_ = 1;
     std::vector<Effect> effects_;

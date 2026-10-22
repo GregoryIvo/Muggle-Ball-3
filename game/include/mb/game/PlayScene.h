@@ -56,6 +56,9 @@ public:
     // `bat` is Settings::bat: 0 red, 1 blue, 2 yellow. `particles` is Data/Particles; it must outlive the scene.
     PlayScene(ModelCache& cache, const MaterialLibrary& materials, const TextureIndex& textures, const ParticleLibrary& particles,
               const Level& level, const GameSession& session, int bat);
+    // The parts that draw effects keep a reference to the scene's own particle system, so a copy would draw into the original's.
+    PlayScene(const PlayScene&) = delete;
+    PlayScene& operator=(const PlayScene&) = delete;
 
     // Brings the picture up to the session as it stands, `seconds` after the last call, with the events it reported since
     // then (not kept). The session steps by 1/60 s and does not interpolate; `lead` is how far past its last step the

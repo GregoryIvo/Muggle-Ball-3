@@ -1,7 +1,7 @@
 // Plays every converted level with the autopilot against the real game data (needs it: skips with exit code 77 when
 // MB3_ASSETS is not set), no GPU.
 //
-//   mb_gameplay_smoke [--seconds S] [--rule never|type|bricks] [--strict|--no-stall] [--campaign-level N] [--log] [--left] [level]
+//   mb_gameplay_smoke [--seconds S] [--rule never|type|bricks] [--strict|--no-stall] [--campaign-level N] [--seed N] [--log] [--left] [level]
 //        each level is played for S seconds of game time (default 60) by the autopilot (the bat follows the ball that
 //        comes down first), with hearts to spare so that it plays on after a lost ball, and ends as the game ends it
 //        (SessionOptions::levelEnd: every brick and tree, with the look at what the ball can reach and the stall
@@ -20,8 +20,11 @@
 //        the table counts those). The prizes drop as in the game, the level's place in the campaign counting (the red ones
 //        come from level 10): the table has the prizes dropped and caught, and the summary how many levels the Next Level star
 //        ended, and how many shots the autopilot fired with the weapons it caught (section 18; --campaign-level N plays every level as
-//        the N-th). --strict switches the look at what the ball can reach and the
-//        stall rule off, --no-stall only the stall rule. With a level name, --log prints its event log.
+//        the N-th). Each level has prizes of its own: its seed is N (--seed, default 1) times a large odd number plus the level's
+//        place in the campaign (the summary prints N, and how many of the 28 kinds dropped; a run of 300 s or more over all the
+//        levels fails when too few did, which a seed shared by every level would). --strict switches the look at what the ball can
+//        reach and the stall rule off, --no-stall only the stall rule. The level is any part of its name, in any case. With a level
+//        name, --log prints its event log.
 
 #include "mb/game/Autopilot.h"
 #include "mb/game/Campaign.h"
@@ -32,8 +35,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -56,6 +61,13 @@ constexpr float kPlaneTolerance = 1e-3f;
 constexpr float kHigh = 2.5f, kReachBeyond = 1.5f;  // see play(): where a ball cannot reach
 constexpr float kMoves = 0.3f;                       // a ball in flight is at least this far from where it was ...
 constexpr std::uint64_t kMovesWithin = 120;          // ... two seconds (frames) ago
+constexpr double kEveryKindFrom = 300;               // a run this long over every level sees most of the prizes drop, whatever the seed:
+constexpr int kMostNeverDropping = 6;                // at most this many of the 28 kinds not at all (9 and more with one seed for all)
+
+std::string lower(std::string text) {
+    std::ranges::transform(text, text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return text;
+}
 
 bool finite(const Mat4& m) {
     for (const auto& row : m.m) {
@@ -86,6 +98,7 @@ struct Outcome {
     std::array<int, kWeaponTypeCount> shots{};     // fired, by weapon (section 18)
     int weaponsCaught = 0, strikesCaught = 0;      // prizes of the four weapons, of the Thunderbolt and of the Meteorite Rain
     int bolts = 0, meteors = 0;                    // that struck
+    std::array<int, kPrizeKindCount> dropped{};    // prizes dropped, by kind
     int givenUp = 0;  // balls lost in a pocket they could not be freed from, see play()
     std::vector<GameEvent> events;
     std::vector<std::string> problems;
@@ -109,11 +122,19 @@ TargetRule gRule = SessionOptions{}.levelEnd;
 bool gStrict = false;   // every target counts, whatever the ball can reach, and the level never stands still
 bool gNoStall = false;  // the look at what the ball can reach stays, the stall rule goes
 int gCampaignLevel = 0; // every level is played as this one of the campaign (0: as its own)
+std::uint64_t gSeed = 1;  // of the prizes, see prizeSeedOf()
 
-Outcome play(const Level& level, const MaterialLibrary& materials, double seconds, int campaignLevel) {
+// The seed of one level's prizes. The default of SessionOptions is the same for every level, so every level would replay the same
+// first drops (a cannon, a bonus, a bat size ...) and nine of the 28 prizes would never drop in a run of 83 levels.
+std::uint64_t prizeSeedOf(int place) {
+    return gSeed * 0x9E3779B97F4A7C15ull + static_cast<std::uint64_t>(place);
+}
+
+Outcome play(const Level& level, const MaterialLibrary& materials, double seconds, int campaignLevel, int place) {
     SessionOptions options;
     options.levelEnd = gRule;
     options.campaignLevel = campaignLevel;
+    options.prizeSeed = prizeSeedOf(place);
     if (gStrict) {
         options.ignoreUnreachable = false;
     }
@@ -224,6 +245,9 @@ Outcome play(const Level& level, const MaterialLibrary& materials, double second
         if (event.type == EventType::ShotFired && event.prize) {
             ++out.shots[static_cast<std::size_t>(*weaponOf(*event.prize))];
         }
+        if (event.type == EventType::PrizeDropped && event.prize) {
+            ++out.dropped[static_cast<std::size_t>(*event.prize)];
+        }
         if (event.type == EventType::PrizeCaught && event.prize) {
             out.weaponsCaught += weaponOf(*event.prize).has_value();
             out.strikesCaught += *event.prize == PrizeKind::Thunderbolt || *event.prize == PrizeKind::Meteor;
@@ -309,18 +333,19 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, const Cam
     int prizesDropped = 0, prizesCaught = 0, prizesMissed = 0, levelsWithStar = 0, endedByStar = 0, starsCaught = 0;
     std::array<int, kWeaponTypeCount> shots{};
     int weaponsCaught = 0, strikesCaught = 0, bolts = 0, meteors = 0;
+    std::array<int, kPrizeKindCount> dropped{};
     std::vector<std::string> notCompleted;
     double share[2] = {0, 0};  // summed over the levels: the part of the targets destroyed
     double stepMs = 0, worstStepMs = 0, slowest = 0;
     std::string worstLevel;
     for (const LevelEntry& entry : catalog.levels()) {
-        if (only && entry.name.find(only) == std::string::npos) {
+        if (only && lower(entry.name).find(lower(only)) == std::string::npos) {
             continue;
         }
         ++levels;
         const Level level = loadLevelJson(entry.path);
-        const Outcome out = play(level, materials, seconds,
-                                  gCampaignLevel > 0 ? gCampaignLevel : campaign.indexOf(entry.name).value_or(0) + 1);
+        const int place = campaign.indexOf(entry.name).value_or(0) + 1;
+        const Outcome out = play(level, materials, seconds, gCampaignLevel > 0 ? gCampaignLevel : place, place);
         std::printf("%-26s | %4d %4d %4d | %5d %7lld %4d %5d %6d %5d | %4d %4d | %5s %5s | %7.1f | %3d/%-3d%s | %.3f\n", entry.name.c_str(),
                     out.targetsAtStart[0], out.targetsAtStart[1], out.stats.targetsOutOfPlay, out.stats.bricksDestroyed,
                     static_cast<long long>(out.score), out.stats.ballsLost, out.stats.batHits, out.stats.bricksHit,
@@ -351,6 +376,9 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, const Cam
         strikesCaught += out.strikesCaught;
         bolts += out.bolts;
         meteors += out.meteors;
+        for (std::size_t kind = 0; kind < dropped.size(); ++kind) {
+            dropped[kind] += out.dropped[kind];
+        }
         outOfPlay += out.stats.targetsOutOfPlay;
         levelsOutOfPlay += out.stats.targetsOutOfPlay > 0;
         if (!out.complete && gRule != TargetRule::Never) {
@@ -415,6 +443,21 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, const Cam
     std::printf("weapons: %d weapon prizes and %d strike prizes caught; the autopilot fired %d Machine Gun, %d Cannon, %d Bazooka and %d Laser shots at "
                 "what stood ahead of it, and %d bolts and %d meteors struck\n",
                 weaponsCaught, strikesCaught, shots[0], shots[1], shots[2], shots[3], bolts, meteors);
+    std::string never;
+    int kinds = 0;
+    for (std::size_t kind = 0; kind < dropped.size(); ++kind) {
+        if (dropped[kind] > 0) {
+            ++kinds;
+        } else {
+            never += (never.empty() ? "" : ", ") + std::string(prizeInfo(static_cast<PrizeKind>(kind)).stem);
+        }
+    }
+    std::printf("prize seed %llu (a level's is this times 0x9E3779B97F4A7C15 plus its place in the campaign): %d of the %d kinds dropped%s%s\n",
+                static_cast<unsigned long long>(gSeed), kinds, kPrizeKindCount, never.empty() ? "" : ", never ", never.c_str());
+    if (!only && seconds >= kEveryKindFrom && gRule != TargetRule::Never && kPrizeKindCount - kinds > kMostNeverDropping) {
+        std::printf("FAIL all: %d kinds of prize never dropped over %d levels of %.0f s: %s\n", kPrizeKindCount - kinds, levels, seconds, never.c_str());
+        ++failed;
+    }
     if (emptyLevels > 0) {
         std::printf("%d levels have no target under one of the readings\n", emptyLevels);
     }
@@ -454,13 +497,15 @@ int main(int argc, char** argv) {
             gNoStall = true;
         } else if (std::strcmp(argv[i], "--campaign-level") == 0 && i + 1 < argc) {
             gCampaignLevel = std::max(1, std::atoi(argv[++i]));
+        } else if (std::strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
+            gSeed = std::strtoull(argv[++i], nullptr, 10);
         } else if (std::strcmp(argv[i], "--rule") == 0 && i + 1 < argc) {
             const std::string rule = argv[++i];
             gRule = rule == "type" ? TargetRule::BrickType : (rule == "bricks" ? TargetRule::Bricks : TargetRule::Never);
         } else if (argv[i][0] != '-') {
             only = argv[i];
         } else {
-            std::printf("usage: mb_gameplay_smoke [--seconds S] [--rule never|type|bricks] [--strict|--no-stall] [--campaign-level N] [--log] [--left] [level]\n");
+            std::printf("usage: mb_gameplay_smoke [--seconds S] [--rule never|type|bricks] [--strict|--no-stall] [--campaign-level N] [--seed N] [--log] [--left] [level]\n");
             return 2;
         }
     }

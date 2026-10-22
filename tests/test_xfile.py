@@ -431,13 +431,15 @@ class ConverterTests(unittest.TestCase):
             "Animation", "", ref("A"), obj("AnimationKey", None, ints(4, len(angles)), *keys)))])
         channel = next(c for c in doc["animations"][0]["channels"] if c["target"]["path"] == "rotation")
         q = accessor_values(doc, binary, doc["animations"][0]["samplers"][channel["sampler"]]["output"])
+        # Each key is exactly (0, 0, sin(a/2), cos(a/2)): a/2 runs 0 to 150 degrees, so every neighbour pair has a
+        # positive dot product and none of the keys is negated.
         for a, key in zip(angles, q):
-            self.assertAlmostEqual(key[2], math.sin(math.radians(a) / 2) * (1 if abs(key[3]) < 2 else -1), delta=1.0)
+            half = math.radians(a) / 2
+            for got, want in zip(key, (0.0, 0.0, math.sin(half), math.cos(half))):
+                self.assertAlmostEqual(got, want, places=6, msg=f"{a} degrees: {key}")
             self.assertAlmostEqual(math.sqrt(sum(v * v for v in key)), 1.0, places=6)
         for before, after in zip(q, q[1:]):
             self.assertGreaterEqual(sum(a * b for a, b in zip(before, after)), 0)
-        self.assertAlmostEqual(q[1][2], math.sin(math.radians(50)), places=6)
-        self.assertAlmostEqual(q[1][3], math.cos(math.radians(50)), places=6)
 
     def test_decompose_puts_the_matrix_back_together(self):
         cases = {

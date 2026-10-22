@@ -83,9 +83,7 @@ bool Weapons::fire(GameSession& session) {
         return false;
     }
     const PrizeKind prize = prizeOf(armed->type);
-    const Vec3 origin{session.bat_.position.x, session.rules_.ballPlaneY - kBallRadius, session.bat_.position.z};
-    const float scale = session.batScale_;
-    const auto place = [&](Vec3 offset) { return origin + offset * scale; };
+    const auto place = [&](Vec3 offset) { return onBat(session.rules_.ballPlaneY, session.bat_.position, session.batScale_, offset); };
 
     GameEvent event;
     event.type = EventType::ShotFired;
@@ -187,6 +185,11 @@ void Weapons::fireLaser(GameSession& session, Vec3 from) {
             if (type == ObjectType::TeleportSrc || type == ObjectType::TeleportDest) {
                 continue;
             }
+            // What is already going (exploding, shrinking away) is hurt no more, and the beam goes through it as it does through the teleports.
+            const GameSession::Brick& brick = session.bricks_[actor];
+            if (brick.damageable && (brick.removed || brick.exploding || brick.shrinking)) {
+                continue;
+            }
             const auto seen = std::ranges::find(reached, actor, &Reach::actor);
             if (seen == reached.end()) {
                 reached.push_back({actor, hit.distance, hit.point});
@@ -235,7 +238,7 @@ void Weapons::fireLaser(GameSession& session, Vec3 from) {
         hit.material = laserMaterial_;
         session.emit(hit);
         if (session.bricks_[reached[i].actor].damageable) {
-            hurt(session, reached[i].actor, reached[i].point, rules_.laserDamage, true);
+            hurt(session, reached[i].actor, reached[i].point, rules_.laserDamage, true, PrizeKind::Laser);
         }
     }
 }
@@ -250,24 +253,26 @@ void Weapons::startStrike(GameSession& session, PrizeKind kind) {
     if (kind == PrizeKind::Thunderbolt) {
         const int span = rules_.boltBurstMost - rules_.boltBurstLeast + 1;
         const int burst = rules_.boltBurstLeast + std::min(span - 1, static_cast<int>(random_.uniform() * span));
+        const int number = nextBurst_++;
         for (int i = 0; i < burst; ++i) {
-            pending_.push_back({now + i * rules_.boltGap, kind});
+            pending_.push_back({now + i * rules_.boltGap, kind, number});
         }
         for (int i = 0; i < rules_.boltsLater; ++i) {
             const double later = rules_.boltLaterFrom + random_.uniform() * (rules_.boltLaterUntil - rules_.boltLaterFrom);
-            pending_.push_back({now + later, kind});
+            pending_.push_back({now + later, kind, -1});
         }
     } else if (kind == PrizeKind::Meteor && rules_.meteors > 0) {
         const double slot = rules_.meteorSpan / rules_.meteors;
         for (int i = 0; i < rules_.meteors; ++i) {
-            pending_.push_back({now + (i + random_.uniform()) * slot, kind});
+            pending_.push_back({now + (i + random_.uniform()) * slot, kind, -1});
         }
     }
 }
 
 // A bolt falls on a standing brick or tree picked at random (nothing else is a target of the level, and metal is spared: the footage's
-// bolts left the Metall wall of level 31 alone), straight down from the top edge of the screen above it.
-void Weapons::throwBolt(GameSession& session) {
+// bolts left the Metall wall of level 31 alone), straight down from the top edge of the screen above it. The bolts of a burst strike
+// different places [M], so one that a bolt of its burst struck a moment ago is left out, unless it is all that stands.
+void Weapons::throwBolt(GameSession& session, int burst) {
     candidates_.clear();
     for (ActorIndex actor = 0; actor < session.bricks_.size(); ++actor) {
         const GameSession::Brick& brick = session.bricks_[actor];
@@ -276,13 +281,23 @@ void Weapons::throwBolt(GameSession& session) {
             candidates_.push_back(actor);
         }
     }
+    // The ones to pick among come first: those the burst has not struck, or all of them if it has struck every one.
+    std::size_t pool = candidates_.size();
+    if (burst >= 0) {
+        const auto fresh = std::stable_partition(candidates_.begin(), candidates_.end(), [&](ActorIndex actor) {
+            return std::ranges::find(burstTargets_, std::pair{burst, actor}) == burstTargets_.end();
+        });
+        pool = fresh != candidates_.begin() ? static_cast<std::size_t>(fresh - candidates_.begin()) : candidates_.size();
+    }
     Vec3 target;
-    if (candidates_.empty()) {  // nothing to strike: the board, anywhere in the meteors' field
+    if (pool == 0) {  // nothing to strike: the board, anywhere in the meteors' field
         target = {random_.between(-rules_.meteorX, rules_.meteorX), 0, random_.between(rules_.meteorZLow, rules_.meteorZHigh)};
     } else {
-        const auto count = static_cast<double>(candidates_.size());
-        const auto pick = std::min(candidates_.size() - 1, static_cast<std::size_t>(random_.uniform() * count));
+        const auto pick = std::min(pool - 1, static_cast<std::size_t>(random_.uniform() * static_cast<double>(pool)));
         target = session.centreOf(candidates_[pick]);
+        if (burst >= 0) {
+            burstTargets_.emplace_back(burst, candidates_[pick]);
+        }
     }
     const Vec3 from{target.x, screenTopHeight(target) + rules_.offscreen, target.z};
     if (launch(session, ProjectileKind::Bolt, PrizeKind::Thunderbolt, from, rules_.bolt.velocity)) {
@@ -323,14 +338,17 @@ void Weapons::update(GameSession& session) {
             ++i;
             continue;
         }
-        const PrizeKind kind = pending_[i].kind;
+        const Strike strike = pending_[i];
         pending_.erase(pending_.begin() + static_cast<std::ptrdiff_t>(i));
-        if (kind == PrizeKind::Thunderbolt) {
-            throwBolt(session);
+        if (strike.kind == PrizeKind::Thunderbolt) {
+            throwBolt(session, strike.burst);
         } else {
             throwMeteor(session);
         }
     }
+    std::erase_if(burstTargets_, [&](const std::pair<int, ActorIndex>& target) {  // a burst that is all thrown is forgotten
+        return std::ranges::none_of(pending_, [&](const Strike& strike) { return strike.burst == target.first; });
+    });
 
     // A projectile's first touch of an actor is its end: it is taken out of the world so that the rest of its contacts of the step
     // find nobody.
@@ -396,9 +414,9 @@ void Weapons::land(GameSession& session, std::size_t index, ActorIndex actor, Ve
     event.material = materialOf(projectile.kind);
     session.emit(event);
 
-    hurt(session, actor, at, spec.damage, spec.dropsPrize);
+    hurt(session, actor, at, spec.damage, spec.dropsPrize, projectile.prize);
     if (spec.blastRadius > 0) {
-        session.objects_.burst(session, actor, at, spec.blastRadius, spec.blastPower, spec.blastDamage, spec.dropsPrize);
+        session.objects_.burst(session, actor, at, spec.blastRadius, spec.blastPower, spec.blastDamage, spec.dropsPrize, projectile.prize);
         GameEvent burst;
         burst.type = EventType::ProjectileExploded;
         burst.prize = projectile.prize;
@@ -409,8 +427,8 @@ void Weapons::land(GameSession& session, std::size_t index, ActorIndex actor, Ve
     }
 }
 
-bool Weapons::hurt(GameSession& session, ActorIndex actor, Vec3 at, int damage, bool dropsPrize) {
-    const bool done = session.objects_.weaponHit(session, actor, at, damage, dropsPrize);
+bool Weapons::hurt(GameSession& session, ActorIndex actor, Vec3 at, int damage, bool dropsPrize, PrizeKind by) {
+    const bool done = session.objects_.weaponHit(session, actor, at, damage, dropsPrize, by);
     stats_.hurt += done ? 1 : 0;
     return done;
 }
@@ -418,6 +436,7 @@ bool Weapons::hurt(GameSession& session, ActorIndex actor, Vec3 at, int damage, 
 // The level is won or the game is over: what is in the air is taken out, and what was to come does not.
 void Weapons::clearAll(GameSession& session) {
     over_ = true;
+    burstTargets_.clear();
     for (const Projectile& projectile : projectiles_) {
         GameEvent event;
         event.type = EventType::ProjectileGone;

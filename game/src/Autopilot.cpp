@@ -39,10 +39,14 @@ bool somethingAhead(const GameSession& session, WeaponType weapon) {
     const bool twin = weapon == WeaponType::Gun;
     for (int barrel = 0; barrel < (twin ? 2 : 1); ++barrel) {
         const float side = twin ? (barrel == 0 ? -muzzle.x : muzzle.x) : 0.0f;
-        const Vec3 origin{bat.x + side * scale, muzzle.y * scale, bat.z + muzzle.z * scale};
+        const Vec3 origin = onBat(session.rules().ballPlaneY, bat, scale, {side, muzzle.y, muzzle.z});
         for (const RayHit& hit : world.raycastAll(origin, {0, 0, 1}, rules.laserRange)) {
             const std::uint64_t data = world.userData(hit.body);
             if (data < session.scene().plan().actors.size()) {
+                const ObjectType type = session.scene().plan().actors[data].type;
+                if (type == ObjectType::TeleportSrc || type == ObjectType::TeleportDest) {
+                    continue;  // a shot goes through the teleports
+                }
                 if (session.actor(static_cast<ActorIndex>(data)).damageable) {
                     return true;
                 }

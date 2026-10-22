@@ -136,7 +136,7 @@ hold back a pile of the same sound in one frame.
 | `ShotFired`, `ProjectileHit`, `BoltStruck`, `MeteorFalling`, `MeteorImpact` | the projectile's material's `period` and `dead` sounds, below | data |
 | `BallLost`, `BallFreed`, `LifeLost`, `BatEntered`, `GameOver` | none | |
 
-**The weapons and the strikes** (`GAMEPLAY.md` 18.13). A projectile's game material names two sounds, which `PlaySounds` takes as the shot's (`period`) and the impact's (`dead`) [data, the use inferred as in `OBJECTS.md` section 4]; the events carry the material.
+**The weapons and the strikes** (`GAMEPLAY.md` 18.13). A projectile's game material names two sounds, which `PlaySounds` takes as the shot's (`period`) and the impact's (`dead`) [data, the use inferred as in `OBJECTS.md` section 4]; the events carry the material. At the autopilot's rate of fire the Bazooka's 2.18 s shot sound stacks seven voices deep and the soft limiter takes the sum (an open item, `GAMEPLAY.md` 18.13).
 
 | Event | Sound | File |
 |---|---|---|

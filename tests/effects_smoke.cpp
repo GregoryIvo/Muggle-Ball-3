@@ -200,6 +200,19 @@ void testBricks(Renderer& renderer, mb_app::Assets& assets) {
             check(files.size() == 1 && files.count(c.file) == 1, what + " goes off in " + c.file);
         }
     }
+    // What a bolt of lightning destroyed has no flash, what any other hit destroyed has (the footage's bolts end on the blocks in splinters,
+    // docs/GAMEPLAY.md 19.5); the event says who destroyed it.
+    for (const std::optional<PrizeKind> killer : {std::optional<PrizeKind>{PrizeKind::Thunderbolt}, std::optional<PrizeKind>{PrizeKind::Laser},
+                                                  std::optional<PrizeKind>{PrizeKind::Meteor}, std::optional<PrizeKind>{}}) {
+        Stage fresh(renderer, assets, "piratos-ostrovok");
+        GameEvent e = destroyed("plitka.jpg", {2, 1, 3});
+        e.prize = killer;
+        fresh.play(0.1, {&e, 1});
+        const bool flash = filesOf(*fresh.scene).count("explosesmall") == 1;
+        check(flash == (killer != PrizeKind::Thunderbolt),
+              std::string("bricks: a brick destroyed by ") + (killer ? std::string(prizeInfo(*killer).stem) : std::string("the ball")) +
+                  (flash ? " has its flash" : " has none"));
+    }
     // A brick with no material (the event says none) is no trouble.
     GameEvent bare = event(EventType::BrickDestroyed, {1, 1, 1});
     bare.actor = *brick;

@@ -7,9 +7,13 @@
 #include "mb/game/ParticleDraw.h"
 #include "mb/game/ParticleSystem.h"
 
+#include <SDL3/SDL_log.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -33,6 +37,30 @@ bool near(float a, float b, float tolerance = 1e-3f) {
 bool near(Vec3 a, Vec3 b, float tolerance = 1e-3f) {
     return near(a.x, b.x, tolerance) && near(a.y, b.y, tolerance) && near(a.z, b.z, tolerance);
 }
+
+// Counts the warnings logged while alive.
+class WarningCapture {
+public:
+    WarningCapture() {
+        SDL_GetLogOutputFunction(&previous_, &previousData_);
+        SDL_SetLogOutputFunction(&WarningCapture::onLog, this);
+    }
+    ~WarningCapture() { SDL_SetLogOutputFunction(previous_, previousData_); }
+    WarningCapture(const WarningCapture&) = delete;
+    WarningCapture& operator=(const WarningCapture&) = delete;
+
+    int count = 0;
+
+private:
+    static void onLog(void* self, int, SDL_LogPriority priority, const char*) {
+        if (priority == SDL_LOG_PRIORITY_WARN) {
+            ++static_cast<WarningCapture*>(self)->count;
+        }
+    }
+
+    SDL_LogOutputFunction previous_ = nullptr;
+    void* previousData_ = nullptr;
+};
 
 // A file in the converter's JSON with the given <particle> attribute objects.
 ParticleLibrary::Source file(const std::string& stem, const std::vector<std::string>& particles) {
@@ -654,6 +682,79 @@ void testSystem() {
     check(near(made.right, {0, 0, 1}) && near(made.up, {0, 1, 0}) && near(made.forward, {-1, 0, 0}), "system: a view from the rows of a facing matrix");
 }
 
+// A name the library lacks is said once, however often the effect is asked for (a rocket that retries its trail every frame would fill the log),
+// and what a caller gives that is not a number does not get into the simulation.
+void testHygiene() {
+    {
+        WarningCapture log;
+        ParticleSystem system(library());
+        for (int i = 0; i < 50; ++i) {
+            system.spawn("Nothing", {});
+            system.attach("Nothing", {});
+            system.beam("Nothing", {}, {1, 0, 0});
+        }
+        check(log.count == 1, "hygiene: a missing effect is logged once, not on every call (" + std::to_string(log.count) + " warnings)");
+        system.spawn("Another", {});
+        system.spawn("Another", {});
+        check(log.count == 2, "hygiene: and another name is said once too (" + std::to_string(log.count) + ")");
+    }
+
+    constexpr float nan = std::numeric_limits<float>::quiet_NaN(), inf = std::numeric_limits<float>::infinity();
+    const auto finite = [](const std::vector<ParticleQuad>& quads) {
+        return !quads.empty() && std::ranges::all_of(quads, [](const ParticleQuad& q) {
+            return std::isfinite(q.centre.x + q.centre.y + q.centre.z + length(q.halfRight) + length(q.halfUp) + q.colourBegin.a);
+        });
+    };
+    ParticleSystem scaled(library());
+    scaled.spawn("Flash", {}, {.scale = nan});
+    scaled.update(0.1);
+    const std::vector<ParticleQuad> flash = quadsOf(scaled);
+    check(finite(flash) && near(length(flash[0].halfRight) * 2, 30, 0.01f), "hygiene: a scale that is not a number is the default one (the flash is its 30 across)");
+    ParticleSystem timed(library());
+    timed.spawn("Smoke", {}, {.seconds = nan});
+    timed.attach("Trail/TrailBlue", {}, {.seconds = inf, .fade = nan});
+    timed.update(0.1);
+    check(finite(quadsOf(timed)), "hygiene: neither is a time or a fade that is not a number");
+
+    // A step that is not a time passes none: the emitter's debt and the particles' ages stay numbers.
+    ParticleSystem steps(library());
+    const EffectId trail = steps.attach("Trail/TrailBlue", {});
+    steps.update(0.1);
+    const std::size_t before = steps.particleCount();
+    for (const double bad : {static_cast<double>(nan), static_cast<double>(inf), -1.0, 1e300}) {
+        steps.update(bad);
+    }
+    check(finite(quadsOf(steps)) && steps.alive(trail), "hygiene: a step of NaN, infinity, less than nothing or 1e300 seconds leaves finite particles");
+    steps.update(0.1);
+    check(steps.particleCount() > 0 && finite(quadsOf(steps)), "hygiene: and the trail still emits afterwards (" + std::to_string(before) + " before, " +
+                                                                    std::to_string(steps.particleCount()) + " after)");
+    // An emitter holds its `num` particles at most, however long the step.
+    ParticleSystem long_(library());
+    long_.attach("Trail/TrailBlue", {});
+    long_.update(1e20);
+    check(long_.particleCount() <= 30, "hygiene: a step far longer than a particle's life puts out no more than the 30 a trail keeps (" + std::to_string(long_.particleCount()) + ")");
+}
+
+// A trail whose particles are asked to live a shorter time: it is a shorter line, still `num` of them while it flies.
+void testTrailLife() {
+    ParticleSystem system(library());
+    const EffectId id = system.attach("Trail/TrailBlue", {}, {.fade = 0.06f});
+    for (int i = 0; i < 60; ++i) {
+        system.moveTo(id, {0, 0, 52.5f * static_cast<float>((i + 1) / 60.0)});
+        system.update(1.0 / 60);
+    }
+    float nearest = 1e9f, farthest = -1e9f;
+    for (const ParticleQuad& q : quadsOf(system)) {
+        nearest = std::min(nearest, q.centre.z);
+        farthest = std::max(farthest, q.centre.z);
+    }
+    check(system.particleCount() >= 25 && system.particleCount() <= 31, "trail life: it keeps its 30 particles alive (" + std::to_string(system.particleCount()) + ")");
+    check(farthest - nearest < 3.5f && farthest - nearest > 2.0f, "trail life: over the 0.06 s they live a trail at 52.5 units a second is 3 units long (" + std::to_string(farthest - nearest) + ")");
+    system.stop(id);
+    system.update(0.07);
+    check(system.particleCount() == 0, "trail life: and what it left is gone in 0.06 s, not the file's half second");
+}
+
 // ---- The batches -------------------------------------------------------------------------------------------------------------
 
 void testBatches() {
@@ -720,6 +821,34 @@ void testBatches() {
 
     batches.build(std::span<const ParticleQuad>());
     check(batches.batches().empty() && batches.quadCount() == 0, "batches: nothing, no batches");
+
+    // preload() looks every texture up at once, the halos' not (the prizes draw those), and drawing asks for nothing after it; the missing
+    // texture is said when it is first drawn.
+    std::vector<std::string> early;
+    ParticleBatches loaded(library(), [&](std::string_view name) -> TextureHandle {
+        early.emplace_back(name);
+        return name == "Particles/ParticleRoket.png" ? 0 : (name == ParticleBatches::kFallbackTexture ? 90 : 7);
+    });
+    check(early.empty(), "batches: nothing is looked up before it is asked for");
+    WarningCapture log;
+    loaded.preload();
+    const std::set<std::string> textures(early.begin(), early.end());
+    check(textures.contains("Particles/ParticleBubble.png") && textures.contains("Particles/ParticleLaser1.png") &&
+              textures.contains("Particles/ParticleRoket.png") && !textures.contains("Oreols/07.png"),
+          "batches: preload() looks up the textures of the definitions, not the halos'");
+    check(log.count == 0, "batches: and says nothing yet of the one it cannot find");
+    const std::size_t looked = early.size();
+    ParticleSystem every(library());
+    for (const ParticleDef& def : library().all()) {
+        if (def.type != ParticleType::Oreol && def.type != ParticleType::Laser && def.type != ParticleType::Lightning) {
+            every.spawn(def.file + "/" + def.name, {0, 1, 0});
+        }
+    }
+    every.update(0.05);
+    loaded.build(every, kView);
+    loaded.build(every, kView);
+    check(early.size() == looked, "batches: so drawing every kind of effect asks for no texture");
+    check(log.count == 1, "batches: the missing texture is said once, when it is first drawn (" + std::to_string(log.count) + ")");
 }
 
 // ---- The table of explosions --------------------------------------------------------------------------------------------------
@@ -757,6 +886,8 @@ int main() {
     testLightning();
     testDegenerate();
     testSystem();
+    testHygiene();
+    testTrailLife();
     testBatches();
     testBrickEffects();
     if (failures) {

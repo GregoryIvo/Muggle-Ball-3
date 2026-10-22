@@ -138,7 +138,8 @@ struct PrizeRules {
     // let go by a click, or by itself after magnetHold seconds, or when the magnet ends [M, the rest I].
     double magnetHold = 4.0;
     // Yo-Yo: the ball is kept within this of the bat, by a string that turns it back [M: 7.0 u at the end, 1-5 u before];
-    // 7.5 s in one case [M, one case].
+    // 7.5 s in one case [M, one case]. Measured at the plain bat; the string is tied to its rim, so a bat the prizes made bigger or
+    // smaller has it that much longer or shorter [I].
     float yoyoLength = 7.0f;
     // Wall: the rope along the near edge. Wall.XML is a box 41.43 x 3.22 x 0.74 at z -20.01 [D]; a ball bounces off its far
     // face [I].

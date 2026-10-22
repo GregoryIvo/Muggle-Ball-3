@@ -66,4 +66,8 @@ void ModelCache::updateMesh(MeshHandle mesh, std::span<const Vertex> vertices) {
     renderer_.updateMesh(mesh, vertices);
 }
 
+void ModelCache::destroyMesh(MeshHandle mesh) {
+    renderer_.destroyMesh(mesh);
+}
+
 }  // namespace mb

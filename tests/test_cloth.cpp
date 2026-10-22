@@ -112,13 +112,24 @@ Actor board() {
                  "BoardMaterial");
 }
 
+// Which way a sail faces: the player (it stands in a plane of constant z, as the levels' do), the sky (it lies flat) or the side (a plane of
+// constant x, which a wind along x is square to).
+enum class Facing { Player, Up, Side };
+
 // The sail the levels have: a grid of `width` by `height` particles `gap` apart in the plane z = `z`, its first particle at x =
 // `left` and its lowest row at height `base`, as a cloth object with id `id` (its own actor is the first particle) and its segments
 // nested in it, each a sphere of 0.5 weighing what the real ones do.
 Actor sail(std::uint32_t id, int width, int height, float gap, float left, float base, float z, Vec3 wind = {},
-           const std::string& material = "Sail") {
+           const std::string& material = "Sail", Facing facing = Facing::Player) {
     const float mass = 0.0052359877f;
-    const auto at = [&](int k) { return Vec3{left + gap * static_cast<float>(k % width), base + gap * static_cast<float>(k / width), z}; };
+    const auto at = [&](int k) {
+        const float across = gap * static_cast<float>(k % width), along = gap * static_cast<float>(k / width);
+        switch (facing) {
+            case Facing::Up: return Vec3{left + across, base, z + along};  // lying in the plane y = base, its rows going away from the player
+            case Facing::Side: return Vec3{left, base + along, z + across};  // standing in the plane x = left
+            default: return Vec3{left + across, base + along, z};
+        }
+    };
     Actor lead = actor(ObjectType::Cloth, id, {0, 0, 0}, kDynamic, mass, {sphere(0.5f, at(0))}, material);
     lead.object->cloth = {width, height, wind};
     for (int k = 1; k < width * height; ++k) {
@@ -569,6 +580,167 @@ void testAWeaponAndABlastHurtASail() {
     }
 }
 
+// A blast takes a sail by where its particles are, not where the level saved it: the sail's yard is thrown up the sky (a saved velocity
+// with some damping, so that it stops about 9 units higher), and the charge goes off where the sail came to rest, 4 in front of it.
+void testABlastTakesASailWhereItIsNow() {
+    const auto level = [](bool withCharge, Vec3 chargeAt) {
+        Rig r = rig(3, 3, 1.0f, 1.0f, 2.0f, {}, true);
+        r.level.actors[kYard].body->linearVelocity = {0, 40, 0};
+        r.level.actors[kYard].body->linearDamping = 4;
+        if (withCharge) {
+            Actor charge = actor(ObjectType::Dynamite, 40, chargeAt, kStatic, 85, {box({0.9f, 1.3f, 0.9f}, {0, 1.3f, 0})}, "Dinamit.jpg");
+            charge.object->param = 0x40A00000;  // 5.0
+            charge.object->target = "explosebig";
+            r.level.actors.push_back(charge);
+        }
+        return r.level;
+    };
+    SessionOptions o = options();
+    o.physics.start = StartState::SavedVelocities;
+    Game probe(level(false, {}), o);
+    probe.run(3);
+    const Vec3 there = probe.session.centreOf(kSail);
+    check(there.y > 9.0f, fmt("carried: the sail went up with its yard (to y %.1f from 2)", there.y));
+    for (const bool where : {true, false}) {
+        // Dynamite's centre is its pose; the charge stands 4 in front of the sail where it is now, or where it was saved
+        const Vec3 at = where ? Vec3{there.x, there.y, there.z - 4} : Vec3{0, 2.0f, -2};
+        Game g(level(true, at), o);
+        g.run(3);
+        const ActorIndex charge = kSail + 9;
+        check(g.session.hit(charge, at), "carried: the charge is hit");
+        g.run(1);
+        check(g.session.actor(kSail).removed == where,
+              std::string("carried: a charge ") + (where ? "4 units from where the sail is takes it, though it is 9 from where it was saved" : "4 units from where the sail was saved leaves it, 7 from where it is"));
+    }
+}
+
+// A body that lies on a sail is not held up by it: the rays that look for what is under a sleeping body hit the sail's faces.
+void testASailHoldsNothingUp() {
+    const auto level = [](bool slab) {
+        Level l = rig(3, 3, 2.0f, 0.0f, 0.0f).level;  // (the rig's board; its yard and sail are replaced)
+        l.actors.resize(1);
+        l.joints.clear();
+        Actor flat = sail(20, 3, 3, 2.0f, -2.0f, 2.0f, 8.0f, {}, "Sail", Facing::Up);
+        for (const int k : {0, 2, 6, 8}) {  // the four corners are tied to the world
+            Joint j;
+            j.type = NxJointType::Spherical;
+            j.actorA = 20 + static_cast<std::uint32_t>(k);
+            j.actorB = 0;
+            j.localAnchor[1] = particleAt(flat, k);
+            j.localAxis[0] = j.localAxis[1] = {0, 0, 1};
+            j.localNormal[0] = j.localNormal[1] = {1, 0, 0};
+            j.maxForce = j.maxTorque = kFltMax;
+            l.joints.push_back(j);
+        }
+        l.actors.push_back(flat);
+        // A block 0.06 above the sail's plane (y 2) over its middle, and one 0.06 above a slab of its own
+        l.actors.push_back(actor(ObjectType::Brick, 30, {0, 2.56f, 10.0f}, kDynamic, 10, {box({0.5f, 0.5f, 0.5f})}, "Shark.jpg"));
+        l.actors.push_back(actor(ObjectType::Brick, 31, {10, 5.56f, 10.0f}, kDynamic, 10, {box({0.5f, 0.5f, 0.5f})}, "Shark.jpg"));
+        if (slab) {
+            l.actors.push_back(actor(ObjectType::Brick, 32, {10, 4.5f, 10.0f}, kStatic, 100, {box({2, 0.5f, 2})}, "Yard.jpg"));
+        }
+        return l;
+    };
+    const ActorIndex onSail = 10, onSlab = 11;  // after the board (0) and the sail's 9 actors (1 to 9)
+    PhysicsScene scene(level(true), materials(), {}, singleThreaded());
+    check(scene.cloths().size() == 1 && scene.body(onSail) != 0 && scene.body(onSlab) != 0, "support: a flat sail with a block above it");
+    check(!scene.supported(onSail), "support: a block that lies 0.06 over a sail is not held up by it");
+    check(scene.supported(onSlab), "support: and one that lies 0.06 over a slab is");
+}
+
+// A ship that closes on a free sail does not hit a wall: the sail is a few grams of cloth, so the hit has next to no force, and the joints that
+// hold the ship together stay. (Its mass was the kinematic actor's, which every other body takes for immovable.)
+void testAShipThatTouchesASailBreaksNothing() {
+    Rig r = rig(3, 3, 2.0f, 4.0f, 10.0f, {}, false);
+    r.level.joints.clear();
+    r.level.actors.resize(2);  // the board and the yard: the sail is rebuilt below, hung from the world
+    Actor free = sail(20, 3, 3, 2.0f, -2.0f, 4.0f, 10.0f);
+    for (const int k : {6, 8}) {
+        Joint j;
+        j.type = NxJointType::Spherical;
+        j.actorA = 20 + static_cast<std::uint32_t>(k);
+        j.actorB = 0;
+        j.localAnchor[1] = particleAt(free, k);
+        j.localAxis[0] = j.localAxis[1] = {0, 0, 1};
+        j.localNormal[0] = j.localNormal[1] = {1, 0, 0};
+        j.maxForce = j.maxTorque = kFltMax;
+        r.level.joints.push_back(j);
+    }
+    r.level.actors.push_back(free);
+    // A boom and a spar welded together (a joint that breaks at 100) fly at the sail's middle row at 5 units a second.
+    Actor boom = actor(ObjectType::Brick, 30, {0, 6, 4}, kDynamic | kNoGravity, 100, {box({3, 0.2f, 0.2f})}, "Yard.jpg");
+    Actor spar = actor(ObjectType::Brick, 31, {0, 6, 3}, kDynamic | kNoGravity, 100, {box({3, 0.2f, 0.2f})}, "Yard.jpg");
+    boom.body->linearVelocity = spar.body->linearVelocity = {0, 0, 5};
+    Joint weld;
+    weld.type = NxJointType::Fixed;
+    weld.actorA = 30;
+    weld.actorB = 31;
+    weld.localAnchor[0] = {0, 0, -0.5f};
+    weld.localAnchor[1] = {0, 0, 0.5f};
+    weld.localAxis[0] = weld.localAxis[1] = {0, 1, 0};
+    weld.localNormal[0] = weld.localNormal[1] = {1, 0, 0};
+    weld.maxForce = weld.maxTorque = 100;
+    r.level.actors.push_back(boom);
+    r.level.actors.push_back(spar);
+    r.level.joints.push_back(weld);
+    PhysicsOptions options;
+    options.start = StartState::SavedVelocities;
+    PhysicsScene scene(r.level, materials(), options, singleThreaded());
+    const ActorIndex boomIndex = kSail + 9;
+    bool touched = false;
+    for (int s = 0; s < 150; ++s) {
+        scene.step(1.0f / 60);
+        for (const ContactEvent& e : scene.contacts()) {
+            touched = touched || ((e.userDataA == kSail || e.userDataB == kSail) && (e.userDataA == boomIndex || e.userDataB == boomIndex));
+        }
+    }
+    check(touched, "weld: the boom reaches the sail");
+    check(scene.brokenJoints().empty(), fmt("weld: and the weld that holds it to its spar is whole (%.0f of 1 broken)", static_cast<float>(scene.brokenJoints().size())));
+}
+
+// The Wind prize and the Earthquake move a sail as they move the loose bodies of the level (the wind of the data, which the sail has of its
+// own, is across it only).
+void testWindAndQuakeMoveASail() {
+    // A sail that stands across x, hung from the middle of its top row by a yard that stays: the wind along x is square to it. It has hung
+    // for 14 s when the prize comes, which is long enough for it to have settled and gone to sleep.
+    struct Hung {
+        std::vector<Vec3> at;
+        bool asleepBefore = false;
+    };
+    const auto hung = [](PrizeKind kind, bool give) {
+        Level level;
+        level.gravity = {0, -9.8f, 0};
+        Actor yard = actor(ObjectType::Brick, 10, {0, 8, 10}, kStatic, 100, {box({0.15f, 0.15f, 3})}, "Yard.jpg");
+        Actor side = sail(20, 3, 4, 2.0f, 0.0f, 2.0f, 8.0f, {}, "Sail", Facing::Side);
+        level.actors = {board(), yard, side};
+        level.joints = {pin(side, 10, 10, {0, 8, 10})};  // the middle of the top row
+        SessionOptions o = options();
+        o.levelEnd = TargetRule::Never;  // (a level with no brick is won at once, and a catch then does nothing)
+        Game g(level, o);
+        g.run(14);
+        Hung result;
+        result.asleepBefore = !g.session.scene().world().isAwake(g.session.scene().cloths().body(0));
+        if (give) {
+            g.session.givePrize(kind);
+        }
+        g.run(1.2);
+        result.at = g.session.scene().cloths().positions(0);
+        return result;
+    };
+    const Hung still = hung(PrizeKind::Wind, false);
+    check(still.asleepBefore, "prizes: a sail that has hung for 14 s is asleep");
+    for (const PrizeKind kind : {PrizeKind::Wind, PrizeKind::Quake}) {
+        const Hung moved = hung(kind, true);
+        float most = 0;
+        for (std::size_t i = 0; i < moved.at.size() && i < still.at.size(); ++i) {
+            most = std::max(most, length(moved.at[i] - still.at[i]));
+        }
+        check(finite(moved.at) && most > 0.2f,
+              fmt(kind == PrizeKind::Wind ? "prizes: the Wind wakes a sail and blows it (it moves %.2f from where it hangs)"
+                                          : "prizes: the Earthquake wakes a sail and shakes it (it moves %.2f from where it hangs)", most));
+    }
+}
+
 // ---- The mesh ---------------------------------------------------------------------------------------------------
 
 void testTheMesh() {
@@ -636,6 +808,10 @@ int main() {
     testTheBallHurtsASail();
     testAWeaponAndABlastHurtASail();
     testASailThatFallsOffTheBoardIsTakenOut();
+    testABlastTakesASailWhereItIsNow();
+    testASailHoldsNothingUp();
+    testAShipThatTouchesASailBreaksNothing();
+    testWindAndQuakeMoveASail();
     testTheMesh();
     if (failures == 0) {
         std::puts("all cloth tests passed");

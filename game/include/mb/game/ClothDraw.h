@@ -29,6 +29,11 @@ bool topIsLastRow(const ClothPlan& cloth);
 class ClothDraw {
 public:
     ClothDraw(ModelCache& cache, const MaterialLibrary& materials, const TextureIndex& textures, const Level& level, const PhysicsScene& scene);
+    // The meshes are the sails' own (the cache does not know them): they go back to the renderer with it, or each level with sails would
+    // leave its 3 to 5 behind until the renderer ends.
+    ~ClothDraw();
+    ClothDraw(const ClothDraw&) = delete;
+    ClothDraw& operator=(const ClothDraw&) = delete;
 
     // Brings the meshes up to the particles; a sail that has not moved since the last call is not uploaded again.
     void update(const PhysicsScene& scene);

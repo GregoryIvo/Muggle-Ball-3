@@ -606,7 +606,7 @@ bool GameSession::hit(ActorIndex actor, Vec3 at, bool dropsPrize) {
     return actor < bricks_.size() && hitBrick(actor, at, 0, -1, dropsPrize);
 }
 
-bool GameSession::hitBrick(ActorIndex actor, Vec3 at, float speed, int ball, bool dropsPrize) {
+bool GameSession::hitBrick(ActorIndex actor, Vec3 at, float speed, int ball, bool dropsPrize, std::optional<PrizeKind> by) {
     Brick& brick = bricks_[actor];
     if (!brick.damageable || brick.removed || brick.exploding || brick.shrinking) {
         return false;
@@ -627,6 +627,7 @@ bool GameSession::hitBrick(ActorIndex actor, Vec3 at, float speed, int ball, boo
     if (brick.energy <= 0) {
         brick.exploding = true;
         brick.noPrize = !dropsPrize;
+        brick.killedBy = by;
         brick.explodeAt = time_ + brick.material->exploseDelay / 1000.0;
         exploding_.push_back(actor);
     }
@@ -797,6 +798,7 @@ void GameSession::explodeDue() {
         event.position = centreOf(actor);
         event.points = brick.material->brickScore;
         event.material = brick.material;
+        event.prize = brick.killedBy;
         emit(event);
         objects_.destroyed(*this, actor, event.position);
         if (shrinksAway(brick.material)) {

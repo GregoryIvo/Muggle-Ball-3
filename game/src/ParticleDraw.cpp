@@ -7,23 +7,45 @@
 namespace mb {
 
 ParticleBatches::ParticleBatches(const ParticleLibrary& library, TextureLookup lookup)
-    : lookup_(std::move(lookup)), textures_(library.all().size(), 0), resolved_(library.all().size(), false) {}
+    : library_(library),
+      lookup_(std::move(lookup)),
+      textures_(library.all().size(), 0),
+      resolved_(library.all().size(), false),
+      missing_(library.all().size(), false),
+      said_(library.all().size(), false) {}
+
+void ParticleBatches::resolve(const ParticleDef& def) {
+    if (resolved_[def.id]) {
+        return;
+    }
+    resolved_[def.id] = true;
+    textures_[def.id] = def.texture.empty() ? 0 : lookup_(def.texture);
+    if (textures_[def.id] == 0) {
+        if (!fallbackResolved_) {
+            fallbackResolved_ = true;
+            fallback_ = lookup_(kFallbackTexture);
+        }
+        missing_[def.id] = true;
+        textures_[def.id] = fallback_;
+    }
+}
+
+void ParticleBatches::preload() {
+    for (const ParticleDef& def : library_.all()) {
+        if (def.type != ParticleType::Oreol) {
+            resolve(def);
+        }
+    }
+}
 
 TextureHandle ParticleBatches::textureOf(const ParticleDef& def) {
     if (def.id >= textures_.size()) {
         return 0;
     }
-    if (!resolved_[def.id]) {
-        resolved_[def.id] = true;
-        textures_[def.id] = def.texture.empty() ? 0 : lookup_(def.texture);
-        if (textures_[def.id] == 0) {
-            if (!fallbackResolved_) {
-                fallbackResolved_ = true;
-                fallback_ = lookup_(kFallbackTexture);
-            }
-            logWarn("particles: no texture {} for {}/{}, drawn with {}", def.texture, def.file, def.name, kFallbackTexture);
-            textures_[def.id] = fallback_;
-        }
+    resolve(def);
+    if (missing_[def.id] && !said_[def.id]) {
+        said_[def.id] = true;
+        logWarn("particles: no texture {} for {}/{}, drawn with {}", def.texture, def.file, def.name, kFallbackTexture);
     }
     return textures_[def.id];
 }

@@ -208,7 +208,8 @@ enum class EventType {
     BrickHit,        // ball (-1 for hit()), actor, position (the contact), speed, energy (left), material
     // BrickDestroyed comes exploseDelay milliseconds after the hit that took the last energy. A person or an animal
     // (shrinksAway()) is then still there for GameplayRules::shrinkTime, shrinking (ActorStatus::shrink): the others are gone.
-    BrickDestroyed,  // actor, position (centre of mass), points (added to the score), material
+    BrickDestroyed,  // actor, position (centre of mass), points (added to the score), material, prize (the weapon or strike whose hit took the
+                     // last energy: Machine Gun, Cannon, Bazooka, Laser, Thunderbolt or Meteor; none for the ball, a blast, a chain)
     ActorFell,       // actor, position (centre of mass), points (only with fallScores), material: it left the board
     // The special objects (SpecialObjects; docs/GAMEPLAY.md section 17). Dynamite that goes off also reports its
     // BrickDestroyed, with the charge's points and sound.
@@ -520,6 +521,7 @@ private:
         double explodeAt = 0;
         double removeAt = 0;  // when it has finished shrinking
         bool noPrize = false;  // the hit that destroyed it carried disablePrize
+        std::optional<PrizeKind> killedBy;  // the weapon or strike whose hit destroyed it (BrickDestroyed's `prize`)
         std::uint8_t targetFor = 0;  // bit per TargetRule
     };
     // What comes next after the last ball is lost.
@@ -590,7 +592,7 @@ private:
     Ball* ballOf(BodyId body);
     void processContacts();
     void hitBat(Ball& ball);
-    bool hitBrick(ActorIndex actor, Vec3 at, float speed, int ball, bool dropsPrize = true);
+    bool hitBrick(ActorIndex actor, Vec3 at, float speed, int ball, bool dropsPrize = true, std::optional<PrizeKind> by = std::nullopt);
     void keepBalls();
     void loseBall(std::size_t index, Vec3 position, Vec3 velocity);
     bool freeBall(Ball& ball, Vec3 at);

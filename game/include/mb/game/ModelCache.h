@@ -38,6 +38,8 @@ public:
     // updateMesh() with as many vertices as it began with. It is the caller's to keep; the cache does not know it.
     MeshHandle dynamicMesh(std::span<const Vertex> vertices, std::span<const std::uint32_t> indices);
     void updateMesh(MeshHandle mesh, std::span<const Vertex> vertices);
+    // Gives a dynamicMesh() back: the GPU's buffers are freed once the frames in flight are done with them.
+    void destroyMesh(MeshHandle mesh);
 
 private:
     Renderer& renderer_;

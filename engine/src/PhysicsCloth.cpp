@@ -217,6 +217,25 @@ void PhysicsWorld::setClothWind(BodyId cloth, Vec3 acceleration) {
     found->second.wind = acceleration;
 }
 
+void PhysicsWorld::pushCloth(BodyId cloth, Vec3 velocity) {
+    Impl& w = *impl_;
+    const auto found = w.cloths.find(cloth);
+    if (found == w.cloths.end() || !isFinite(velocity)) {
+        logWarn("PhysicsWorld::pushCloth: body {} is no cloth, or the velocity is not finite", cloth);
+        return;
+    }
+    if (found->second.frozen) {
+        return;
+    }
+    JPH::Body& body = *w.joltBody(w.records.at(cloth));
+    for (JPH::SoftBodyVertex& vertex : particlesOf(body).GetVertices()) {
+        if (vertex.mInvMass > 0) {
+            vertex.mVelocity += toJolt(velocity);
+        }
+    }
+    w.bodies.ActivateBody(body.GetID());
+}
+
 void PhysicsWorld::clothIgnores(BodyId cloth, BodyId other) {
     const auto found = impl_->cloths.find(cloth);
     if (found != impl_->cloths.end()) {

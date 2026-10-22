@@ -3,7 +3,7 @@
 //
 //   mb_cloth_smoke [--seconds S] [--print] [level]
 //        each level with cloth is built the way the game builds it and left alone for S seconds (default 10): every particle must
-//        stay finite and within reach of where it was saved, no spring may stretch past a third of its length, and every pinned
+//        stay finite and within 3 units of where it was saved, no spring may stretch past an eighth of its length, and every pinned
 //        particle must be where its holder has it. Then a ball is shot at the middle of each sail, and the sail's touch must
 //        be reported by the lead actor's id; a holder that is taken away lets its pins go, and a sail that is taken away
 //        leaves the world. The table has, per level, the sails, their particles and pins, the furthest a particle got from where
@@ -33,8 +33,8 @@ namespace {
 
 constexpr float kStep = 1.0f / 60.0f;
 constexpr float kRunSeconds = 10.0f;
-constexpr float kMostDrift = 15.0f;     // a particle this far from where the level saved it has blown away
-constexpr float kMostStretch = 0.34f;   // of a spring's length at rest
+constexpr float kMostDrift = 3.0f;      // a particle this far from where the level saved it has blown away (2.31 at most, GAMEPLAY.md 20.6)
+constexpr float kMostStretch = 0.12f;   // of a spring's length at rest (8 % at most)
 constexpr float kPinSlack = 0.05f;      // how near a pinned particle is to the place its holder has it
 constexpr float kLowSail = 5.0f;        // a sail whose middle hangs lower than this already lies on a deck or a boat
 // The sails of the shipped levels: 22 of them, with 431 segments besides their own actors (453 particles), held by 84 joints.

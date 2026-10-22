@@ -234,9 +234,14 @@ bool PhysicsScene::supported(ActorIndex actor) const {
     for (const Vec3 p : points) {
         lowest = std::min(lowest, p.y);
     }
+    // What holds a body up is the level's solid actors and the balls: not a sail, whose faces the rays hit (a body lying on a sail goes down with
+    // it), and not a projectile passing under.
     for (const Vec3 p : points) {
-        if (world_.raycast({p.x, lowest - 0.005f, p.z}, {0, -1, 0}, kSupportGap)) {
-            return true;
+        for (const RayHit& hit : world_.raycastAll({p.x, lowest - 0.005f, p.z}, {0, -1, 0}, kSupportGap)) {
+            const std::uint64_t data = world_.userData(hit.body);
+            if (data != kProjectileData && !(isActor(data) && cloths_->clothOf(static_cast<ActorIndex>(data)) >= 0)) {
+                return true;
+            }
         }
     }
     return false;
@@ -280,6 +285,12 @@ float PhysicsScene::massOf(std::uint64_t userData, BodyId body) const {
     }
     if (!isActor(userData)) {
         return kBallMass;
+    }
+    // A sail is a few grams of cloth, however its actors were saved (kinematic, which is immovable to every other kind of body): a ship that
+    // closes on a free sail does not hit a wall (it would break its own joints).
+    if (const int cloth = cloths_->clothOf(static_cast<ActorIndex>(userData)); cloth >= 0) {
+        const ClothPlan& sail = cloths_->plan(static_cast<std::size_t>(cloth));
+        return std::max(sail.particleMass * static_cast<float>(sail.actors.size()), 1e-3f);
     }
     const ActorPlan& actor = plan_.actors[userData];
     return actor.motion == MotionType::Dynamic ? std::max(actor.body.mass, 1e-3f) : kImmovable;

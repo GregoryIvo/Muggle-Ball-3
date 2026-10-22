@@ -40,8 +40,10 @@ constexpr float kRingSeconds = 0.4f;
 // A rocket's trail comes out of its tail, which is this far behind the middle of its capsule (the model runs from -0.79 to +1.0) [D].
 constexpr float kRocketTail = 0.8f;
 // The footage's rocket is a small red body with a short glow behind it and no streak (V2 112.62 to 112.75): the trail's 2.5 units are
-// drawn at this share of their size [M, I].
+// drawn at this share of their size, and each of its particles lives this long instead of the file's half a second (which at 52.5 units a
+// second is a dotted line 26 units long), so that the glow is about 3 units behind the tail [M, I].
 constexpr float kRocketTrailScale = 0.35f;
+constexpr float kRocketTrailLife = 0.06f;
 
 }  // namespace
 
@@ -91,7 +93,7 @@ void WeaponEffects::follow(std::span<const Projectile> projectiles, double lead)
         }
         EffectId& trail = trails_[projectile.id];
         if (!particles_.alive(trail)) {
-            trail = projectile.kind == ProjectileKind::Rocket ? particles_.attach(kRocketTrail, at, {.scale = kRocketTrailScale})
+            trail = projectile.kind == ProjectileKind::Rocket ? particles_.attach(kRocketTrail, at, {.scale = kRocketTrailScale, .fade = kRocketTrailLife})
                                                                : particles_.attach(kMeteorTrail, at);
         }
         particles_.moveTo(trail, at);

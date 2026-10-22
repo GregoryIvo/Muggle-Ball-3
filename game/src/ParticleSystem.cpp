@@ -48,6 +48,11 @@ constexpr float kTileLeft = 1.0f / 3.0f, kTileRight = 2.0f / 3.0f;
 
 constexpr float kTiny = 1e-4f;
 
+// A size or a time asked for: one that is not a number or is infinite is `otherwise`.
+float finiteOr(float value, float otherwise) {
+    return std::isfinite(value) ? value : otherwise;
+}
+
 float lerp(float a, float b, float t) {
     return a + (b - a) * t;
 }
@@ -227,15 +232,23 @@ float ParticleSystem::draw(Effect& effect) {
     return hash01(effect.seed, effect.draws++, 0x51ED);
 }
 
+const ParticleDef* ParticleSystem::definition(std::string_view effect) {
+    const ParticleDef* def = library_.find(effect);
+    if (def == nullptr && missing_.emplace(effect).second) {
+        logWarn("particles: no effect named {}", effect);
+    }
+    return def;
+}
+
 EffectId ParticleSystem::make(const ParticleDef* def, Vec3 at, const EffectOptions& options) {
     Effect effect;
     effect.id = nextId_++;
     effect.def = def;
     effect.at = effect.previous = at;
-    effect.scale = std::max(options.scale, 0.0f);
-    effect.holdSeconds = std::max(options.seconds, 0.0f);
-    effect.fadeSeconds = std::max(options.fade, 0.0f);
-    effect.growSeconds = std::max(options.grow, 0.0f);
+    effect.scale = std::max(finiteOr(options.scale, 1.0f), 0.0f);
+    effect.holdSeconds = std::max(finiteOr(options.seconds, 0.0f), 0.0f);
+    effect.fadeSeconds = std::max(finiteOr(options.fade, 0.0f), 0.0f);
+    effect.growSeconds = std::max(finiteOr(options.grow, 0.0f), 0.0f);
     effect.direction = normalize(length(options.direction) > 0 ? options.direction : def->direction.value_or(Vec3{}));
     seed_ = seed_ * 1664525u + 1013904223u;
     effect.seed = options.seed != 0 ? options.seed : seed_ ^ (effect.id * 0x9E3779B9u);
@@ -256,9 +269,8 @@ EffectId ParticleSystem::beam(std::string_view effect, Vec3 from, Vec3 to) {
 }
 
 EffectId ParticleSystem::spawn(std::string_view effect, Vec3 at, const EffectOptions& options) {
-    const ParticleDef* def = library_.find(effect);
+    const ParticleDef* def = definition(effect);
     if (def == nullptr) {
-        logWarn("particles: no effect named {}", effect);
         return kNoEffect;
     }
     switch (def->type) {
@@ -276,9 +288,9 @@ EffectId ParticleSystem::spawn(std::string_view effect, Vec3 at, const EffectOpt
         default: {
             const EffectId id = make(def, at, options);
             Effect& emitter = *find(id);
-            if (options.seconds > 0) {
+            if (emitter.holdSeconds > 0) {
                 emitter.emitting = true;
-                emitter.emitLeft = options.seconds;
+                emitter.emitLeft = emitter.holdSeconds;
             } else {
                 burst(emitter);
             }
@@ -288,9 +300,8 @@ EffectId ParticleSystem::spawn(std::string_view effect, Vec3 at, const EffectOpt
 }
 
 EffectId ParticleSystem::attach(std::string_view effect, Vec3 at, const EffectOptions& options) {
-    const ParticleDef* def = library_.find(effect);
+    const ParticleDef* def = definition(effect);
     if (def == nullptr) {
-        logWarn("particles: no effect named {}", effect);
         return kNoEffect;
     }
     switch (def->type) {
@@ -301,7 +312,7 @@ EffectId ParticleSystem::attach(std::string_view effect, Vec3 at, const EffectOp
             const EffectId id = make(def, at, options);
             Effect& emitter = *find(id);
             emitter.emitting = true;
-            emitter.emitLeft = options.seconds > 0 ? options.seconds : -1.0f;
+            emitter.emitLeft = emitter.holdSeconds > 0 ? emitter.holdSeconds : -1.0f;
             return id;
         }
         default:
@@ -310,9 +321,8 @@ EffectId ParticleSystem::attach(std::string_view effect, Vec3 at, const EffectOp
 }
 
 EffectId ParticleSystem::beam(std::string_view effect, Vec3 from, Vec3 to, const EffectOptions& options) {
-    const ParticleDef* def = library_.find(effect);
+    const ParticleDef* def = definition(effect);
     if (def == nullptr) {
-        logWarn("particles: no effect named {}", effect);
         return kNoEffect;
     }
     if (def->type != ParticleType::Laser && def->type != ParticleType::Lightning) {
@@ -383,7 +393,7 @@ ParticleSystem::Particle ParticleSystem::start(Effect& effect, Vec3 at, float ag
             break;
         }
         case ParticleType::Trail: {
-            p.life = fadeOf(def);
+            p.life = effect.fadeSeconds > 0 ? effect.fadeSeconds : fadeOf(def);
             const float u = draw(effect), v = draw(effect), within = draw(effect);  // (the order of the draws is the order they are written)
             p.origin = at + onSphere(u, v) * (def.radius * effect.scale * std::cbrt(within));
             break;
@@ -440,6 +450,9 @@ void ParticleSystem::burst(Effect& effect) {
 
 void ParticleSystem::update(double seconds) {
     const auto dt = static_cast<float>(seconds);
+    if (!(dt >= 0) || !std::isfinite(dt)) {  // no time passes (a NaN would stay in every age and in what the emitters owe)
+        return;
+    }
     for (Particle& p : particles_) {
         p.age += dt;
     }
@@ -468,9 +481,11 @@ void ParticleSystem::update(double seconds) {
                 effect.emitLeft -= emitFor;
                 effect.emitting = effect.emitLeft > 0;
             }
-            effect.owed += static_cast<double>(def.count) / particleLife(def) * emitFor;
-            const auto due = static_cast<int>(effect.owed);
-            effect.owed -= due;
+            const float life = def.type == ParticleType::Trail && effect.fadeSeconds > 0 ? effect.fadeSeconds : particleLife(def);
+            effect.owed += static_cast<double>(def.count) / life * emitFor;
+            // An emitter holds `num` particles at most, however long the step was.
+            const auto due = static_cast<int>(std::min(effect.owed, static_cast<double>(std::max(def.count, 1))));
+            effect.owed = std::min(effect.owed - due, 1.0);
             emit(effect, due, dt);
         }
         effect.previous = effect.at;

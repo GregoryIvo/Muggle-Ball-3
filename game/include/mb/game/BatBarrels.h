@@ -16,7 +16,7 @@
 
 namespace mb {
 
-// What a weapon's barrel is doing on the bat (docs/GAMEPLAY.md section 18.8).
+// What a weapon's barrel is doing on the bat (docs/GAMEPLAY.md section 18.11).
 enum class BarrelPhase : std::uint8_t {
     Hidden,     // the weapon is not the one a click fires
     Growing,    // it was caught: the barrel swells to full size and the gun pushes out of it

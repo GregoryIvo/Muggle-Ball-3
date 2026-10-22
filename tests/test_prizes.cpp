@@ -1112,6 +1112,37 @@ void testYoYo() {
     check(free.count(EventType::BallRubbered) == 0, "yoyo: and nothing turns it back");
 }
 
+// The string is tied to the bat's rim: with the biggest bat (1.9 times, a radius of 5.7) a string of 7 from its centre would leave a ball that
+// touches it 0.7 to turn in, and the ball would bounce between the bat and the string every tenth of a second, the autopilot's bat always
+// under it (a smoke run of 900 s met it, with the Multiball).
+void testYoYoWithABigBat() {
+    Game g(levelOf({board()}));
+    g.ready();
+    g.launch();
+    for (int i = 0; i < 8; ++i) {
+        g.give(PrizeKind::IncBat);
+    }
+    const float plain = g.session.rules().batRadius, big = g.session.batRadius();
+    check(big > 1.8f * plain, "yoyo, big bat: the bat is 1.9 times the plain one (" + num(big) + ")");
+    g.give(PrizeKind::YoYo);
+    float farthest = 0;
+    for (int i = 0; i < 60 * 7 && g.session.effect(PrizeKind::YoYo) != nullptr; ++i) {
+        GameInput input = Autopilot{}.decide(g.session);
+        input.launch = false;
+        g.step(input);
+        for (const BallView& ball : g.session.balls()) {
+            if (!ball.held) {
+                farthest = std::max(farthest, std::hypot(ball.position.x - g.bat().x, ball.position.z - g.bat().z));
+            }
+        }
+    }
+    const float string = g.session.rules().prizes.yoyoLength + (big - plain);
+    check(farthest > g.session.rules().prizes.yoyoLength + 0.5f && farthest <= string + 0.5f,
+          "yoyo, big bat: the ball goes out to the string, which is " + num(string) + " from the centre of the bat, not to 7 (" + num(farthest) + ")");
+    check(g.count(EventType::BallLost) == 0 && g.count(EventType::BallFreed) == 0 && g.count(EventType::BatHit) < 20,
+          "yoyo, big bat: and goes to and fro in about a second, not every tenth of one (" + std::to_string(g.count(EventType::BatHit)) + " bat hits in 7 s)");
+}
+
 void testWall() {
     // A ball that goes by the bat at x = 10 meets the rope at z -20 and comes back; without it, the ball is lost.
     struct Outcome {
@@ -1455,6 +1486,7 @@ int main() {
     testMultiball();
     testMagnet();
     testYoYo();
+    testYoYoWithABigBat();
     testWall();
     testNight();
     testQuake();

@@ -309,6 +309,48 @@ void testSlackFillsTheSheetOut() {
     check(taut.clothPositions(flat)[middle].z < 0.3f, "slack: with none it stays flat but for a shiver");
 }
 
+// A push is a velocity added to every particle that is free, along any direction (the wind only takes what is square to the sheet), and it
+// wakes a sheet that lies asleep.
+void testPushCloth() {
+    ClothDesc desc = sheet(5, 6, 2.0f, 5.0f);
+    desc.bendCompliance = 0.05f;
+    desc.slack = 0.05f;
+    desc.slackSeconds = 1.0f;
+    desc.damping = 0.8f;
+    // No gravity: a sheet with one corner pinned and the rest pushed along x, which lies in its plane.
+    PhysicsWorld still = makeWorld({0, 0, 0}), pushed = makeWorld({0, 0, 0});
+    const BodyId a = still.addCloth(desc), b = pushed.addCloth(desc);
+    const int topLeft = particle(desc, desc.height - 1, 0);
+    for (PhysicsWorld* world : {&still, &pushed}) {
+        world->pinClothParticle(world == &still ? a : b, topLeft, desc.positions[static_cast<std::size_t>(topLeft)]);
+    }
+    runSeconds(still, 1);
+    runSeconds(pushed, 1);
+    pushed.pushCloth(b, {3, 0, 0});
+    runSeconds(still, 0.5f);
+    runSeconds(pushed, 0.5f);
+    const auto far = static_cast<std::size_t>(particle(desc, 0, 4));  // the corner farthest from the pin
+    const Vec3 was = still.clothPositions(a)[far], now = pushed.clothPositions(b)[far];
+    check(now.x - was.x > 0.3f, str("push: the sheet is carried along x, though x lies in its plane (%.2f units in half a second)", now.x - was.x));
+    check(length(pushed.clothPositions(b)[static_cast<std::size_t>(topLeft)] - desc.positions[static_cast<std::size_t>(topLeft)]) < 1e-3f,
+          "push: but what is pinned stays where its pin is");
+    check(finite(pushed.clothPositions(b)), "push: and the sheet stays whole");
+
+    // Asleep, it wakes.
+    runSeconds(pushed, 14);
+    check(!pushed.isAwake(b), "push: a sheet that has settled is asleep");
+    pushed.pushCloth(b, {0, 0, 1});
+    check(pushed.isAwake(b), "push: and a push wakes it");
+    runSeconds(pushed, 0.3f);
+    check(pushed.clothPositions(b)[far].z > 0.05f, str("push: and moves it (z %.2f)", pushed.clothPositions(b)[far].z));
+
+    // Bad input changes nothing.
+    pushed.pushCloth(99, {1, 0, 0});
+    pushed.pushCloth(b, {std::numeric_limits<float>::quiet_NaN(), 0, 0});
+    runSeconds(pushed, 0.5f);
+    check(finite(pushed.clothPositions(b)), "push: a body that is no cloth, or a velocity that is NaN, is refused");
+}
+
 void testASettledClothSleepsAndWakes() {
     ClothDesc desc = sheet(5, 6, 2.0f, 5.0f);
     desc.bendCompliance = 0.05f;
@@ -547,6 +589,7 @@ int main() {
     testPinnedCornersHold();
     testFallsAndRestsOnTheFloor();
     testWindBlowsTheSheet();
+    testPushCloth();
     testBodiesPushTheSheetAndTouchesAreReported();
     testATouchIsReportedOnce();
     testSlackFillsTheSheetOut();

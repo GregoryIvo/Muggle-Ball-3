@@ -36,6 +36,8 @@ public:
     // The box round the particles and their radius, and the middle of the particles; for a cloth that is gone, where it was saved.
     Bounds bounds(std::size_t cloth) const;
     Vec3 centre(std::size_t cloth) const;
+    // How far `point` is from the nearest particle's sphere (zero inside it), where the particles are now; infinity for a cloth that is gone.
+    float distanceTo(std::size_t cloth, Vec3 point) const;
 
     // Before each fixed step: takes every held particle to where its holder has it. A holder that has no body stays where it was saved.
     void carryPins(const PhysicsScene& scene);

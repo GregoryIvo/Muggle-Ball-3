@@ -24,6 +24,10 @@ public:
 
     ParticleBatches(const ParticleLibrary& library, TextureLookup lookup);
 
+    // Looks up the texture of every definition the system draws (all but the halos, which the prizes draw), so that none is uploaded in
+    // the middle of a game by the first frame that needs it. A definition whose texture is missing is said so when it is first drawn.
+    void preload();
+
     // Replaces the batches with those of the system's particles as `view` sees them. `brightness` multiplies the colours (the night
     // dims what has no light of its own).
     void build(const ParticleSystem& system, const ParticleView& view, float brightness = 1);
@@ -49,10 +53,13 @@ private:
     };
 
     TextureHandle textureOf(const ParticleDef& def);
+    void resolve(const ParticleDef& def);
 
+    const ParticleLibrary& library_;
     TextureLookup lookup_;
     std::vector<TextureHandle> textures_;  // by definition, once looked up
     std::vector<bool> resolved_;
+    std::vector<bool> missing_, said_;     // by definition: its texture was not found (the fallback stands in), and that was logged
     TextureHandle fallback_ = 0;
     bool fallbackResolved_ = false;
     // Kept between builds to reuse their storage.

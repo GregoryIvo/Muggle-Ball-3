@@ -142,6 +142,7 @@ PlayScene::PlayScene(ModelCache& cache, const MaterialLibrary& materials, const 
       effects_(cache, materials, textures, level, particles_),
       barrels_(cache, materials, textures, batMaterial(bat)),
       weapons_(cache, materials, textures, particles_, session.rules().weapons) {
+    batches_.preload();  // (the textures are uploaded now, not by the first flash or trail in the middle of a game)
     update(session, {}, 0);
 }
 
@@ -168,7 +169,8 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
                 } else {
                     level_.hide(event.actor);
                 }
-                if (event.material != nullptr) {  // the flash is the material's exploseType's: none for a pirate [M]
+                // The flash is the material's exploseType's: none for a pirate [M], and none for what a bolt of lightning destroyed [M].
+                if (event.material != nullptr && event.prize != PrizeKind::Thunderbolt) {
                     for (const std::string_view effect : explosionEffects(event.material->exploseType)) {
                         particles_.spawn(effect, event.position);
                     }

@@ -84,6 +84,8 @@ const MaterialLibrary& materials() {
       {"name": "bat_lazer", "group": "Bats", "brick": {"type": 0, "energy": 3, "score": 4}, "sounds": {"period": "lazer_shoot", "dead": "lazer_dead"}},
       {"name": "thunderbolt", "group": "temp", "brick": {"type": 0, "energy": 1, "score": 10}, "sounds": {"period": "thunderbolt", "dead": "thunderbolt_dead"}},
       {"name": "meteor", "group": "temp", "brick": {"type": 0, "energy": 1, "score": 250}, "sounds": {"period": "meteor", "dead": "meteor_dead"}},
+      {"name": "Sail", "density": 0.01, "physics": {"staticFriction": 0.9, "dynamicFriction": 0.9, "restitution": 0.5},
+       "brick": {"type": 0, "energy": 1, "score": 60, "exploseType": 3, "exploseDelay": 10}},
       {"name": "gun", "group": "Prizes", "brick": {"type": 0, "energy": 3, "score": 300, "exploseType": 3, "exploseDelay": 500}},
       {"name": "cannon", "group": "Prizes", "brick": {"type": 0, "energy": 3, "score": 320, "exploseType": 3, "exploseDelay": 500}}
     ]})");
@@ -147,6 +149,59 @@ Actor thing(ObjectType type, Vec3 at, const char* material) {
     return actor(type, at, kDynamic, 100, {box({1, 1, 1}, {0, 1, 0})}, material);
 }
 
+// A sail of `width` by `height` particles (spheres of 0.5, `gap` apart) in the plane z = `z`, its lowest row at `base`, its first column at x =
+// `left`, as a cloth object with the id 100 (its own actor is the first particle, its segments are nested in it). The top corners are tied
+// to the world, so that it hangs where it is. `lyingFlat`: it lies in the plane y = `base` instead, its rows going away from z, tied at all four corners.
+struct Sail {
+    Actor actor;
+    std::vector<Joint> joints;
+};
+
+Sail sail(int width, int height, float gap, float left, float base, float z, bool lyingFlat = false) {
+    const float mass = 0.0052359877f;
+    const auto at = [&](int k) {
+        const float across = gap * static_cast<float>(k % width), along = gap * static_cast<float>(k / width);
+        return lyingFlat ? Vec3{left + across, base, z + along} : Vec3{left + across, base + along, z};
+    };
+    const auto ball = [&](int k) {
+        Shape s;
+        s.type = ShapeType::Sphere;
+        s.radius = 0.5f;
+        s.localPose.position = at(k);
+        s.group = 2;
+        s.shapeFlags = 8;
+        return s;
+    };
+    Sail result;
+    result.actor = actor(ObjectType::Cloth, {0, 0, 0}, kDynamic, mass, {ball(0)}, "Sail");
+    result.actor.object->id = 100;
+    result.actor.object->cloth = {width, height, {}};
+    for (int k = 1; k < width * height; ++k) {
+        Actor segment;
+        Body body;
+        body.mass = mass;
+        body.massSpaceInertia = {mass / 6, mass / 6, mass / 6};
+        body.flags = kDynamic;
+        segment.body = body;
+        segment.shapes = {ball(k)};
+        result.actor.object->clothSegments.push_back(segment);
+    }
+    const std::vector<int> pinned = lyingFlat ? std::vector<int>{0, width - 1, (height - 1) * width, height * width - 1}
+                                               : std::vector<int>{(height - 1) * width, height * width - 1};
+    for (const int k : pinned) {
+        Joint j;
+        j.type = NxJointType::Spherical;
+        j.actorA = 100 + static_cast<std::uint32_t>(k);
+        j.actorB = 0;
+        j.localAnchor[1] = at(k);
+        j.localAxis[0] = j.localAxis[1] = {0, 0, 1};
+        j.localNormal[0] = j.localNormal[1] = {1, 0, 0};
+        j.maxForce = j.maxTorque = 1e9f;
+        result.joints.push_back(j);
+    }
+    return result;
+}
+
 Actor portal(ObjectType type, Vec3 at) {
     std::vector<Shape> shapes = {box({0.2f, 1.9f, 0.9f}, {-1.3f, 1.75f, 0}), box({0.2f, 1.9f, 0.9f}, {1.3f, 1.75f, 0})};
     if (type == ObjectType::TeleportSrc) {
@@ -169,6 +224,13 @@ Level levelOf(std::vector<Actor> actors) {
     Level level;
     level.gravity = {0, -9.8f, 0};
     level.actors = std::move(actors);
+    return level;
+}
+
+Level levelWithSail(std::vector<Actor> actors, const Sail& sailed) {
+    Level level = levelOf(std::move(actors));
+    level.actors.push_back(sailed.actor);
+    level.joints = sailed.joints;
     return level;
 }
 
@@ -760,6 +822,19 @@ void testLaser() {
         const std::optional<GameEvent> beam = g.first(EventType::LaserBeam);
         check(beam && beam->count == 2, "laser: it reached the brick and the wall, not the teleport (" + std::to_string(beam ? beam->count : -1) + ")");
     }
+    {  // what is already going is hurt no more and not reached: an exploding brick, which the beam goes through to the wall
+        Game g(levelOf({board(), brick(8, 6, "One.jpg"), brick(8, 12, "One.jpg")}));
+        g.play();
+        g.give(PrizeKind::Laser);
+        check(g.session.hit(1, {8, 1.5f, 6}), "laser: the first brick is hit and goes off in 0.1 s");
+        g.flush();
+        g.click();
+        const std::optional<GameEvent> beam = g.first(EventType::LaserBeam);
+        const std::vector<GameEvent> hits = g.all(EventType::ProjectileHit);
+        check(beam && beam->count == 2 && hits.size() == 2 && hits[0].actor == 2 && hits[1].actor == 0,
+              "laser: it reaches the brick behind and the wall, not the one that is exploding (" + std::to_string(beam ? beam->count : -1) + " reached)");
+        check(g.count(EventType::BrickHit) == 2 && g.session.stats().bricksHit == 2, "laser: and the exploding one is hit no more (one hit of its own, one of the other)");
+    }
     {  // it fades
         Game g(levelOf({board()}));
         g.play();
@@ -964,6 +1039,146 @@ void testThunderbolt() {
     check(run(1) != run(2), "bolt: another seed, other targets");
 }
 
+// The bolts of a burst strike different places [M]. Three bricks of four energy, which up to three bolts cannot clear, so that a bolt
+// picked at random could strike the same one again (it did, in 6 bursts of 498 in the real levels).
+void testBoltBurstsStrikeDifferentPlaces() {
+    int bursts = 0;
+    for (std::uint64_t seed = 1; seed <= 30; ++seed) {
+        SessionOptions o = options();
+        o.prizeSeed = seed;
+        Game g(levelOf({board(), brick(10, 4, "Four.jpg"), brick(14, 8, "Four.jpg"), brick(12, 12, "Four.jpg")}), o, 8);
+        g.ready();
+        g.log.clear();
+        g.give(PrizeKind::Thunderbolt);
+        const int burst = g.session.weapons().strikesPending() - 2;
+        g.run(1.5);  // the burst is thrown 0.2 s apart and falls for up to 0.6 s; the later bolts come after 2 s
+        const std::vector<GameEvent> struck = g.all(EventType::BoltStruck);
+        std::set<ActorIndex> places;
+        for (const GameEvent& event : struck) {
+            places.insert(event.actor);
+        }
+        ++bursts;
+        check(static_cast<int>(struck.size()) == burst && places.size() == struck.size(),
+              "bolt burst: seed " + std::to_string(seed) + ": " + std::to_string(struck.size()) + " bolts of a burst of " + std::to_string(burst) +
+                  " strike " + std::to_string(places.size()) + " different bricks");
+    }
+    check(bursts == 30, "bolt burst: thirty bursts were looked at");
+    // With one brick left every bolt of the burst has to strike it.
+    Game one(levelOf({board(), brick(12, 8, "Four.jpg")}), options(), 8);
+    one.ready();
+    one.log.clear();
+    one.give(PrizeKind::Thunderbolt);
+    one.run(1.5);
+    const std::vector<GameEvent> all = one.all(EventType::BoltStruck);
+    check(all.size() >= 2 && std::ranges::all_of(all, [](const GameEvent& event) { return event.actor == 1; }),
+          "bolt burst: and when only one brick stands the bolts strike it again");
+}
+
+// A destroyed brick says what killed it: the weapon or strike whose hit took the last energy; the ball, a blast and a fall are none.
+void testWhoKilledIt() {
+    for (const PrizeKind weapon : {PrizeKind::Gun, PrizeKind::Cannon, PrizeKind::Bazooka, PrizeKind::Laser}) {
+        Game g(levelOf({board(), brick(8 - 2.1556f, 8, "One.jpg"), brick(8, 8, "One.jpg")}));
+        g.play();
+        g.give(weapon);
+        g.click();
+        g.run(1.2);
+        const std::vector<GameEvent> dead = g.all(EventType::BrickDestroyed);
+        check(!dead.empty() && std::ranges::all_of(dead, [&](const GameEvent& event) { return event.prize == weapon; }),
+              "killer: what a " + std::string(prizeInfo(weapon).stem) + " destroys says so");
+    }
+    {  // what the burst of a kernel takes is the kernel's kill too; a blast of dynamite is no weapon's
+        Game g(levelOf({board(), brick(8, 8, "Four.jpg"), brick(10.2f, 8, "One.jpg"), dynamite({-8, 0, 8})}));
+        g.play();
+        g.give(PrizeKind::Cannon);
+        g.click();
+        check(g.runUntil([&] { return g.destroyed(2); }, 2), "killer: the burst takes the brick beside the column");
+        const auto beside = std::ranges::find_if(g.log, [](const GameEvent& e) { return e.type == EventType::BrickDestroyed && e.actor == 2; });
+        check(beside != g.log.end() && beside->prize == PrizeKind::Cannon, "killer: a kernel's burst kills for the Cannon");
+        g.session.hit(3, {-8, 1.3f, 8});
+        check(g.runUntil([&] { return g.destroyed(3); }, 1), "killer: the dynamite goes off");
+        const auto charge = std::ranges::find_if(g.log, [](const GameEvent& e) { return e.type == EventType::BrickDestroyed && e.actor == 3; });
+        check(charge != g.log.end() && !charge->prize, "killer: and a hit that is nobody's (hit()) leaves none");
+    }
+    {  // a bolt and a meteor
+        Game b(boltField(), options(), 8);
+        b.ready();
+        b.give(PrizeKind::Thunderbolt);
+        b.run(13.0);
+        const std::vector<GameEvent> dead = b.all(EventType::BrickDestroyed);
+        check(!dead.empty() && std::ranges::all_of(dead, [](const GameEvent& event) { return event.prize == PrizeKind::Thunderbolt; }),
+              "killer: what a bolt destroys says so");
+        Game m(levelOf({board(), brick(0, 5, "Two.jpg", kStatic, {19, 0.5f, 16})}), options(), 8);
+        m.ready();
+        m.give(PrizeKind::Meteor);
+        m.run(9.0);
+        const std::vector<GameEvent> gone = m.all(EventType::BrickDestroyed);
+        check(gone.size() == 1 && gone[0].prize == PrizeKind::Meteor, "killer: and a meteor");
+    }
+}
+
+// What the weapons do to a sail (docs/GAMEPLAY.md 18.4 and 20.3): it is one object, its lead actor, with one energy, and what reaches it is hurt
+// as any damageable thing is. A beam crosses its faces; what has a body (a bullet, a kernel, a rocket, a bolt) touches the particles, spheres of
+// 0.5 that it can pass between, so it is spent on the sail when it meets one. Bolts do not pick a sail for a target (it is no target), but one
+// that falls on a sail on its way is spent on it.
+void testWeaponsAndSails() {
+    {  // the beam: a vertical sail across it and a brick behind; it goes through the sail, which dies, and on to the brick and the wall
+        const Sail s = sail(4, 3, 2.0f, 5.0f, 0.2f, 8.0f);
+        Game g(levelWithSail({board(), brick(8, 14, "One.jpg")}, s));
+        check(g.play(), "sails: the ball is launched");
+        const ActorIndex lead = 2;  // after the board and the brick
+        g.give(PrizeKind::Laser);
+        g.click();
+        g.run(0.3);
+        const std::optional<GameEvent> beam = g.first(EventType::LaserBeam);
+        check(beam && beam->count == 3 && near(beam->end.z, 22.6f, 0.1f), "sails: the beam reaches the sail, the brick behind it and the wall (it is stopped by what nothing damages)");
+        check(g.destroyed(lead) && g.destroyed(1) && g.session.score() == 70 && g.session.actor(lead).removed, "sails: it destroys the sail for its 60 and the brick for its 10");
+        const auto dead = std::ranges::find_if(g.log, [&](const GameEvent& e) { return e.type == EventType::BrickDestroyed && e.actor == lead; });
+        check(dead != g.log.end() && dead->prize == PrizeKind::Laser && !g.session.scene().cloths().alive(0), "sails: and the sail's destruction is the Laser's");
+    }
+    {  // a bullet of the left barrel (x -2.1556 from the bat) meets a particle: the sail is hurt, and the bullet spent on it
+        const Sail s = sail(3, 3, 1.0f, 8 - 2.1556f - 1.0f, 0.7f, 8.0f);
+        Game g(levelWithSail({board(), brick(8 - 2.1556f, 14, "One.jpg")}, s));
+        g.play();
+        const ActorIndex lead = 2;
+        g.give(PrizeKind::Gun);
+        g.click();
+        g.run(1.2);
+        const std::vector<GameEvent> hits = g.all(EventType::ProjectileHit);
+        check(!hits.empty() && hits[0].actor == lead && g.destroyed(lead) && g.session.score() >= 60,
+              "sails: a bullet that meets a particle hits the sail, by its lead actor, and destroys it");
+        check(!g.destroyed(1), "sails: and is spent on it: the brick behind is not reached by that bullet");
+    }
+    {  // a kernel and a rocket: spent on the sail, and the burst takes what is near
+        for (const PrizeKind weapon : {PrizeKind::Cannon, PrizeKind::Bazooka}) {
+            const bool kernel = weapon == PrizeKind::Cannon;
+            const Sail s = kernel ? sail(4, 3, 2.0f, 5.0f, 0.2f, 8.0f) : sail(3, 3, 1.0f, 7.0f, 0.5f, 8.0f);
+            Game g(levelWithSail({board(), brick(8, 14, "One.jpg")}, s));
+            g.play();
+            const ActorIndex lead = 2;
+            g.give(weapon);
+            g.click();
+            g.run(1.5);
+            const std::vector<GameEvent> hits = g.all(EventType::ProjectileHit);
+            check(!hits.empty() && hits[0].actor == lead && g.destroyed(lead) && g.count(EventType::ProjectileExploded) == 1,
+                  std::string("sails: a ") + (kernel ? "kernel" : "rocket") + " that meets the sail hits it, destroys it and bursts there");
+        }
+    }
+    {  // bolts: the target is a brick, never the sail; one that comes down on the sail on its way is spent on it
+        const Sail s = sail(3, 3, 2.0f, 10.0f, 3.0f, 6.0f, true);  // lying over the brick below, a particle straight above its middle
+        Game g(levelWithSail({board(), brick(12, 8, "Four.jpg")}, s), options(), 8);
+        const ActorIndex lead = 2;
+        g.ready();
+        g.log.clear();
+        g.give(PrizeKind::Thunderbolt);
+        g.run(1.5);
+        const std::vector<GameEvent> struck = g.all(EventType::BoltStruck);
+        check(struck.size() >= 2 && struck[0].actor == lead && g.destroyed(lead), "sails: the first bolt, aimed at the brick, falls on the sail above it and destroys it");
+        check(struck.size() >= 2 && std::ranges::all_of(struck.begin() + 1, struck.end(), [](const GameEvent& e) { return e.actor == 1; }) &&
+                  g.session.actor(1).energy < 4,
+              "sails: the bolts after it find the brick (a sail is never what a bolt is aimed at)");
+    }
+}
+
 void testMeteors() {
     {
         Game g(levelOf({board()}), options(), 8);
@@ -1084,6 +1299,25 @@ void testStrikesStopWhenOver() {
     check(g.session.weapons().strikesPending() == 0, "strikes: and a catch during the fade starts none");
 }
 
+// The strikes are the board's, not the bat's: losing the bat (here to the Skull) ends the weapons and the prizes of the ball, and leaves the
+// bolts and meteors still to come to be thrown, in the seconds the bat is gone and after (docs/GAMEPLAY.md 18.5).
+void testStrikesGoOnWithoutTheBat() {
+    Game g(boltField(), options(), 8);
+    g.ready();
+    g.give(PrizeKind::Thunderbolt);
+    g.give(PrizeKind::Meteor);
+    const int due = g.session.weapons().strikesPending();
+    g.give(PrizeKind::Skull);
+    g.run(0.1);
+    check(g.session.phase() == SessionPhase::Lost, "strikes: the Skull loses the bat");
+    check(g.session.weapons().strikesPending() >= due - 2, "strikes: and the strikes still due are still due (" + std::to_string(g.session.weapons().strikesPending()) + " of " +
+                                                                std::to_string(due) + ")");
+    g.run(14.0);
+    check(g.session.weapons().strikesPending() == 0 && g.count(EventType::BoltStruck) + g.count(EventType::MeteorImpact) == due && g.count(EventType::BatEntered) >= 1,
+          "strikes: every one is thrown, the later ones for the next bat (" + std::to_string(g.count(EventType::BoltStruck) + g.count(EventType::MeteorImpact)) + " of " +
+              std::to_string(due) + ")");
+}
+
 void testDeterminism() {
     // An autopilot game with a gun and both strikes, twice: every event the same.
     const auto play = [] {
@@ -1133,6 +1367,26 @@ void testAutopilot() {
         unarmed.play();
         check(!pilot.decide(unarmed.session).launch, "autopilot: with no weapon it does not click");
     }
+    {  // the shots go through a teleport: a plate in the line of a barrel does not hold the fire
+        Game g(levelOf({board(), portal(ObjectType::TeleportSrc, {8 - 2.1556f + 1.3f, 0, 6}), brick(8 - 2.1556f, 12, "One.jpg")}));
+        g.play();
+        g.give(PrizeKind::Gun);
+        check(pilot.decide(g.session).launch, "autopilot: with a plate of a teleport in front of the brick it fires (a shot goes through)");
+    }
+    {  // and the barrels are where the shot leaves, whatever plane the balls are on: a shelf only the real height meets
+        SessionOptions o = options();
+        o.rules.ballPlaneY = 1.0f;
+        Game g(levelOf({board(), actor(ObjectType::Brick, {8 - 2.1556f, 1.6f, 10}, kStatic, 50, {box({3, 0.1f, 0.5f})}, "One.jpg")}), o);
+        g.play();
+        g.give(PrizeKind::Gun);
+        g.click();
+        g.run(1.0);
+        check(g.count(EventType::ProjectileHit) >= 1 && g.destroyed(1), "autopilot: the bullets of a bat on a higher plane (1.0) do hit the shelf at 1.6 up");
+        Game h(levelOf({board(), actor(ObjectType::Brick, {8 - 2.1556f, 1.6f, 10}, kStatic, 50, {box({3, 0.1f, 0.5f})}, "One.jpg")}), o);
+        h.play();
+        h.give(PrizeKind::Gun);
+        check(pilot.decide(h.session).launch, "autopilot: and it aims where they leave from (the same height), so it fires at the shelf");
+    }
     {  // each weapon's own line: the laser and the cannon down the middle
         for (const PrizeKind weapon : {PrizeKind::Cannon, PrizeKind::Bazooka, PrizeKind::Laser}) {
             Game g(levelOf({board(), brick(8, 10, "One.jpg")}));
@@ -1179,7 +1433,11 @@ int main() {
     testMeteors();
     testStrikeDamage();
     testBulletsPush();
+    testBoltBurstsStrikeDifferentPlaces();
+    testWeaponsAndSails();
+    testWhoKilledIt();
     testStrikesStopWhenOver();
+    testStrikesGoOnWithoutTheBat();
     testDeterminism();
     testAutopilot();
     if (failures > 0) {

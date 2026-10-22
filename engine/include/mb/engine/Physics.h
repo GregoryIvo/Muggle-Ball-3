@@ -252,6 +252,9 @@ public:
     // The wind: an acceleration (units per second squared) that every particle takes, along the surface's normal, by its
     // share of the wind square to the sheet there (a sheet edge-on to it feels nothing). Zero is no wind.
     void setClothWind(BodyId cloth, Vec3 acceleration);
+    // Adds `velocity` to every particle that is not pinned, and wakes the cloth: the way a loose body is kicked or blown, whatever
+    // faces the push (the wind above only takes what is square to the sheet).
+    void pushCloth(BodyId cloth, Vec3 velocity);
     // The cloth goes through `other` from now on: what it hangs from. It still touches everything else.
     void clothIgnores(BodyId cloth, BodyId other);
     void clothIgnoresNothing(BodyId cloth);

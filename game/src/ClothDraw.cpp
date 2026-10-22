@@ -111,6 +111,12 @@ ClothDraw::ClothDraw(ModelCache& cache, const MaterialLibrary& materials, const 
     }
 }
 
+ClothDraw::~ClothDraw() {
+    for (const Sail& sail : sails_) {
+        cache_.destroyMesh(sail.mesh);
+    }
+}
+
 void ClothDraw::update(const PhysicsScene& scene) {
     const ClothSet& cloths = scene.cloths();
     for (std::size_t i = 0; i < sails_.size(); ++i) {

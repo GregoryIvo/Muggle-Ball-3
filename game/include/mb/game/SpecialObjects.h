@@ -3,6 +3,7 @@
 #include "mb/engine/Math.h"
 #include "mb/game/Level.h"
 #include "mb/game/PhysicsScene.h"
+#include "mb/game/Prizes.h"
 
 #include <cstdint>
 #include <optional>
@@ -104,13 +105,15 @@ public:
     // the object is hurt `damage` energy at a time, and what that does to it is its own (a charge of dynamite goes off after its
     // material's delay, a cannon of two energy takes two, a firework crate a weapon destroys gives no rocket). False if nothing was
     // hurt: the object is gone or going, or nothing hurts it (the teleports, the board). `dropsPrize` false: if this destroys it,
-    // it leaves no prize (the thunderbolt and the meteor, which carry disablePrize [D]).
-    bool weaponHit(GameSession& session, ActorIndex actor, Vec3 at, int damage, bool dropsPrize);
+    // it leaves no prize (the thunderbolt and the meteor, which carry disablePrize [D]). `by` is the weapon or strike that hurt it
+    // (BrickDestroyed says so if this destroys it).
+    bool weaponHit(GameSession& session, ActorIndex actor, Vec3 at, int damage, bool dropsPrize, std::optional<PrizeKind> by = std::nullopt);
     // A burst at `centre`, the kernel's, the rocket's or the meteor's (a charge of dynamite's blast is the same law): `damage` energy off
     // every damageable object within `radius` of it (the distance to the box round it) but `source`, the one the projectile hit; and
     // the loose bodies in reach are pushed away and up as dynamite pushes them, `power` times as hard. A charge of dynamite in reach
     // goes off at the next fixed step, as in a chain.
-    void burst(GameSession& session, ActorIndex source, Vec3 centre, float radius, float power, int damage, bool dropsPrize);
+    void burst(GameSession& session, ActorIndex source, Vec3 centre, float radius, float power, int damage, bool dropsPrize,
+               std::optional<PrizeKind> by = std::nullopt);
 
     // ---- What the presentation draws
     struct Shot {  // a cannonball in flight
@@ -217,7 +220,8 @@ private:
     float random01();
     // The damage of a blast or a cannonball: `damage` hits, the last of which may fire a charge after `fuse` seconds (a fuse of 0 or
     // less leaves the charge its material's own delay).
-    bool strike(GameSession& session, ActorIndex actor, Vec3 at, int damage, double fuse, bool dropsPrize = true);
+    bool strike(GameSession& session, ActorIndex actor, Vec3 at, int damage, double fuse, bool dropsPrize = true,
+                std::optional<PrizeKind> by = std::nullopt);
     void blast(GameSession& session, ActorIndex source, Vec3 centre, float radius, float power);
     void push(GameSession& session, ActorIndex actor, Vec3 centre, float radius, float power);
     void fire(GameSession& session, ActorIndex actor);
