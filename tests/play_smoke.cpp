@@ -1,8 +1,9 @@
 // Plays levels of the real game data in $MB3_ASSETS on the GPU without a window: the game's PlaySession (the rules, the
 // scene, the autopilot) and the pieces under it. Checks that a level builds and is drawn (the bat, the ball, the bricks), that
 // a brick that is destroyed leaves the picture and one that is damaged shows its damage texture, that the picture fades in,
-// that a level the autopilot wins holds for 0.45 s and is reported as won once its fade out is over, and that the click that
-// ends a pause does not launch the ball. Skips (exit code 77) without the data or a GPU.
+// that a person who is destroyed shrinks away before the level ends, that a level the autopilot wins holds for 0.1 s after
+// its last required object is gone and is reported as won once its fade out is over, and that the click that ends a pause
+// does not launch the ball. Skips (exit code 77) without the data or a GPU.
 
 #include "PlaySession.h"
 #include "mb/engine/Image.h"
@@ -11,6 +12,7 @@
 #include "mb/game/SceneBuilder.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
@@ -91,6 +93,30 @@ void testScene(mb::Renderer& renderer, mb_app::Assets& assets) {
     std::vector<mb::DrawItem> drawn;
     scene.appendDrawn(drawn);
     check(drawn.size() == scene.items().size(), "scene: nothing is hidden at first");
+    // A shrinking actor is drawn smaller about its point, all of its draws, and whole again at scale 1.
+    const mb::Vec3 about{3, 1, 2};
+    scene.setScale(actor, 0.5f, about);
+    drawn.clear();
+    scene.appendDrawn(drawn);
+    bool halved = drawn.size() == scene.items().size();
+    for (std::size_t i = 0; i < drawn.size() && halved; ++i) {
+        const mb::DrawItem& was = scene.items()[i];
+        const bool theirs = description.draws[i].actor == actor;
+        // A point of the model stands halfway to `about` from where it was.
+        const mb::Vec3 before = mb::transformPoint({0, 0, 0}, was.world), after = mb::transformPoint({0, 0, 0}, drawn[i].world);
+        const mb::Vec3 expected = theirs ? about + (before - about) * 0.5f : before;
+        halved = std::fabs(after.x - expected.x) < 1e-3f && std::fabs(after.y - expected.y) < 1e-3f &&
+                 std::fabs(after.z - expected.z) < 1e-3f;
+    }
+    check(halved, "scene: setScale draws an actor's draws at half the size about a point, and nothing else");
+    scene.setScale(actor, 1, about);
+    drawn.clear();
+    scene.appendDrawn(drawn);
+    check(drawn.size() == scene.items().size() && drawn[crate].world.m[3][0] == scene.items()[crate].world.m[3][0] &&
+              drawn[crate].world.m[0][0] == scene.items()[crate].world.m[0][0],
+          "scene: scale 1 is whole again");
+    scene.setScale(mb::kNoActor, 0.5f, about);  // nothing
+
     scene.hide(actor);
     drawn.clear();
     scene.appendDrawn(drawn);
@@ -168,10 +194,10 @@ void testWinning(mb::Renderer& renderer, mb_app::Assets& assets) {
         }
     }
     check(outcome == mb::LevelOutcome::Complete, "win: the autopilot wins the level");
-    check(completeAt > 0 && darkAt - completeAt > 0.4 && darkAt - completeAt < 0.5,
-          "win: the picture holds for 0.45 s after the last target is gone, and then goes dark");
-    check(completeAt > 0 && seconds - completeAt > 1.2 && seconds - completeAt < 1.35,
-          "win: and it is reported 1.25 s after the last target (the hold, then the fade out)");
+    check(completeAt > 0 && darkAt - completeAt > 0.09 && darkAt - completeAt < 0.15,
+          "win: the picture holds for 0.1 s after the last target is gone, and then goes dark");
+    check(completeAt > 0 && seconds - completeAt > 0.85 && seconds - completeAt < 0.95,
+          "win: and it is reported 0.9 s after the last target (the hold, then the fade out)");
     check(session.darkness() == 1, "win: the picture is dark by then");
     check(hud.score > 1000 && hud.lives >= 0 && hud.lives <= 99, "win: the points were added to those brought in, and the hearts are the rules'");
     check(session.rules()->targetsLeft(session.rules()->levelEnd()) == 0, "win: no target is left");

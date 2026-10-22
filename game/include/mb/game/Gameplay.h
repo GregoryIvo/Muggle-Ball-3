@@ -26,7 +26,8 @@ namespace mb {
 //     session->update(dt, {.batTargetX = batTargetX(mouseX, mouseY, w, h, camera), .launch = clicked});
 //     for (const GameEvent& event : session->takeEvents()) { /* sounds, flashes, the HUD */ }
 //     // drawing: session->scene().actorPose(i) for each actor with !session->actor(i).removed, session->bat(),
-//     // session->balls(); retexture a brick by session->actor(i).textureIndex; the HUD from hearts() and score().
+//     // session->balls(); retexture a brick by session->actor(i).textureIndex and draw it at 1 - actor(i).shrink of its
+//     // size; the HUD from hearts() and score().
 //
 // What the presentation reads is the state after the last fixed step (1/60 s, see PhysicsSettings::fixedStep); update()
 // does not interpolate, and a display running at another rate may carry a ball on with its velocity.
@@ -99,8 +100,8 @@ struct GameplayRules {
     // What the look cannot tell: a piece that stays up where the physics left it (a mast held by joints that no longer
     // hold it, a cactus that came to rest 10 cm above the ball's reach) is a target nobody can hit. When balls have been in
     // flight this long without touching any brick and no more than stallMost targets, or stallShare of those the level
-    // began with, are left, they are let go and the level ends. The autopilot's runs that stood still (16 of the 63 levels
-    // it finished in 900 s, 6 of which it would not have finished without this) did so with 1 to 6 targets left [?].
+    // began with, are left, they are let go and the level ends. The autopilot's runs that stood still (14 of the 60 levels
+    // it finished in 900 s, 8 of which it would not have finished without this) did so with 1 to 6 targets left [?].
     double stallSeconds = 90;
     int stallMost = 12;
     float stallShare = 0.25f;
@@ -118,18 +119,25 @@ struct GameplayRules {
     // reading.
     float fallLimitY = -5.0f;
     bool fallScores = false;
+    // A person or an animal (a material that shrinksAway()) pays its score as it is destroyed and is gone this long after,
+    // shrinking away meanwhile; a brick of another kind is gone with its score. The level ends when the last required
+    // object is gone, so after the shrink. The footage has them gone 0.35 to 0.4 s after the score (level 1's last pirate:
+    // paid 143.75, gone 144.15; level 17's gorilla: paid 1943.6, gone about 1944.0; docs/GAMEPLAY.md, "Rules settled by the
+    // second study", 8) [M].
+    double shrinkTime = 0.35;
 };
 
-// Which objects must be destroyed to finish a level. The second study of the footage settled it (docs/GAMEPLAY.md,
-// "Rules settled by the second study"): DynamicBricks. BrickType, the other reading docs/OBJECTS.md section 10 weighed,
-// is refuted; it stays so that the autopilot's runs and the tests can still make a target out of a brick that does not
-// move. Never is for a session that never ends.
+// Which objects must be destroyed to finish a level. The second study of the footage and its fact-check settled it
+// (docs/GAMEPLAY.md, "Rules settled by the second study", 3 and 7): Bricks. BrickType, the other reading docs/OBJECTS.md
+// section 10 weighed, is refuted; it stays so that the autopilot's runs and the tests can still make a target out of a
+// brick of one kind. Never is for a session that never ends.
 enum class TargetRule {
-    // Every brick of material type 0 or 4 (people, buildings, ships, ground, rocks, crates, animals) and every tree that is
-    // dynamic as the level saved it. Not required: the kinematic ones (floor tiles, sharks, birds), and every object of a
-    // type other than brick and tree: metall, teleports, cannons, and, never seen to decide a level's end, dynamite,
-    // fireworks, generators, springs, volcanoes, cloth and vibro. Those can still be destroyed for their points.
-    DynamicBricks,
+    // Every damageable brick (people, buildings, ships, ground, rocks, crates, animals) and every tree, whatever its
+    // motion: dynamic, kinematic (floor tiles, sharks, birds) or bound to a path. Not required: every object of a type
+    // other than brick and tree: metall, teleports and cannons (left on the board at natural ends), and, never seen to
+    // decide a level's end, dynamite, fireworks, generators, springs, volcanoes, cloth and vibro. Those can still be
+    // destroyed for their points.
+    Bricks,
     // Every brick whose material has brickType 0, moving or not; crates, rocks, animals, ground (type 4) and trees (5) do
     // not count. The footage refutes it: a level did not end before its type 4 gorilla was destroyed.
     BrickType,
@@ -139,12 +147,12 @@ enum class TargetRule {
 
 struct SessionOptions {
     GameplayRules rules;
-    // DynamicBricks is the default: the rule the footage shows (a level ends when the last dynamic brick or tree is gone,
-    // with metal, portals and cannons still on the board). The autopilot finishes 63 of the 83 levels in 900 s under it
-    // (tests/gameplay_smoke.cpp counts them), but not one that has a target out of the ball's reach (above it on a support
-    // that stays, or beyond the walls: 39 of the 83 have, most of them knight boards), so a target the ball cannot get at
-    // is not one: see ignoreUnreachable.
-    TargetRule levelEnd = TargetRule::DynamicBricks;
+    // Bricks is the default: the rule the footage shows (a level ends when the last brick or tree is gone, moving or not,
+    // with metal, portals and cannons still on the board). The autopilot's numbers for it are in docs/GAMEPLAY.md section
+    // 12 (tests/gameplay_smoke.cpp counts them), but it cannot finish a level that has a target out of the ball's reach
+    // (above it on a support that stays, or beyond the walls: 43 of the 83 have, most of them knight boards), so a target
+    // the ball cannot get at is not one: see ignoreUnreachable.
+    TargetRule levelEnd = TargetRule::Bricks;
     // A target does not count once the ball cannot get at it, so that no level ends up impossible to finish. The ball
     // gets at what it can touch on its plane (a part of the plane joined to the bat's end of the board without a gap
     // narrower than itself, bounded by the immovable parts of the level: walls, platforms, pinned buildings, and what is
@@ -174,7 +182,8 @@ enum class EventType {
     BoardHit,        // ball, position (the contact), speed: the ball met a wall (the sound "ballHitBoard")
     BallsHit,        // ball, otherBall, position, speed ("ballHitBall")
     BrickHit,        // ball (-1 for hit()), actor, position (the contact), speed, energy (left), material
-    // BrickDestroyed comes exploseDelay milliseconds after the hit that took the last energy.
+    // BrickDestroyed comes exploseDelay milliseconds after the hit that took the last energy. A person or an animal
+    // (shrinksAway()) is then still there for GameplayRules::shrinkTime, shrinking (ActorStatus::shrink): the others are gone.
     BrickDestroyed,  // actor, position (centre of mass), points (added to the score), material
     ActorFell,       // actor, position (centre of mass), points (only with fallScores), material: it left the board
     BallLost,        // ball, position, velocity: behind the bat's line (or out of the world); it shrinks away
@@ -182,7 +191,7 @@ enum class EventType {
     LifeLost,        // hearts (left): the heart is spent, 2.1 s after the last ball was lost
     BatLeft,         // the bat starts to fly off (after the last ball was lost)
     BatEntered,      // the bat swoops in with the ball on it (at the start of a level, and as the heart is spent)
-    LevelComplete,   // the last target is gone
+    LevelComplete,   // the last target is gone (a shrinking one is gone when it has shrunk)
     GameOver,        // the last ball is lost with no heart left
 };
 
@@ -246,7 +255,10 @@ struct BallView {
 struct ActorStatus {
     bool damageable = false;  // a ball hurts it (canBeDamaged()) and it is still there
     bool exploding = false;   // out of energy, waiting out exploseDelay
-    bool removed = false;     // it exploded or fell off the board: stop drawing it
+    // After its score, a person or an animal shrinks away over GameplayRules::shrinkTime: 0 as it begins, up to 1 as it is
+    // removed. It is a target until then, and no more to be hurt.
+    float shrink = 0;
+    bool removed = false;     // it exploded or fell off the board, or finished shrinking: stop drawing it
     int energy = 0;           // hits left
     int maxEnergy = 0;
     int textureIndex = 0;     // which of the material's textures shows now, see damageTextureIndex()
@@ -278,9 +290,14 @@ struct GameInput {
 // docs/GAMEPLAY.md), and they are not targets here.
 bool canBeDamaged(ObjectType type, const GameMaterial* material);
 
-// Whether an object counts toward the end of the level under a rule. `dynamic` is whether the body is dynamic as the
-// level saved it (not kinematic, not frozen on every axis), which welding to the world does not change.
-bool isTarget(TargetRule rule, ObjectType type, bool dynamic, const GameMaterial* material);
+// Whether a destroyed object of this material shrinks away instead of being gone with its score: exploseType 5, the
+// class of the materials with no splinters to break into (people, animals, trees, fruit, barrels, the interactive objects),
+// which docs/OBJECTS.md section 9 lists. The footage shows it for a pirate and a gorilla; the rest of the class is
+// inferred.
+bool shrinksAway(const GameMaterial* material);
+
+// Whether an object counts toward the end of the level under a rule.
+bool isTarget(TargetRule rule, ObjectType type, const GameMaterial* material);
 
 // Which of a material's textures shows at this energy. Several textures on a material that does not animate are damage
 // states listed from the most damaged to the intact one, so a brick shows the one at index energy - 1 (SceneBuilder
@@ -317,8 +334,9 @@ public:
     //    heart is spent (LifeLost) as the new bat comes (BatEntered) with the ball on it, and it can be launched
     //    again (phase Ready). With no heart left it is GameOver instead;
     //  - a ball that touches a brick at more than hitFraction of its speed hits it (BrickHit): one hit takes one
-    //    energy, at zero the brick explodes exploseDelay milliseconds later (BrickDestroyed): its body goes (and what
-    //    rested on it falls), its brickScore is added;
+    //    energy, at zero the brick explodes exploseDelay milliseconds later (BrickDestroyed): its brickScore is added and
+    //    its body goes (and what rested on it falls), a person's or an animal's after shrinking away for
+    //    GameplayRules::shrinkTime;
     //  - dynamic bodies below fallLimitY are taken out (ActorFell), no longer targets, with no points unless fallScores;
     //  - when no target is left, LevelComplete.
     void update(double seconds, const GameInput& input);
@@ -354,8 +372,8 @@ public:
     int addBall(Vec3 position, Vec3 direction);
 
     // One hit on an actor from something other than a ball (a bullet, dynamite, the Thunderbolt prize): the same as a
-    // ball's, with `ball` -1 in the event. False if nothing counted: the actor is not damageable or is gone or already
-    // out of energy.
+    // ball's, with `ball` -1 in the event. False if nothing counted: the actor is not damageable or is gone, shrinking
+    // away or already out of energy.
     bool hit(ActorIndex actor, Vec3 at);
 
     // Ends the level at once (the prize "Next Level"). Nothing happens if it is over.
@@ -375,14 +393,15 @@ private:
     struct Brick {
         const GameMaterial* material = nullptr;
         ObjectType type = ObjectType::Unknown;
-        bool dynamic = false;  // as the level saved it
         bool damageable = false;
         bool exploding = false;
+        bool shrinking = false;  // paid for, and on its way out (shrinksAway())
         bool removed = false;
         bool outOfPlay = false;  // a target the ball cannot get at: it does not count
         int energy = 0;
         int maxEnergy = 0;
         double explodeAt = 0;
+        double removeAt = 0;  // when it has finished shrinking
         std::uint8_t targetFor = 0;  // bit per TargetRule
     };
     // What comes next after the last ball is lost.
@@ -400,6 +419,7 @@ private:
     int targetsAtStart_[2] = {0, 0};
     double stalled_ = 0;              // seconds of play since a brick was last touched
     std::vector<ActorIndex> exploding_;
+    std::vector<ActorIndex> shrinking_;
     std::vector<ActorIndex> hitThisStep_;
 
     std::int64_t score_;
@@ -442,6 +462,7 @@ private:
     bool freeBall(Ball& ball, Vec3 at);
     void runLifeSequence();
     void explodeDue();
+    void removeShrunk();
     void removeFallen();
     void removeBrick(ActorIndex actor);
     bool inPlay(ActorIndex actor) const;

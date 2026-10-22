@@ -487,7 +487,8 @@ Two hypotheses cheap to test on footage, each a single predicate:
 
 - **H-dyn**: a level ends when every *dynamic* `brick` (and `tree`) is destroyed;
   kinematic floors never count. Predicts that `knight-castle` ends with its 84
-  kinematic `plitka` tiles and 12 water tiles still standing.
+  kinematic `plitka` tiles and 12 water tiles still standing. Refuted by the
+  footage: its natural end shows an empty board.
 - **H-type**: a level ends when every `brick` whose `brickType` is 0 is
   destroyed; animals, crates and ground (type 4) are optional bonus points.
   Predicts `village-wolf-sheeps` can end with sheep and crates standing, and
@@ -497,17 +498,17 @@ Build it as one predicate `isTarget(object)` so the rule is a one-line change.
 `metall` (group 12) and `dynamite`/`firework` are the next questions: whether the
 ball can break metal, and whether dynamite counts.
 
-**Footage answered it** (`GAMEPLAY.md`, "Rules settled by the second study"): H-type is
-refuted (a level did not end before its type 4 gorilla was destroyed) and H-dyn fits
-the natural ends: the required objects are the dynamic `brick`s of material type 0 and 4
-and the `tree`s. `metall` and `teleport*` objects stayed on the board at natural ends
-(and one `cannon`), so they are not required; metal is destructible (blasts, +50 each)
-but most of it survives a level. `dynamite`, `firework`, `generator*`, `spring`,
-`volcano`, `cloth` and `vibro` never decided an end that was seen; they are not required
-here (they are not bricks), and they can still be destroyed for their points. The game's
-`TargetRule::DynamicBricks` is this predicate, and the default. One caveat of the
-re-check: that kinematic bricks are *not* required rests on one ending (level 23) that
-fits either reading to a tenth of a second.
+**Footage answered it** (`GAMEPLAY.md`, "Rules settled by the second study", 3 and 7):
+H-type is refuted (a level did not end before its type 4 gorilla was destroyed) and so
+is H-dyn: the kinematic floors count. The required objects are every `brick` of material
+type 0 and 4 and every `tree`, whatever its motion (level 23 ended with the last of its
+kinematic ground blocks, level 65 with all of its tiles gone). `metall` and `teleport*`
+objects stayed on the board at natural ends (and one `cannon`), so they are not required;
+metal is destructible (blasts, +50 each) but most of it survives a level. `dynamite`,
+`firework`, `generator*`, `spring`, `volcano`, `cloth` and `vibro` never decided an end that
+was seen; they are not required here (they are not bricks), and they can still be
+destroyed for their points. The game's `TargetRule::Bricks` is this predicate, and the
+default.
 
 ## 11. What the data cannot tell you (code-only), and checks for footage
 
