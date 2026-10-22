@@ -29,21 +29,23 @@ hit has its sound. The hearts and points carry from level to level, a finished l
 next, a lost game goes to Game Over or the high scores, and `--autoplay` lets an autopilot play
 (see below). The 35 sharks and birds that follow a path swim and dance along it, as kinematic bodies that push the ball
 and the bricks they meet (see [`docs/LEVEL_FORMAT.md`](docs/LEVEL_FORMAT.md), "Path motion"). The 28 prizes (they drop from destroyed
-objects, fall to the bat and change it, the ball or the board; `docs/GAMEPLAY.md` sections 15 and 16) and the level's special objects (dynamite
-chains, interactive cannons, teleports, firework crates, springs, volcanoes and metal; section 17) are in. Not there yet: the bat's weapons (they are
-granted and counted, nothing fires) and the Thunderbolt and meteor strikes, sails (cloth), reflections, particle systems, and model animation.
+objects, fall to the bat and change it, the ball or the board; `docs/GAMEPLAY.md` sections 15 and 16), the level's special objects (dynamite
+chains, interactive cannons, teleports, firework crates, springs, volcanoes and metal; section 17), the bat's four weapons and the Thunderbolt and
+meteor strikes (section 18), the particle systems of `Data/Particles` (section 19) and the 22 sails, which hang from their ships' yards, fill out in
+the wind, fall when the ship breaks and score when they are hit (section 20), are in. Not there yet: reflections, the island that sinks and the other animation takes of the models (only the bat's weapon
+barrels and the turn of the projectiles are played).
 
 ## Layout
 
 | Path | What it is |
 |---|---|
 | `engine/` | Platform-neutral runtime: window and input, GPU renderer and shaders, model and image loading, physics (`PhysicsWorld` over Jolt), audio (Ogg Vorbis decoding, mixer, device), logging, paths |
-| `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, level physics (`PhysicsScene`), the rules of play (`GameSession`, `BallReach`), the level's special objects (`SpecialObjects`), the prizes (`Prizes`, the session's `SessionPrizes.cpp`), objects that follow paths (`PathPlayer`), what a session looks and sounds like (`PlayScene`, `ObjectEffects`, `PrizeScene`, `PrizeHud`, `Billboard`, `PlaySounds`), camera, sound library, save data; the 2D UI (bitmap fonts, string table, menu forms, the menu screens and their flow, the HUD) |
+| `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, level physics (`PhysicsScene`), the rules of play (`GameSession`, `BallReach`, the autopilot `Autopilot`), the level's special objects (`SpecialObjects`), the prizes (`Prizes`, the session's `SessionPrizes.cpp`), the weapons and the strikes of the prizes (`Weapons`), the sails (`Cloth`, `ClothPlan`), objects that follow paths (`PathPlayer`), the particle systems (`ParticleDef`, `ParticleSystem`, `ParticleDraw`), what a session looks and sounds like (`PlayScene`, `ObjectEffects`, `BrickEffects`, `PrizeScene`, `PrizeHud`, `Billboard`, `BatBarrels`, `WeaponScene`, `WeaponEffects`, `ClothDraw`, `PlaySounds`), camera, sound library, save data; the 2D UI (bitmap fonts, string table, menu forms, the menu screens and their flow, the HUD) |
 | `app/` | Executable entry point: the game's front end and its play session (`PlaySession`), the level viewer (with physics and music) and the menu form viewer |
 | `platform/macos/` | App bundle metadata (the only per-platform code so far) |
 | `scripts/` | `package_macos.sh`: universal build, ad-hoc signing, Developer ID signing and notarization |
 | `tools/` | Asset pipeline: `convert_assets.py` runs the converters for levels (`mb3level.py`), meshes (`x2glb.py`), materials, sounds and music (`sounds.py`), textures, the menus, strings and fonts (`ui.py`) and the level list (`campaign.py`), object and particle definitions (`objects.py`), and on macOS the app icon (`make_icon.py`); also the MoleBox dumper and the shader compiler |
-| `docs/` | Architecture, level format, converted asset formats (`ASSET_FORMATS.md`), levels in the physics world (`PHYSICS.md`), sound and music (`AUDIO.md`), macOS packaging (`MACOS.md`), save files (`SAVES.md`), what the object definitions say about gameplay (`OBJECTS.md`), how the data was recovered |
+| `docs/` | Architecture, level format, converted asset formats (`ASSET_FORMATS.md`), levels in the physics world (`PHYSICS.md`), sound and music (`AUDIO.md`), macOS packaging (`MACOS.md`), save files (`SAVES.md`), what the object definitions say about gameplay (`OBJECTS.md`), the rules of play and the footage behind them (`GAMEPLAY.md`), how the data was recovered |
 | `tests/` | C++ and Python tests; the ones that read the game data are skipped unless `MB3_ASSETS` is set |
 
 ## Build (macOS)
@@ -108,6 +110,7 @@ to regenerate them; that is the only thing that needs `glslangValidator` and
    $MuggleBall3 --screenshot out.png --level piratos-ostrovok --simulate 3 --ball -5,0   # a test ball, 3 s of physics
    $MuggleBall3 --screenshot out.png --level cowboys-napadenie --autoplay --simulate 20   # 20 s played by the autopilot, no window
    $MuggleBall3 --autoplay --level piratos-ostrovok --catch-prize magnit@2 --drop-prize bonus@3,-10   # a prize given at a time (GAMEPLAY.md 16.5)
+   $MuggleBall3 --autoplay --level piratos-ostrovok --effect Fireworks/magenta@1,0,6,4 --screenshot out.png --simulate 1.25   # a particle effect at a time (GAMEPLAY.md 19.8)
    $MuggleBall3 --check assets/Data/Levels/piratos-po-krugy.json
    $MuggleBall3 --play-sound pirat_hit           # play a named sound (sounds.xml), wait, exit
    $MuggleBall3 --play-music Pirates --seconds 20  # one pass of Menu, Village, Pirates, Cowboys or Knights
@@ -147,7 +150,9 @@ to regenerate them; that is the only thing that needs `glslangValidator` and
    picture is the game's own, HUD included (a flash needs a lucky time to be caught). `--catch-prize <stem>[@seconds]`
    and `--drop-prize <stem>[@seconds[,x]]` (with `--autoplay`, repeatable) give the level a prize at that time of play,
    caught at once or falling from the far end of the board, to look at the effects without waiting for the drops
-   (`<stem>` is a file of `Data/Objects/Prizes`: `bonus`, `magnit`, `tripple`...). In the window
+   (`<stem>` is a file of `Data/Objects/Prizes`: `bonus`, `magnit`, `tripple`...). `--effect <file>[/<name>][@seconds[,x,y,z[,x2,y2,z2]]]` (with `--autoplay`, repeatable)
+   sets a particle effect of `Data/Particles` going at that time of play at a point (over the middle of the board without one; a beam's second end is the second point), to
+   look at a file without waiting for the game to need it (`explosebig@5`, `Lightning@1,-8,1,0,8,1,10`; `docs/GAMEPLAY.md` 19.8). In the window
    the log reports the frame time every few seconds. `MB3_GPU_DEBUG=1` turns on the GPU back end's validation
    layer. `--form` shows a menu form over the `background` form
    (`--no-background` leaves it out), with sample high scores; in the window Left/Right

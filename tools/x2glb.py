@@ -29,16 +29,18 @@ ARRAY_BUFFER, ELEMENT_ARRAY_BUFFER = 34962, 34963
 TRIANGLES = 4
 DEFAULT_TICKS_PER_SECOND = 4800  # D3DX default when a file has no AnimTicksPerSecond
 IDENTITY = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
-# AnimationKey type -> (track key, values per key)
+# AnimationKey type -> (what the key sets, values per key). A rotation key (a quaternion in the .x's own convention) is
+# not converted: no shipped file has one.
 KEY_TYPES = {
-    xfile.KEY_ROTATION: ("rotation", 4),
     xfile.KEY_SCALE: ("scale", 3),
-    xfile.KEY_POSITION: ("position", 3),
+    xfile.KEY_POSITION: ("translation", 3),
     xfile.KEY_MATRIX: ("matrix", 16),
     xfile.KEY_MATRIX_ALT: ("matrix", 16),
 }
 COMPONENT_SIZE = {5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4}
 TYPE_WIDTH = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT4": 16}
+# glTF animation path -> accessor type of its values
+PATH_TYPES = {"translation": "VEC3", "rotation": "VEC4", "scale": "VEC3"}
 # The runtime decodes JPEG and PNG only; every .dds has a .png beside it.
 SKIPPED_TEXTURE_EXTENSIONS = {".dds"}
 PREFERRED_EXTENSIONS = {".png": 0, ".jpg": 1, ".jpeg": 1}
@@ -93,6 +95,69 @@ def _pack_floats(rows):
 def _unit(x, y, z):
     n = math.sqrt(x * x + y * y + z * z)
     return (x / n, y / n, z / n) if n > 1e-12 else None
+
+
+def compose(translation, rotation, scale):
+    """The 16 floats of translation * rotation * scale as glTF lays them out (column-major), the same as a .x matrix in file order."""
+    x, y, z, w = rotation
+    sx, sy, sz = scale
+    return [(1 - 2 * y * y - 2 * z * z) * sx, (2 * x * y + 2 * z * w) * sx, (2 * x * z - 2 * y * w) * sx, 0.0,
+            (2 * x * y - 2 * z * w) * sy, (1 - 2 * x * x - 2 * z * z) * sy, (2 * y * z + 2 * x * w) * sy, 0.0,
+            (2 * x * z + 2 * y * w) * sz, (2 * y * z - 2 * x * w) * sz, (1 - 2 * x * x - 2 * y * y) * sz, 0.0,
+            translation[0], translation[1], translation[2], 1.0]
+
+
+def decompose(m):
+    """(translation, rotation as x, y, z, w, scale) of a matrix of 16 floats read as glTF reads them.
+
+    The scale is the length of each column (a row of the .x matrix), the rotation what is left of the columns once they
+    are made square to one another: a shear is dropped, as D3DX does when it loads matrix keys into an animation. A
+    mirror comes back as a negative z scale. None when the matrix has a projection or an axis of no length.
+    """
+    if abs(m[3]) > 1e-4 or abs(m[7]) > 1e-4 or abs(m[11]) > 1e-4 or abs(m[15] - 1) > 1e-4:
+        return None
+    c = [m[0:3], m[4:7], m[8:11]]
+    scale = [math.sqrt(sum(v * v for v in column)) for column in c]
+    if min(scale) < 1e-9:
+        return None
+    x = [v / scale[0] for v in c[0]]
+    along = sum(a * b for a, b in zip(c[1], x))
+    y = [v - along * a for v, a in zip(c[1], x)]
+    length = math.sqrt(sum(v * v for v in y))
+    if length < 1e-9:
+        return None
+    y = [v / length for v in y]
+    z = [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]]
+    if sum(a * b for a, b in zip(z, c[2])) < 0:
+        scale[2] = -scale[2]
+    r = [[x[i], y[i], z[i]] for i in range(3)]  # r[row][column]
+    trace = r[0][0] + r[1][1] + r[2][2]
+    if trace > 0:
+        s4 = math.sqrt(trace + 1) * 2
+        q = [(r[2][1] - r[1][2]) / s4, (r[0][2] - r[2][0]) / s4, (r[1][0] - r[0][1]) / s4, s4 / 4]
+    elif r[0][0] > r[1][1] and r[0][0] > r[2][2]:
+        s4 = math.sqrt(1 + r[0][0] - r[1][1] - r[2][2]) * 2
+        q = [s4 / 4, (r[0][1] + r[1][0]) / s4, (r[0][2] + r[2][0]) / s4, (r[2][1] - r[1][2]) / s4]
+    elif r[1][1] > r[2][2]:
+        s4 = math.sqrt(1 + r[1][1] - r[0][0] - r[2][2]) * 2
+        q = [(r[0][1] + r[1][0]) / s4, s4 / 4, (r[1][2] + r[2][1]) / s4, (r[0][2] - r[2][0]) / s4]
+    else:
+        s4 = math.sqrt(1 + r[2][2] - r[0][0] - r[1][1]) * 2
+        q = [(r[0][2] + r[2][0]) / s4, (r[1][2] + r[2][1]) / s4, s4 / 4, (r[1][0] - r[0][1]) / s4]
+    norm = math.sqrt(sum(v * v for v in q))
+    return (m[12], m[13], m[14]), tuple(v / norm for v in q), tuple(scale)
+
+
+def _trs_json(translation, rotation, scale):
+    """The node properties of a transform; what is the default is left out."""
+    out = {}
+    if any(translation):
+        out["translation"] = [f32(v) for v in translation]
+    if tuple(rotation) != (0.0, 0.0, 0.0, 1.0):
+        out["rotation"] = [f32(v) for v in rotation]
+    if tuple(scale) != (1.0, 1.0, 1.0):
+        out["scale"] = [f32(v) for v in scale]
+    return out
 
 
 def _smooth_normals(mesh):
@@ -160,13 +225,19 @@ class _GlbBuilder:
         self.warnings = list(xf.warnings)
         self.triangles = 0
         self.vertices = 0
+        self.node_index = {}  # frame name -> its first node, which is the one an animation moves
+        # The frames some animation moves: glTF wants those as translation, rotation and scale rather than a matrix.
+        self.animated = {anim.frame for aset in xf.animation_sets for anim in aset.animations
+                         if any(ks.key_type in KEY_TYPES for ks in anim.key_sets)}
 
     # -- buffers --------------------------------------------------------
 
-    def _accessor(self, payload, count, component_type, kind, target, bounds=None):
+    def _accessor(self, payload, count, component_type, kind, target=None, bounds=None):
         assert len(payload) % 4 == 0 and len(self.binary) % 4 == 0
-        self.views.append({"buffer": 0, "byteOffset": len(self.binary), "byteLength": len(payload),
-                           "target": target})
+        view = {"buffer": 0, "byteOffset": len(self.binary), "byteLength": len(payload)}
+        if target is not None:  # the animations' data is neither vertices nor indices
+            view["target"] = target
+        self.views.append(view)
         self.binary += payload
         accessor = {"bufferView": len(self.views) - 1, "componentType": component_type,
                     "count": count, "type": kind}
@@ -221,8 +292,13 @@ class _GlbBuilder:
         self.nodes.append(node)
         if frame.name:
             node["name"] = frame.name
+            self.node_index.setdefault(frame.name, index)
         if frame.matrix is not None and [float(v) for v in frame.matrix] != IDENTITY:
-            node["matrix"] = [f32(v) for v in frame.matrix]
+            parts = decompose([float(v) for v in frame.matrix]) if frame.name in self.animated else None
+            if parts is None:
+                node["matrix"] = [f32(v) for v in frame.matrix]
+            else:  # a node that is animated may not have a matrix
+                node.update(_trs_json(*parts))
         mesh = self._add_mesh(frame.meshes)
         if mesh is not None:
             node["mesh"] = mesh
@@ -269,30 +345,82 @@ class _GlbBuilder:
             out["name"] = m.name
         return out
 
+    def _channels(self, aset, anim):
+        """{glTF path: (times in ticks, values)} for what one .x Animation moves, or None."""
+        matrix_keys = [ks for ks in anim.key_sets if KEY_TYPES.get(ks.key_type, ("", 0))[0] == "matrix"]
+        parts = {}
+        for key_set in anim.key_sets:
+            kind = KEY_TYPES.get(key_set.key_type)
+            if kind is None or any(len(v) != kind[1] for _, v in key_set.keys) or not key_set.keys:
+                self.warnings.append(f"animation '{aset.name}' on '{anim.frame}': "
+                                     f"key type {key_set.key_type} is unsupported or malformed, skipped")
+                continue
+            if matrix_keys and kind[0] != "matrix":
+                self.warnings.append(f"animation '{aset.name}' on '{anim.frame}': "
+                                     f"{kind[0]} keys beside matrix keys, skipped")
+                continue
+            latest = {}  # a tick written twice keeps its last key
+            for tick, values in key_set.keys:
+                latest[tick] = values
+            ticks = sorted(latest)
+            if kind[0] != "matrix":
+                parts[kind[0]] = (ticks, [latest[t] for t in ticks])
+                continue
+            decomposed = [decompose([float(v) for v in latest[t]]) for t in ticks]
+            if None in decomposed:
+                self.warnings.append(f"animation '{aset.name}' on '{anim.frame}': "
+                                     f"a matrix key has no scale or has a projection, skipped")
+                return None
+            rotations = []
+            for _, q, _ in decomposed:
+                # q and -q are the same turn: keep neighbours on one side so that the interpolation takes the short way
+                if rotations and sum(a * b for a, b in zip(q, rotations[-1])) < 0:
+                    q = tuple(-v for v in q)
+                rotations.append(q)
+            parts = {"translation": (ticks, [t for t, _, _ in decomposed]),
+                     "rotation": (ticks, rotations),
+                     "scale": (ticks, [s for _, _, s in decomposed])}
+        return parts
+
     def _animations(self):
-        ticks = self.xf.ticks_per_second or DEFAULT_TICKS_PER_SECOND
-        sets = []
+        """glTF animations of the .x AnimationSets, times in seconds; (list, how many nodes they move in all)."""
+        ticks_per_second = self.xf.ticks_per_second or DEFAULT_TICKS_PER_SECOND
+        animations, moved = [], 0
         for aset in self.xf.animation_sets:
-            tracks = []
+            samplers, channels = [], []
             for anim in aset.animations:
-                track = {"node": anim.frame}
-                for key_set in anim.key_sets:
-                    kind = KEY_TYPES.get(key_set.key_type)
-                    if kind is None or any(len(v) != kind[1] for _, v in key_set.keys):
-                        self.warnings.append(f"animation '{aset.name}' on '{anim.frame}': "
-                                             f"unsupported key type {key_set.key_type}, skipped")
-                        continue
-                    track.setdefault(kind[0], []).extend([t, *map(f32, v)] for t, v in key_set.keys)
-                tracks.append(track)
-            sets.append({"name": aset.name, "ticksPerSecond": ticks, "tracks": tracks})
-        return sets
+                node = self.node_index.get(anim.frame)
+                if node is None:
+                    self.warnings.append(f"animation '{aset.name}': no frame '{anim.frame}', skipped")
+                    continue
+                if "matrix" in self.nodes[node]:
+                    self.warnings.append(f"animation '{aset.name}' on '{anim.frame}': the frame's matrix has no "
+                                         f"scale or a projection, skipped")
+                    continue
+                parts = self._channels(aset, anim)
+                if not parts:
+                    continue
+                moved += 1
+                inputs = {}  # key times share an accessor
+                for path, (ticks, values) in parts.items():
+                    times = tuple(t / ticks_per_second for t in ticks)
+                    if times not in inputs:
+                        inputs[times] = self._accessor(
+                            _pack_floats([(t,) for t in times]), len(times), FLOAT, "SCALAR",
+                            bounds=([f32(times[0])], [f32(times[-1])]))
+                    output = self._accessor(_pack_floats(values), len(values), FLOAT, PATH_TYPES[path])
+                    channels.append({"sampler": len(samplers), "target": {"node": node, "path": path}})
+                    samplers.append({"input": inputs[times], "output": output, "interpolation": "LINEAR"})
+            if channels:
+                animations.append({"name": aset.name, "channels": channels, "samplers": samplers})
+        return animations, moved
 
     # -- result ---------------------------------------------------------
 
     def build(self, source):
         materials = [self._material(m) for m in self.xf.materials]
         roots = [self._add_root(r) for r in self.xf.roots]
-        animations = self._animations()
+        animations, moved = self._animations()
         gltf = {"asset": {"version": "2.0", "generator": "Muggle Ball 3 tools/x2glb.py"},
                 "scene": 0, "scenes": [{"nodes": roots}], "nodes": self.nodes}
         for key, value in (("meshes", self.meshes), ("materials", materials), ("textures", self.textures),
@@ -302,11 +430,13 @@ class _GlbBuilder:
                 gltf[key] = value
         if self.binary:
             gltf["buffers"] = [{"byteLength": len(self.binary)}]
-        gltf["extras"] = {"source": source, "coordinateSystem": "d3d-left-handed", "animations": animations}
+        if animations:
+            gltf["animations"] = animations
+        gltf["extras"] = {"source": source, "coordinateSystem": "d3d-left-handed"}
         stats = {"nodes": len(self.nodes), "meshes": len(self.meshes),
                  "primitives": sum(len(m["primitives"]) for m in self.meshes),
                  "triangles": self.triangles, "vertices": self.vertices, "materials": len(materials),
-                 "animation_sets": len(animations), "animation_tracks": sum(len(a["tracks"]) for a in animations)}
+                 "animation_sets": len(animations), "animation_tracks": moved}
         return gltf, bytes(self.binary), stats
 
 
@@ -478,6 +608,62 @@ def _check_nodes(doc, expected_nodes, problems):
         problems.append("some nodes are not reachable from the scene")
 
 
+def _check_animations(doc, binary, problems):
+    """Channels, samplers and what they point at: the nodes a channel moves have no matrix, key times strictly
+    increase, and every sampler's input and output have the same number of keys of the right type."""
+    nodes, accessors = doc.get("nodes", []), doc.get("accessors", [])
+    for ai, animation in enumerate(doc.get("animations", [])):
+        where = f"animation {ai}"
+        samplers = animation.get("samplers", [])
+        if not animation.get("channels") or not samplers:
+            problems.append(f"{where}: no channels or no samplers")
+            continue
+        for ci, channel in enumerate(animation["channels"]):
+            target = channel.get("target", {})
+            path = target.get("path")
+            if not 0 <= channel.get("sampler", -1) < len(samplers):
+                problems.append(f"{where} channel {ci}: bad sampler")
+                continue
+            if not 0 <= target.get("node", -1) < len(nodes):
+                problems.append(f"{where} channel {ci}: bad node")
+                continue
+            if path not in PATH_TYPES:
+                problems.append(f"{where} channel {ci}: unknown path {path}")
+                continue
+            if "matrix" in nodes[target["node"]]:
+                problems.append(f"{where} channel {ci}: node {target['node']} has a matrix")
+            sampler = samplers[channel["sampler"]]
+            if sampler.get("interpolation", "LINEAR") != "LINEAR":
+                problems.append(f"{where} channel {ci}: not LINEAR")
+            if not all(0 <= sampler.get(k, -1) < len(accessors) for k in ("input", "output")):
+                problems.append(f"{where} channel {ci}: bad accessor")
+                continue
+            times_accessor, values_accessor = accessors[sampler["input"]], accessors[sampler["output"]]
+            if times_accessor["type"] != "SCALAR" or times_accessor["componentType"] != FLOAT:
+                problems.append(f"{where} channel {ci}: key times are not float scalars")
+                continue
+            if values_accessor["type"] != PATH_TYPES[path] or values_accessor["componentType"] != FLOAT:
+                problems.append(f"{where} channel {ci}: {path} values are {values_accessor['type']}")
+                continue
+            if values_accessor["count"] != times_accessor["count"]:
+                problems.append(f"{where} channel {ci}: {times_accessor['count']} times, "
+                                f"{values_accessor['count']} values")
+                continue
+            times = _read_accessor(doc, binary, sampler["input"])
+            if not all(a < b for a, b in zip(times, times[1:])) or not all(math.isfinite(t) and t >= 0 for t in times):
+                problems.append(f"{where} channel {ci}: key times do not strictly increase from 0 or more")
+            for bound, expected in (("min", times[0]), ("max", times[-1])):
+                got = times_accessor.get(bound)
+                if not got or struct.pack("<f", got[0]) != struct.pack("<f", expected):
+                    problems.append(f"{where} channel {ci}: key time {bound} is wrong")
+            values = _read_accessor(doc, binary, sampler["output"])
+            if not all(math.isfinite(v) for v in values):
+                problems.append(f"{where} channel {ci}: a value is not finite")
+            elif path == "rotation" and any(
+                    abs(math.sqrt(sum(v * v for v in values[i:i + 4])) - 1) > 1e-3 for i in range(0, len(values), 4)):
+                problems.append(f"{where} channel {ci}: a rotation is not unit length")
+
+
 def _check_materials(doc, glb_dir, problems):
     textures, images = doc.get("textures", []), doc.get("images", [])
     for i, m in enumerate(doc.get("materials", [])):
@@ -515,11 +701,7 @@ def validate_glb(path, expected_nodes=None):
                 _check_primitive(doc, binary, f"mesh {mi} primitive {pi}", prim, problems)
         _check_nodes(doc, expected_nodes, problems)
         _check_materials(doc, path.parent, problems)
-        names = {n.get("name") for n in doc.get("nodes", [])}
-        for aset in doc.get("extras", {}).get("animations", []):
-            for track in aset["tracks"]:
-                if track["node"] not in names:
-                    problems.append(f"animation '{aset['name']}' targets unknown frame '{track['node']}'")
+        _check_animations(doc, binary, problems)
     except (KeyError, IndexError, TypeError, ValueError) as e:
         problems.append(f"malformed glTF: {type(e).__name__} {e}")
     return problems

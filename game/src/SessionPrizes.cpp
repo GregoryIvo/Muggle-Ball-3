@@ -239,6 +239,7 @@ void GameSession::givePrize(PrizeKind kind) {
             event.type = EventType::StrikeGranted;
             event.prize = kind;
             emit(event);
+            weapons_.startStrike(*this, kind);
             break;
         }
         case PrizeKind::Surprise: {
@@ -439,10 +440,12 @@ void GameSession::steerBall(Ball& ball, Vec3 at) {
         ball.heading = rotated(ball.heading, radians(rules.drunkenRate) * static_cast<float>(wobble * fixedStep_));
     }
     if (effect(PrizeKind::YoYo) != nullptr && batBody_ != 0) {
-        // The string is taut at its length: a ball going further out is turned back like a ball off a wall round the bat.
+        // The string is taut at its length: a ball going further out is turned back like a ball off a wall round the bat. It is tied to the bat's
+        // rim, so it is as much longer than yoyoLength as the bat is bigger than the plain one (a bat of 1.9 times would leave a ball that
+        // touches it a hand's breadth to turn in) [I].
         const Vec3 out{at.x - bat_.position.x, 0, at.z - bat_.position.z};
         const float distance = length(out);
-        if (distance > rules.yoyoLength) {
+        if (distance > rules.yoyoLength + (batRadius() - rules_.batRadius)) {
             const Vec3 radial = out / distance;
             const float away = dot(ball.heading, radial);
             if (away > 0) {
@@ -541,7 +544,7 @@ void GameSession::blast(Vec3 at) {
         if (!bricks_[actor].damageable || bricks_[actor].removed || hitAlready) {
             continue;
         }
-        const Bounds box = boundsOf(scene_.plan().actors[actor].body, scene_.actorPose(actor));
+        const Bounds box = scene_.bounds(actor);
         const Vec3 nearest{std::clamp(at.x, box.low.x, box.high.x), std::clamp(at.y, box.low.y, box.high.y),
                            std::clamp(at.z, box.low.z, box.high.z)};
         if (length(nearest - at) <= radius) {
@@ -595,6 +598,14 @@ void GameSession::shakeBodies() {
         scene_.world().wake(body);
         scene_.world().setLinearVelocity(body, scene_.world().linearVelocity(body) + kick);
     }
+    // The sails are loose bodies too, and shake as one each [I]: the whole sail takes a kick of its own (the pins hold the corners).
+    const ClothSet& cloths = scene_.cloths();
+    for (std::size_t i = 0; i < cloths.size(); ++i) {
+        if (cloths.alive(i)) {
+            scene_.world().pushCloth(cloths.body(i), {effectRandom_.between(-rules.quakeKick, rules.quakeKick), effectRandom_.between(0, rules.quakeJump),
+                                                       effectRandom_.between(-rules.quakeKick, rules.quakeKick)});
+        }
+    }
 }
 
 void GameSession::blowBodies() {
@@ -605,6 +616,14 @@ void GameSession::blowBodies() {
             continue;
         }
         scene_.world().setLinearVelocity(body, scene_.world().linearVelocity(body) + Vec3{push, 0, 0});
+    }
+    // A sail is blown along x as well, awake or asleep (a settled sail hangs by its pins and would never feel it) [I]: the wind the data
+    // gives a sail is square to it and is the sail's own (20.2).
+    const ClothSet& cloths = scene_.cloths();
+    for (std::size_t i = 0; i < cloths.size(); ++i) {
+        if (cloths.alive(i)) {
+            scene_.world().pushCloth(cloths.body(i), {push, 0, 0});
+        }
     }
 }
 

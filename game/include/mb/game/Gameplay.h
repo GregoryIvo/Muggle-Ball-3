@@ -8,6 +8,7 @@
 #include "mb/game/PhysicsScene.h"
 #include "mb/game/SpecialObjects.h"
 #include "mb/game/Prizes.h"
+#include "mb/game/Weapons.h"
 
 #include <array>
 #include <cstdint>
@@ -110,8 +111,9 @@ struct GameplayRules {
     // What the look cannot tell: a piece that stays up where the physics left it (a mast held by joints that no longer
     // hold it, a cactus that came to rest 10 cm above the ball's reach) is a target nobody can hit. When balls have been in
     // flight this long without touching any brick and no more than stallMost targets, or stallShare of those the level
-    // began with, are left, they are let go and the level ends. The autopilot's runs that stood still (14 of the 60 levels
-    // it finished in 900 s, 8 of which it would not have finished without this) did so with 1 to 6 targets left [?].
+    // began with, are left, they are let go and the level ends. The autopilot's runs that stood still (9 of the 71 levels
+    // it finished in 900 s, 3 of which it would not have finished without this, docs/GAMEPLAY.md section 12) did so with 1 or 2
+    // targets left [?].
     double stallSeconds = 90;
     int stallMost = 12;
     float stallShare = 0.25f;
@@ -140,6 +142,8 @@ struct GameplayRules {
     SpecialObjectRules objects;
     // ---- Prizes (sections 7, 14 and 15)
     PrizeRules prizes;
+    // ---- The weapons and the strikes of the prizes (section 18)
+    WeaponRules weapons;
 };
 
 // Which objects must be destroyed to finish a level. The second study of the footage and its fact-check settled it
@@ -166,7 +170,7 @@ struct SessionOptions {
     // Bricks is the default: the rule the footage shows (a level ends when the last brick or tree is gone, moving or not,
     // with metal, portals and cannons still on the board). The autopilot's numbers for it are in docs/GAMEPLAY.md section
     // 12 (tests/gameplay_smoke.cpp counts them), but it cannot finish a level that has a target out of the ball's reach
-    // (above it on a support that stays, or beyond the walls: 43 of the 83 have, most of them knight boards), so a target
+    // (above it on a support that stays, or beyond the walls: 44 of the 83 had one by the end of a 900 s run, most of them knight boards), so a target
     // the ball cannot get at is not one: see ignoreUnreachable.
     TargetRule levelEnd = TargetRule::Bricks;
     // A target does not count once the ball cannot get at it, so that no level ends up impossible to finish. The ball
@@ -205,7 +209,8 @@ enum class EventType {
     BrickHit,        // ball (-1 for hit()), actor, position (the contact), speed, energy (left), material
     // BrickDestroyed comes exploseDelay milliseconds after the hit that took the last energy. A person or an animal
     // (shrinksAway()) is then still there for GameplayRules::shrinkTime, shrinking (ActorStatus::shrink): the others are gone.
-    BrickDestroyed,  // actor, position (centre of mass), points (added to the score), material
+    BrickDestroyed,  // actor, position (centre of mass), points (added to the score), material, prize (the weapon or strike whose hit took the
+                     // last energy: Machine Gun, Cannon, Bazooka, Laser, Thunderbolt or Meteor; none for the ball, a blast, a chain)
     ActorFell,       // actor, position (centre of mass), points (only with fallScores), material: it left the board
     // The special objects (SpecialObjects; docs/GAMEPLAY.md section 17). Dynamite that goes off also reports its
     // BrickDestroyed, with the charge's points and sound.
@@ -225,10 +230,21 @@ enum class EventType {
     PrizeMissed,     // prize, position: it fizzles at the near edge
     EffectStarted,   // prize: a timed effect, a weapon, the Explosive Ball, the Earthquake or the Wind began (a second catch: no)
     EffectEnded,     // prize: it ran out, or the bat was lost, or Normal Ball cancelled it
-    StrikeGranted,   // prize (Thunderbolt or Meteor): the strikes are for whoever implements them (step 5, wave 3)
+    StrikeGranted,   // prize (Thunderbolt or Meteor): its strikes are scheduled (Weapons::startStrike)
     BallStuck,       // ball, position: the Magnet caught it (the sound "ballMagnited")
     Blast,           // ball, position, speed (the radius): the Explosive Ball went off
     BallRubbered,    // ball, position: the Yo-Yo's string turned the ball back (the sound "ballRubbered")
+    // ---- The weapons and the strikes (section 18). `material` is the projectile's (bat_bullet, bat_kernel, bat_rocket, bat_lazer,
+    // thunderbolt, meteor): its `period` sound is the shot's and its `dead` sound the impact's. Every projectile ends with one
+    // of ProjectileHit, BoltStruck, MeteorImpact or ProjectileGone.
+    ShotFired,       // prize (the weapon), position (the muzzle: the middle of the barrels), velocity (of a projectile), count (shots left)
+    ProjectileHit,   // prize, actor (what it touched: the board and what nothing damages too), position (the contact), velocity (its own)
+    ProjectileExploded,  // prize, position, speed (the burst's radius): a cannonball or a rocket burst, after its ProjectileHit
+    ProjectileGone,  // prize, position: it left the world or ran out of time with no hit, or the level ended
+    LaserBeam,       // position (the barrel), end (the tip), count (the actors it reached, the one that stopped it included)
+    BoltStruck,      // prize (Thunderbolt), actor, position (where it struck), end (the top edge of the screen above, where it is drawn from)
+    MeteorFalling,   // prize (Meteor), position (where it starts, above the screen's top edge), velocity, end (where it will come down)
+    MeteorImpact,    // prize (Meteor), actor (the board's for the water), position (the contact)
     LifeLost,        // hearts (left): the heart is spent, 2.1 s after the last ball was lost
     BatLeft,         // the bat starts to fly off (after the last ball was lost)
     BatEntered,      // the bat swoops in with the ball on it (at the start of a level, and as the heart is spent)
@@ -248,6 +264,8 @@ struct GameEvent {
     int energy = 0;
     int points = 0;
     int hearts = 0;
+    int count = 0;  // how many: the shots left of a weapon, the actors a laser beam reached
+    Vec3 end{};     // a second point: a beam's tip, the top of a bolt, where a meteor will land
     std::optional<PrizeKind> prize;
     // The brick's game material, for the sounds (hitSound, deadSound), the explosion (exploseType) and the retexture;
     // it points into the MaterialLibrary the session was made with. Null where there is none.
@@ -327,7 +345,9 @@ struct GameInput {
     // Where the cursor is on the board (batTargetX(), which has none for a cursor above the horizon); the bat eases
     // towards it. None keeps the target of the frame before.
     std::optional<float> batTargetX;
-    bool launch = false;  // the click: lets the held ball go
+    // The click. One thing happens, in this order: it launches the ball held on the bat; else lets go of the balls the Magnet holds;
+    // else fires the weapon (section 18.1).
+    bool launch = false;
 };
 
 // ---- Rules that stand on their own
@@ -335,10 +355,10 @@ struct GameInput {
 // Whether something can hurt an actor of this object type with this material: it has a brick material (brickType other
 // than 2, which the ball, bullets, board, water and the fallback have, and energy above 0). The board and markers never
 // do, and neither do the teleports, which a charge of dynamite 3.8 units away left standing (docs/GAMEPLAY.md section
-// 17.1). The ball itself hurts only bricks, trees, dynamite, firework crates, vibros and flickers (SpecialObjects); the
-// rest of the objects are hurt by blasts, cannonballs and weapons. A cloth is a placeholder for a sail the cloth simulation has yet to build (step 5),
-// so a ball goes by it, though the original scored sails (60 each: piratos-ostrovok's 62 bricks and 3 sails are the 65
-// bricks, 4,231 points of docs/GAMEPLAY.md), and they are not targets here.
+// 17.1). The ball itself hurts bricks, trees, dynamite, firework crates, vibros, flickers and sails (SpecialObjects); the
+// rest of the objects are hurt by blasts, cannonballs and weapons. A sail (cloth) is one object, its lead actor: the original
+// scored them (60 each: piratos-ostrovok's 62 bricks and 3 sails are the 65 bricks, 4,231 points of docs/GAMEPLAY.md), but they
+// are not targets (section 20).
 bool canBeDamaged(ObjectType type, const GameMaterial* material);
 
 // Whether a destroyed object of this material shrinks away instead of being gone with its score: exploseType 5, the
@@ -406,6 +426,10 @@ public:
     TargetRule levelEnd() const { return levelEnd_; }
     // The level's special objects: the cannonballs and rockets in flight, for the presentation.
     const SpecialObjects& objects() const { return objects_; }
+    // The weapons and the strikes: the projectiles in flight and the laser's beams, for the presentation (docs/GAMEPLAY.md section 18).
+    const Weapons& weapons() const { return weapons_; }
+    std::span<const Projectile> projectiles() const { return weapons_.projectiles(); }
+    std::span<const LaserBeam> laserBeams() const { return weapons_.beams(); }
 
     ActorStatus actor(ActorIndex actor) const;
     // Whether an actor that is still in the level counts toward a rule (whatever rule the session ends by), and how
@@ -442,11 +466,12 @@ public:
     // weapons with their shots, the Explosive Ball with its blasts. Those with prizeInfo(kind).icon go on the HUD.
     std::span<const ActiveEffect> activeEffects() const { return effects_; }
     const ActiveEffect* effect(PrizeKind kind) const;
-    // The weapon a click would fire: the one caught last that has shots left. The weapons are filled in by wave 3; the session
-    // only grants them (gun 12 shots, cannon 6, bazooka 7, laser 5) and counts them down.
+    // The weapon a click would fire: the one caught last that has shots left (gun 12 shots, cannon 6, bazooka 7, laser 5). The
+    // others keep their shots. A click fires it (Weapons::fire, docs/GAMEPLAY.md section 18.1) and counts a shot down.
     std::optional<WeaponState> weapon() const;
     int shotsLeft(WeaponType type) const;
-    // Takes a shot from weapon(); false if there is none. The weapon's effect ends with its last shot.
+    // Takes a shot from weapon(); false if there is none. The weapon's effect ends with its last shot. Firing does this: it is for
+    // the weapons' own use and for tests.
     bool useShot();
     // What the prizes have done: the ball's radius and speed (the speed prizes multiply GameplayRules::ballSpeed), the bat's
     // collision radius and its scale against GameplayRules::batRadius (draw the bat that much wider), the night, 0 (day) to 1.
@@ -463,6 +488,7 @@ public:
 
 private:
     friend class SpecialObjects;
+    friend class Weapons;
 
     struct Ball {
         int id = 0;
@@ -496,6 +522,7 @@ private:
         double explodeAt = 0;
         double removeAt = 0;  // when it has finished shrinking
         bool noPrize = false;  // the hit that destroyed it carried disablePrize
+        std::optional<PrizeKind> killedBy;  // the weapon or strike whose hit destroyed it (BrickDestroyed's `prize`)
         std::uint8_t targetFor = 0;  // bit per TargetRule
     };
     // What comes next after the last ball is lost.
@@ -505,6 +532,7 @@ private:
     TargetRule levelEnd_;
     PhysicsScene scene_;
     SpecialObjects objects_;
+    Weapons weapons_;
     double fixedStep_;
     std::vector<Brick> bricks_;  // by ActorIndex
     std::vector<ActorIndex> dynamicActors_;
@@ -565,7 +593,7 @@ private:
     Ball* ballOf(BodyId body);
     void processContacts();
     void hitBat(Ball& ball);
-    bool hitBrick(ActorIndex actor, Vec3 at, float speed, int ball, bool dropsPrize = true);
+    bool hitBrick(ActorIndex actor, Vec3 at, float speed, int ball, bool dropsPrize = true, std::optional<PrizeKind> by = std::nullopt);
     void keepBalls();
     void loseBall(std::size_t index, Vec3 position, Vec3 velocity);
     bool freeBall(Ball& ball, Vec3 at);

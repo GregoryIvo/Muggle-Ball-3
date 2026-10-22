@@ -15,6 +15,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -1435,6 +1436,80 @@ void testRaycast() {
     check(after.has_value() && after->body == wall, "raycast: a removed body is not hit");
 }
 
+// BodyDesc::group and collidesWith: two bodies touch only when each one's collidesWith has the other's group.
+void testKinds() {
+    // A bullet fired along +z at a ball and, behind it, a wall: whether it touches them is the rule of the kinds. With the defaults it stops at
+    // the ball; a bullet of kind 8 that wants kind 1 passes a ball of kind 2 and meets a wall of the default kind, but not a wall that does not
+    // want kind 8.
+    const auto fire = [](std::uint32_t group, std::uint32_t collidesWith, std::uint32_t wallGroup, std::uint32_t wallCollidesWith,
+                         std::uint32_t ballGroup) {
+        PhysicsWorld world(kGravity, settingsFor());
+        BodyDesc ball = floating(at({0, 1, 3}), sphereShape(0.5f));
+        ball.group = ballGroup;
+        ball.userData = 2;
+        world.addBody(ball);
+        BodyDesc wall = staticBody(at({0, 1, 6}), boxShape({2, 2, 0.25f}));
+        wall.group = wallGroup;
+        wall.collidesWith = wallCollidesWith;
+        wall.userData = 3;
+        world.addBody(wall);
+        BodyDesc bullet = floating(at({0, 1, 0}), sphereShape(0.2f));
+        bullet.linearVelocity = {0, 0, 20};
+        bullet.continuousCollision = true;
+        bullet.group = group;
+        bullet.collidesWith = collidesWith;
+        bullet.userData = 1;
+        world.addBody(bullet);
+        std::set<std::uint64_t> touched;
+        for (int i = 0; i < 40; ++i) {
+            world.step(kStep);
+            for (const ContactEvent& e : world.takeContacts()) {
+                touched.insert(e.userDataA == 1 ? e.userDataB : e.userDataA);
+            }
+        }
+        return touched;
+    };
+    check(fire(1, ~0u, 1, ~0u, 1) == std::set<std::uint64_t>{2}, "kinds: with the defaults the bullet meets the first body in its way and stops there");
+    check(fire(8, 1, 1, ~0u, 2) == std::set<std::uint64_t>{3},
+          "kinds: a bullet that touches kind 1 only goes through a ball of kind 2 and meets the wall of the default kind behind it");
+    check(fire(8, 1, 16, ~std::uint32_t{8}, 2).empty(), "kinds: a wall that leaves the bullet's kind out is passed too");
+    check(fire(8, 1 | 16, 16, ~std::uint32_t{8}, 2).empty(),
+          "kinds: it takes both sides to touch: the bullet wants the wall's kind and the wall does not want the bullet's");
+    check(fire(8, 2, 1, ~0u, 2) == std::set<std::uint64_t>{2}, "kinds: a bullet that touches kind 2 meets the ball, whatever else stands behind it");
+}
+
+void testRaycastAll() {
+    PhysicsWorld world(kGravity, settingsFor());
+    BodyDesc far = staticBody(at({0, 0, 20}), boxShape({1, 1, 1}));
+    far.userData = 30;
+    BodyDesc near2 = staticBody(at({0, 0, 5}), boxShape({1, 1, 1}));
+    near2.userData = 10;
+    // Two shapes in one body, one behind the other: the ray enters the body once, at the first.
+    BodyDesc two = staticBody(at({0, 0, 12}), boxShape({1, 1, 1}));
+    two.shapes.push_back(boxShape({1, 1, 1}));
+    two.shapes.back().localPose = at({0, 0, 3});
+    two.userData = 20;
+    const BodyId bFar = world.addBody(far), bNear = world.addBody(near2), bTwo = world.addBody(two);
+    const std::vector<RayHit> hits = world.raycastAll({0, 0, 0}, {0, 0, 2}, 50);  // (the direction need not be a unit vector)
+    check(hits.size() == 3 && hits[0].body == bNear && hits[1].body == bTwo && hits[2].body == bFar,
+          "raycastAll: every body once, nearest first (" + std::to_string(hits.size()) + ")");
+    if (hits.size() == 3) {
+        check(near(hits[0].distance, 4, 1e-3f) && near(hits[1].distance, 11, 1e-3f) && near(hits[2].distance, 19, 1e-3f) &&
+                  near(hits[1].point, {0, 0, 11}, 1e-3f) && near(hits[0].normal, {0, 0, -1}, 1e-3f),
+              "raycastAll: where the ray enters each, with the face's normal");
+    }
+    check(world.raycastAll({0, 0, 0}, {0, 0, 1}, 8).size() == 1, "raycastAll: only what is within the length");
+    const std::vector<RayHit> inside = world.raycastAll({0, 0, 5}, {0, 0, 1}, 50);
+    check(inside.size() == 3 && inside[0].body == bNear && near(inside[0].distance, 0, 1e-3f), "raycastAll: a body that holds the origin is hit at distance 0");
+    check(world.raycastAll({0, 5, 0}, {0, 0, 1}, 50).empty() && world.raycastAll({0, 0, 0}, {0, 0, 0}, 50).empty() &&
+              world.raycastAll({0, 0, 0}, {0, 0, 1}, 0).empty(),
+          "raycastAll: a miss, no direction and no length give nothing");
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    check(world.raycastAll({nan, 0, 0}, {0, 0, 1}, 50).empty() && world.raycastAll({0, 0, 0}, {0, 0, 1}, nan).empty(), "raycastAll: NaN gives nothing");
+    world.removeBody(bNear);
+    check(world.raycastAll({0, 0, 0}, {0, 0, 1}, 50).size() == 2, "raycastAll: a removed body is not hit");
+}
+
 // ---- Safety --------------------------------------------------------------------------------------
 
 void testUnknownAndRemovedIds() {
@@ -1838,6 +1913,8 @@ int main() {
     testJointsWakeTheirPartners();
     testContactEvents();
     testRaycast();
+    testKinds();
+    testRaycastAll();
     testUnknownAndRemovedIds();
     testDegenerateInput();
     testLimitsAndLifetime();

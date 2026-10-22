@@ -63,7 +63,7 @@ Renderer::Impl::~Impl() {
         if (windowDepth.texture) {
             SDL_ReleaseGPUTexture(device, windowDepth.texture);
         }
-        for (StreamBuffer* stream : {&lineBuffer, &spriteBuffer}) {
+        for (StreamBuffer* stream : {&lineBuffer, &spriteBuffer, &effectBuffer}) {
             releaseStream(*stream);
         }
         for (const auto& entry : textures) {
@@ -258,6 +258,7 @@ MeshHandle Renderer::Impl::uploadMesh(std::span<const Vertex> vertices, std::spa
 
     GpuMesh mesh;
     mesh.indexCount = static_cast<std::uint32_t>(indices.size());
+    mesh.vertexBytes = static_cast<Uint32>(vertexBytes);
     SDL_GPUBufferCreateInfo bufferInfo{};
     bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
     bufferInfo.size = static_cast<Uint32>(vertexBytes);
@@ -300,6 +301,30 @@ MeshHandle Renderer::Impl::uploadMesh(std::span<const Vertex> vertices, std::spa
     return handle;
 }
 
+void Renderer::Impl::rewriteMesh(MeshHandle handle, std::span<const Vertex> vertices) {
+    const auto found = meshes.find(handle);
+    if (found == meshes.end() || vertices.size_bytes() != found->second.vertexBytes) {
+        logError("updateMesh: {} is not a mesh of {} vertices", handle, found == meshes.end() ? 0 : found->second.vertexBytes / sizeof(Vertex));
+        return;
+    }
+    const Uint32 bytes = found->second.vertexBytes;
+    TransferBufferPtr transfer = createTransferBuffer(SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, bytes);
+    void* mapped = transfer ? SDL_MapGPUTransferBuffer(device, transfer.get(), false) : nullptr;
+    SDL_GPUCommandBuffer* cmd = mapped ? SDL_AcquireGPUCommandBuffer(device) : nullptr;
+    if (!cmd) {
+        logError("updateMesh: upload setup failed: {}", SDL_GetError());
+        return;
+    }
+    std::memcpy(mapped, vertices.data(), bytes);
+    SDL_UnmapGPUTransferBuffer(device, transfer.get());
+    const SDL_GPUTransferBufferLocation source{transfer.get(), 0};
+    const SDL_GPUBufferRegion destination{found->second.vertices, 0, bytes};
+    SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
+    SDL_UploadToGPUBuffer(copy, &source, &destination, true);  // cycled: a frame in flight still reads the old one
+    SDL_EndGPUCopyPass(copy);
+    SDL_SubmitGPUCommandBuffer(cmd);
+}
+
 Renderer::Renderer() : impl_(std::make_unique<Impl>()) {
     impl_->init(nullptr);
 }
@@ -328,6 +353,10 @@ TextureHandle Renderer::createTexture(const Image& image, bool mipmaps) {
     return handle;
 }
 
+void Renderer::updateMesh(MeshHandle mesh, std::span<const Vertex> vertices) {
+    impl_->rewriteMesh(mesh, vertices);
+}
+
 void Renderer::destroyMesh(MeshHandle mesh) {
     const auto found = impl_->meshes.find(mesh);
     if (found != impl_->meshes.end()) {
@@ -353,17 +382,19 @@ void Renderer::drawableSize(int& width, int& height) const {
 }
 
 void Renderer::renderToWindow(const FrameParams& frame, std::span<const DrawItem> items,
-                              std::span<const DebugLine> lines, std::span<const Sprite> sprites) {
+                              std::span<const DebugLine> lines, std::span<const Sprite> sprites,
+                              std::span<const EffectBatch> effects) {
     if (!impl_->window) {
         logError("renderToWindow called on a headless Renderer");
         return;
     }
-    impl_->renderWindow(frame, items, lines, sprites);
+    impl_->renderWindow(frame, items, lines, sprites, effects);
 }
 
 Image Renderer::renderToImage(int width, int height, const FrameParams& frame, std::span<const DrawItem> items,
-                              std::span<const DebugLine> lines, std::span<const Sprite> sprites) {
-    return impl_->renderOffscreen(width, height, frame, items, lines, sprites);
+                              std::span<const DebugLine> lines, std::span<const Sprite> sprites,
+                              std::span<const EffectBatch> effects) {
+    return impl_->renderOffscreen(width, height, frame, items, lines, sprites, effects);
 }
 
 }  // namespace mb

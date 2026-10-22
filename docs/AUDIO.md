@@ -133,9 +133,21 @@ hold back a pile of the same sound in one frame.
 | `BallRubbered` | `ballRubbered` (the Yo-Yo's string turns the ball back) | name in `sounds.xml`, use inferred |
 | `Blast` | `explosion_ball` (the Explosive Ball goes off) | name in `sounds.xml`, use inferred |
 | `PrizeDropped`, `PrizeMissed`, `EffectStarted`, `EffectEnded`, `StrikeGranted` | none | |
+| `ShotFired`, `ProjectileHit`, `BoltStruck`, `MeteorFalling`, `MeteorImpact` | the projectile's material's `period` and `dead` sounds, below | data |
 | `BallLost`, `BallFreed`, `LifeLost`, `BatEntered`, `GameOver` | none | |
 
-The weapons' sounds (`bullet_shoot`, `rocket_shoot`, `kernel_shoot`, `lazer_shoot` and their `*_dead`, `thunderbolt`) come with the weapons.
+**The weapons and the strikes** (`GAMEPLAY.md` 18.13). A projectile's game material names two sounds, which `PlaySounds` takes as the shot's (`period`) and the impact's (`dead`) [data, the use inferred as in `OBJECTS.md` section 4]; the events carry the material. At the autopilot's rate of fire the Bazooka's 2.18 s shot sound stacks seven voices deep and the soft limiter takes the sum (an open item, `GAMEPLAY.md` 18.13).
+
+| Event | Sound | File |
+|---|---|---|
+| `ShotFired` | `bullet_shoot` (Machine Gun), `kernel_shoot` (Cannon), `rocket_shoot` (Bazooka), `lazer_shoot` (Laser): one for each shot, so one for the Machine Gun's pair of bullets (the data marks only the right bullet's `shootSound`); panned by the middle of the barrels | `bullet_shoot.ogg`, `kernel_shoot.ogg`, `rocket_shoot.ogg`, `lazer_shoot.ogg` |
+| `ProjectileHit` | `bullet_dead`, `kernel_dead`, `rocket_dead`, `lazer_dead`: named, with **no file**, so silent (and not warned about: they are in `sounds.xml`). What a cannonball, a rocket or a bullet destroys makes its own `dead` sound | none |
+| `BoltStruck` | `thunderbolt_dead` (the thunder), at the strike | `thunderbolt_dead.ogg` |
+| `MeteorFalling` | `meteor`, as each meteor starts to fall | `meteor.ogg` |
+| `MeteorImpact` | `meteor_dead` = `dynamite_dead.ogg`, replay delay 0.5 s: two meteors that land together are one sound | `dynamite_dead.ogg` |
+| `ProjectileExploded`, `ProjectileGone`, `LaserBeam` | none | |
+
+The `thunderbolt` sound (the Thunderbolt material's `period`) has no file either; the original's use of it and of the meteor's `period` sound is open [?]. Catching a weapon or a strike prize sounds the prize's own (`gun`, `lazer`, `explosion`...: `GAMEPLAY.md` 16.4).
 
 **Sounds a brick names that `sounds.xml` does not have.** Five names are heard in play, and each is silent and warned about once
 (`SoundLibrary::lookup`; `tests/test_sound.cpp` checks that a repeated unknown name warns once): `wood_hit` and `wood_dead`

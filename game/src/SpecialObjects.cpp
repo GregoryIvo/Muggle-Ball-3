@@ -184,16 +184,24 @@ void SpecialObjects::update(GameSession& session) {
 
 // ---- Damage
 
-bool SpecialObjects::strike(GameSession& session, ActorIndex actor, Vec3 at, int damage, double fuse) {
+bool SpecialObjects::strike(GameSession& session, ActorIndex actor, Vec3 at, int damage, double fuse, bool dropsPrize,
+                            std::optional<PrizeKind> by) {
     GameSession::Brick& brick = session.bricks_[actor];
     bool hurt = false;
-    for (int hit = 0; hit < damage && session.hitBrick(actor, at, 0, -1); ++hit) {
+    for (int hit = 0; hit < damage && session.hitBrick(actor, at, 0, -1, dropsPrize, by); ++hit) {
         hurt = true;
     }
-    if (kindOf(actor) == Kind::Dynamite && brick.exploding) {  // a charge a blast reaches goes off at the next link at the latest
+    if (fuse > 0 && kindOf(actor) == Kind::Dynamite && brick.exploding) {  // a charge a blast reaches goes off at the next link at the latest
         brick.explodeAt = std::min(brick.explodeAt, session.time_ + fuse);
     }
     return hurt;
+}
+
+bool SpecialObjects::weaponHit(GameSession& session, ActorIndex actor, Vec3 at, int damage, bool dropsPrize, std::optional<PrizeKind> by) {
+    if (actor >= kinds_.size() || !session.bricks_[actor].damageable || session.bricks_[actor].removed) {
+        return false;
+    }
+    return strike(session, actor, at, damage, 0, dropsPrize, by);
 }
 
 void SpecialObjects::blast(GameSession& session, ActorIndex source, Vec3 centre, float radius, float power) {
@@ -204,7 +212,11 @@ void SpecialObjects::blast(GameSession& session, ActorIndex source, Vec3 centre,
     event.position = centre;
     event.speed = radius;
     session.emit(event);
+    burst(session, source, centre, radius, power, rules_.blastDamage, true);
+}
 
+void SpecialObjects::burst(GameSession& session, ActorIndex source, Vec3 centre, float radius, float power, int damage,
+                           bool dropsPrize, std::optional<PrizeKind> by) {
     const PhysicsScene& scene = session.scene_;
     for (ActorIndex actor = 0; actor < kinds_.size(); ++actor) {
         const ActorPlan& plan = scene.plan().actors[actor];
@@ -212,12 +224,22 @@ void SpecialObjects::blast(GameSession& session, ActorIndex source, Vec3 centre,
             continue;
         }
         const bool moves = plan.motion != MotionType::Static;
-        const Mat4 pose = moves ? scene.actorPose(actor) : plan.pose;
-        if (length(pose.translationPart() - centre) > radius + reach_[actor]) {
-            continue;
+        const int sail = scene.cloths().clothOf(actor);
+        Bounds box;
+        float distance;
+        if (sail >= 0) {
+            // A sail is where its particles are, which is nowhere near where it was saved once its ship has moved (the pose and `reach_` are
+            // the saved ones): the blast takes it by the distance to its particles, not to the box round them (docs/GAMEPLAY.md 20.3).
+            distance = scene.cloths().distanceTo(static_cast<std::size_t>(sail), centre);
+            box = scene.bounds(actor);
+        } else {
+            const Mat4 pose = moves ? scene.actorPose(actor) : plan.pose;
+            if (length(pose.translationPart() - centre) > radius + reach_[actor]) {
+                continue;
+            }
+            box = moves ? scene.bounds(actor) : staticBounds_[actor];
+            distance = distanceTo(box, centre);
         }
-        const Bounds box = moves ? boundsOf(plan.body, pose) : staticBounds_[actor];
-        const float distance = distanceTo(box, centre);
         if (distance > radius) {
             continue;
         }
@@ -225,7 +247,7 @@ void SpecialObjects::blast(GameSession& session, ActorIndex source, Vec3 centre,
             push(session, actor, centre, 1 - distance / radius, power);
         }
         if (session.bricks_[actor].damageable && !session.bricks_[actor].removed) {
-            strike(session, actor, centreOfBox(box), rules_.blastDamage, rules_.chainDelay);
+            strike(session, actor, centreOfBox(box), damage, rules_.chainDelay, dropsPrize, by);
         }
     }
 }

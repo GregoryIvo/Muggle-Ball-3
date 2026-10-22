@@ -1,33 +1,31 @@
 #include "mb/game/ObjectEffects.h"
 
-#include "mb/game/GameCamera.h"
+#include "mb/game/Billboard.h"
+#include "mb/game/PhysicsScene.h"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 
 namespace mb {
 
 namespace {
 
-// ---- How the effects look. The sizes and times are the particle files' (Data/Particles/*.xml [D]) where they have one,
-// else what the footage shows [M] or a guess [I].
+// ---- How the effects look. The particle files (Data/Particles/*.xml [D]) say what they do; what is not a particle file is the sizes
+// and times of the footage [M] or a guess [I].
 
-// A charge of dynamite: explosebig.xml's Flash, `size` 25 for the radius 5 (five times it) and a fade of 500 ms; it swells to
-// its size fast ([I]: the footage's frames at 1/30 s show it full at once). Sparks as the bricks have.
-constexpr float kBlastSizePerRadius = 5.0f;
-constexpr double kBlastGrowSeconds = 0.08;
-constexpr double kBlastSeconds = 0.5;
-constexpr int kBlastSparks = 20;
-constexpr float kSparkGravity = 18.0f;
+// The charge of dynamite names its explosion (`explosebig` for radius 5, `explosesmall` for 3 [D]); a level that does not
+// (a made-up one) gets the one that its radius fits.
+constexpr float kBigBlastRadius = 4.0f;
+constexpr std::string_view kBigBlast = "explosebig", kSmallBlast = "explosesmall";
 
-// A cannonball bursting: exploseyadro.xml, a flash of size 10 that fades in 500 ms [D]; the footage's is white and then
-// orange, about 3 units wide for the bat's cannon (F48, "Weapons") [M].
-constexpr float kShotBurstSize = 10.0f;
-constexpr double kShotBurstSeconds = 0.5;
-// The puff at a cannon's muzzle [I].
+// A cannonball bursting: exploseyadro.xml, a flash of size 10 that fades in 500 ms [D]; the footage's is white and then orange,
+// about 3 units wide for the bat's cannon (F48, "Weapons") [M].
+constexpr std::string_view kShotBurst = "exploseyadro";
+// The puff at a cannon's muzzle: a flare for a short while and Smoke.xml's smoke along the barrel for a moment [I].
 constexpr double kMuzzleSeconds = 0.5;
 constexpr float kMuzzleFlashSize = 3.5f;
+constexpr std::string_view kMuzzleSmoke = "Smoke";
+constexpr float kMuzzleSmokeSeconds = 0.15f;
 
 // A ball in a teleport: a ring on the floor and a glow where it went in or came out [I].
 constexpr double kPortalSeconds = 0.35;
@@ -35,27 +33,21 @@ constexpr float kPortalRingSize = 6.0f;
 constexpr float kPortalGlowSize = 4.0f;
 constexpr float kPortalFloor = 0.05f;
 
-// A firework rocket's burst: Fireworks.xml's 30 particles of radius 10 and size 3.5 that fade in 500 ms [D], thrown at
-// speed 30; the footage's is a pink ball that spreads to about 25 units across in 0.3 s and is gone by 0.6 s [M].
-constexpr int kBurstParticles = 30;
-constexpr float kBurstSpeed = 30.0f;
-constexpr float kBurstSize = 4.0f;
-constexpr double kBurstSeconds = 0.6;
-// The rocket's trail: the Trail particle, 30 sprites fading in 500 ms; here a few behind it.
-constexpr int kTrailSprites = 8;
-constexpr float kTrailSpacing = 0.7f;
-constexpr float kTrailSize = 1.8f;
-// The six bursts' colours (Fireworks.xml: colour1 to colour2, ARGB) [D].
-constexpr std::array<std::array<std::uint32_t, 2>, 6> kBurstColours{{{0xffff0000, 0xffffff00},
-                                                                       {0xffff0000, 0xffff8800},
-                                                                       {0xffffff00, 0xffff88ff},
-                                                                       {0xff00ff00, 0xffffff00},
-                                                                       {0xff0000ff, 0xff00ffff},
-                                                                       {0xffff00ff, 0xffffffff}}};
+// A firework rocket: its trail is Trail.xml's TrailOrange (the one with a scatter and the colours of a flame; TrailBlue is for the
+// bat's rocket [I]), put out from the rocket's tail; its burst is one of the six of Fireworks.xml, chosen by where and when it
+// went off [D, I]. The rocket's `particles1="trail"` is the file alone, which the library reads as the file's first definition,
+// TrailBlue: the game overrides its own rule here (docs/GAMEPLAY.md 19.6) [I].
+constexpr std::string_view kRocketTrail = "Trail/TrailOrange";
+constexpr std::string_view kBurstFile = "Fireworks";
 
 // A spring that is hit gives: it swells and shrinks back [I].
 constexpr double kGiveSeconds = 0.25;
 constexpr float kGiveAmount = 0.2f;
+
+// A tree that is hit shakes its leaves down, as LeafFall.xml says [D: the file is named by nothing; the trees are its
+// inferred users]. The crown is above the trunk's centre of mass: the trunk is a capsule 10 units tall, the foliage round its top [I].
+constexpr std::string_view kLeaves = "LeafFall";
+constexpr float kCrownLift = 3.0f;
 
 // The glow of a flicker's fire, above the cauldron's middle [I; the footage's light changes by 1.4 %, F13].
 constexpr float kGlowHeight = 0.9f;
@@ -63,21 +55,6 @@ constexpr float kGlowSize = 4.5f;
 
 constexpr float kShadowAlpha = 0.85f;
 constexpr float kShadowLift = 0.04f;  // above the floor, which is at y = 0 in every level
-
-// The camera of the game turns a quad to face it.
-Mat4 facingGameCamera() {
-    const Vec3 forward = normalize(kGameCameraTarget - kGameCameraEye);
-    const Vec3 right = normalize(cross({0, 1, 0}, forward));
-    const Vec3 up = cross(forward, right);
-    Mat4 m;
-    const Vec3 axes[3] = {right, up, forward};
-    for (int i = 0; i < 3; ++i) {
-        m.m[i][0] = axes[i].x;
-        m.m[i][1] = axes[i].y;
-        m.m[i][2] = axes[i].z;
-    }
-    return m;
-}
 
 // A level of one object with a mesh, to draw it at the origin.
 Level modelLevel(ObjectType type, const char* mesh, const char* material) {
@@ -90,24 +67,6 @@ Level modelLevel(ObjectType type, const char* mesh, const char* material) {
     Level level;
     level.actors.push_back(actor);
     return level;
-}
-
-// A number in [0, 1) from two others: the same effect always scatters the same way.
-float hash01(std::uint32_t seed, std::uint32_t n) {
-    std::uint32_t h = seed * 2654435761u ^ (n + 1) * 40503u;
-    h ^= h >> 15;
-    h *= 2246822519u;
-    h ^= h >> 13;
-    return static_cast<float>(h & 0xFFFFu) / 65536.0f;
-}
-
-Color argb(std::uint32_t colour, float alpha) {
-    return {static_cast<float>((colour >> 16) & 0xFF) / 255.0f, static_cast<float>((colour >> 8) & 0xFF) / 255.0f,
-            static_cast<float>(colour & 0xFF) / 255.0f, alpha};
-}
-
-Color mix(Color a, Color b, float t) {
-    return {a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a};
 }
 
 std::uint32_t seedOf(Vec3 at, double time) {
@@ -125,61 +84,85 @@ Vec3 rocketPosition(const SpecialObjects::Rocket& rocket, float rocketSpeed, flo
     return rocket.position + Vec3{0, rocketSpeed * lead, 0};
 }
 
-ObjectEffects::ObjectEffects(ModelCache& cache, const MaterialLibrary& materials, const TextureIndex& textures)
+ObjectEffects::ObjectEffects(ModelCache& cache, const MaterialLibrary& materials, const TextureIndex& textures, const Level& level,
+                             ParticleSystem& particles)
     : rocket_(cache, materials, textures, modelLevel(ObjectType::FireRocket, "Fire-rocket.x", "Fire-rocket"), PhysicsPlan{}),
       shot_(cache, materials, textures, modelLevel(ObjectType::Bullet, "Yadro.x", "Telega1.jpg"), PhysicsPlan{}),
+      particles_(particles),
       quad_(cache.quad()),
-      blastTexture_(cache.texture(textures.find("Oreols/02.png"))),
       burstTexture_(cache.texture(textures.find("Oreols/11.png"))),
-      dotTexture_(cache.texture(textures.find("Particles/ParticleTrail(orange).png"))),
       glowTexture_(cache.texture(textures.find("Particles/PARTICLE.PNG"))),
       ringTexture_(cache.texture(textures.find("Particles/Boom.png"))),
-      smokeTexture_(cache.texture(textures.find("Particles/ParticleBubble.png"))),
-      facing_(facingGameCamera()) {}
+      facing_(facingGameCamera()) {
+    const std::vector<ActorRef> actors = flattenActors(level);
+    blastTargets_.resize(actors.size());
+    fireNames_.resize(actors.size());
+    for (const ActorRef& ref : actors) {
+        if (ref.owner == nullptr) {
+            continue;
+        }
+        if (ref.owner->type == ObjectType::Dynamite) {
+            blastTargets_[ref.index] = ref.owner->target;
+        } else if (ref.owner->type == ObjectType::Flicker) {
+            fireNames_[ref.index] = ref.owner->names;
+        }
+    }
+}
+
+std::string_view ObjectEffects::blastEffect(const GameEvent& event) const {
+    if (event.actor < blastTargets_.size() && particles_.library().find(blastTargets_[event.actor]) != nullptr) {
+        return blastTargets_[event.actor];
+    }
+    return event.speed >= kBigBlastRadius ? kBigBlast : kSmallBlast;
+}
+
+std::string ObjectEffects::burstEffect(const GameEvent& event) const {
+    const std::span<const ParticleDef> variants = particles_.library().file(kBurstFile);
+    if (variants.empty()) {
+        return {};
+    }
+    const ParticleDef& chosen = variants[seedOf(event.position, event.time) % variants.size()];
+    return chosen.file + "/" + chosen.name;
+}
 
 void ObjectEffects::update(const GameSession& session, std::span<const GameEvent> events, double seconds, LevelScene& level,
                            double lead) {
     time_ += seconds;
     for (const GameEvent& event : events) {
-        Flash flash;
-        flash.at = event.position;
-        flash.seed = seedOf(event.position, event.time);
         switch (event.type) {
-            case EventType::DynamiteBlast:
-                flash.kind = Kind::Blast;
-                flash.size = event.speed;
+            case EventType::DynamiteBlast: particles_.spawn(blastEffect(event), event.position); break;
+            case EventType::ShotHit: particles_.spawn(kShotBurst, event.position); break;
+            case EventType::CannonFired: {
+                const Vec3 way = normalize(event.velocity);
+                flashes_.push_back({Kind::Muzzle, event.position, way, 0});
+                particles_.spawn(kMuzzleSmoke, event.position + way, {.direction = way, .seconds = kMuzzleSmokeSeconds});
                 break;
-            case EventType::ShotHit: flash.kind = Kind::ShotBurst; break;
-            case EventType::CannonFired:
-                flash.kind = Kind::Muzzle;
-                flash.direction = normalize(event.velocity);
+            }
+            case EventType::RocketBurst:
+                particles_.spawn(burstEffect(event), event.position);
                 break;
-            case EventType::RocketBurst: flash.kind = Kind::Burst; break;
             case EventType::BallEntered:
-            case EventType::BallEmerged: flash.kind = Kind::Portal; break;
-            case EventType::BrickHit:
-                if (event.actor != kNoActor && session.scene().plan().actors[event.actor].type == ObjectType::Spring) {
+            case EventType::BallEmerged: flashes_.push_back({Kind::Portal, event.position, {}, 0}); break;
+            case EventType::BrickHit: {
+                if (event.actor == kNoActor) {
+                    break;
+                }
+                const ObjectType type = session.scene().plan().actors[event.actor].type;
+                if (type == ObjectType::Spring) {
                     std::erase_if(gives_, [&](const Give& give) { return give.actor == event.actor; });
                     gives_.push_back({event.actor, 0});
+                } else if (type == ObjectType::Tree) {
+                    particles_.spawn(kLeaves, session.centreOf(event.actor) + Vec3{0, kCrownLift, 0});
                 }
-                continue;
-            default: continue;
+                break;
+            }
+            default: break;
         }
-        flashes_.push_back(flash);
     }
     for (Flash& flash : flashes_) {
         flash.age += seconds;
     }
-    std::erase_if(flashes_, [](const Flash& flash) {
-        switch (flash.kind) {
-            case Kind::Blast: return flash.age >= kBlastSeconds;
-            case Kind::ShotBurst: return flash.age >= kShotBurstSeconds;
-            case Kind::Muzzle: return flash.age >= kMuzzleSeconds;
-            case Kind::Portal: return flash.age >= kPortalSeconds;
-            case Kind::Burst: return flash.age >= kBurstSeconds;
-        }
-        return true;
-    });
+    std::erase_if(flashes_, [](const Flash& flash) { return flash.age >= (flash.kind == Kind::Muzzle ? kMuzzleSeconds : kPortalSeconds); });
     std::erase_if(gives_, [&](Give& give) {
         give.age += seconds;
         const bool done = give.age >= kGiveSeconds || session.actor(give.actor).removed;
@@ -199,12 +182,9 @@ void ObjectEffects::update(const GameSession& session, std::span<const GameEvent
         const Vec3 at = rocketPosition(rocket, session.rules().objects.rocketSpeed, static_cast<float>(lead));
         addMesh(rocket_, Mat4::translation(at));
         addShadow({at.x, 0, at.z}, 2.0f);
-        for (int i = 1; i <= kTrailSprites; ++i) {
-            const float u = static_cast<float>(i) / (kTrailSprites + 1);
-            addBillboard(at - Vec3{0, kTrailSpacing * static_cast<float>(i), 0}, kTrailSize * (1 - 0.6f * u),
-                         {1, 0.7f, 0.3f, 0.8f * (1 - u)}, dotTexture_, BlendMode::Additive);
-        }
     }
+    followRockets(objects, session.rules().objects.rocketSpeed, static_cast<float>(lead));
+    followFires(session);
     for (const ActorIndex actor : objects.flickers()) {
         if (session.actor(actor).removed) {
             continue;
@@ -221,14 +201,59 @@ void ObjectEffects::update(const GameSession& session, std::span<const GameEvent
     }
 }
 
+// Each rocket in the air leaves a trail from its tail; the trail stops when the rocket is gone, and what it left fades out.
+void ObjectEffects::followRockets(const SpecialObjects& objects, float rocketSpeed, float lead) {
+    for (const SpecialObjects::Rocket& rocket : objects.rockets()) {
+        const Vec3 at = rocketPosition(rocket, rocketSpeed, lead);  // where the rocket is drawn
+        EffectId& trail = trails_[rocket.crate];
+        if (!particles_.alive(trail)) {
+            trail = particles_.attach(kRocketTrail, at);
+        }
+        particles_.moveTo(trail, at);
+    }
+    std::erase_if(trails_, [&](const auto& entry) {
+        const bool flying = std::ranges::any_of(objects.rockets(), [&](const SpecialObjects::Rocket& rocket) { return rocket.crate == entry.first; });
+        if (!flying) {
+            particles_.stop(entry.second);
+        }
+        return !flying;
+    });
+}
+
+// A flicker burns its two particle files (the sparks and the smoke) from the top of its box; they go when it does.
+void ObjectEffects::followFires(const GameSession& session) {
+    for (const ActorIndex actor : session.objects().flickers()) {
+        const auto fire = fires_.find(actor);
+        if (session.actor(actor).removed) {
+            if (fire != fires_.end()) {
+                for (const EffectId effect : fire->second.effects) {
+                    particles_.stop(effect);
+                }
+                fires_.erase(fire);
+            }
+            continue;
+        }
+        if (fire != fires_.end()) {
+            for (const EffectId effect : fire->second.effects) {
+                particles_.moveTo(effect, session.centreOf(actor) + Vec3{0, fire->second.lift, 0});
+            }
+            continue;
+        }
+        const ActorPlan& plan = session.scene().plan().actors[actor];
+        const Vec3 centre = session.centreOf(actor);
+        Fire made;
+        made.lift = std::max(boundsOf(plan.body, plan.pose).high.y - centre.y, 0.0f);
+        for (const std::string& name : fireNames_[actor]) {
+            if (const EffectId effect = particles_.attach(name, centre + Vec3{0, made.lift, 0}); effect != kNoEffect) {
+                made.effects.push_back(effect);
+            }
+        }
+        fires_.emplace(actor, std::move(made));
+    }
+}
+
 void ObjectEffects::drawFlash(const Flash& flash) {
     switch (flash.kind) {
-        case Kind::Blast: drawBlast(flash); break;
-        case Kind::ShotBurst: {
-            const float fade = 1 - static_cast<float>(flash.age / kShotBurstSeconds);
-            addBillboard(flash.at, kShotBurstSize * (0.5f + 0.5f * fade), {1, 1, 1, fade}, burstTexture_, BlendMode::Additive);
-            break;
-        }
         case Kind::Muzzle: {
             const float u = static_cast<float>(flash.age / kMuzzleSeconds);
             const float flare = std::max(0.0f, 1 - 4 * u);  // the flash is over in an eighth of a second
@@ -236,9 +261,6 @@ void ObjectEffects::drawFlash(const Flash& flash) {
                 addBillboard(flash.at + flash.direction * 0.5f, kMuzzleFlashSize * (0.6f + 0.4f * flare), {1, 1, 1, flare},
                              burstTexture_, BlendMode::Additive);
             }
-            // The smoke drifts on the way the ball went and thins.
-            addBillboard(flash.at + flash.direction * (1.0f + 2.5f * u), 1.5f + 2.5f * u, {0.8f, 0.8f, 0.8f, 0.55f * (1 - u)},
-                         smokeTexture_, BlendMode::AlphaBlend);
             break;
         }
         case Kind::Portal: {
@@ -248,45 +270,6 @@ void ObjectEffects::drawFlash(const Flash& flash) {
                          glowTexture_, BlendMode::Additive);
             break;
         }
-        case Kind::Burst: drawBurst(flash); break;
-    }
-}
-
-// A swelling flash the size of the blast and sparks thrown up and out.
-void ObjectEffects::drawBlast(const Flash& flash) {
-    const float fade = 1 - static_cast<float>(flash.age / kBlastSeconds);
-    const float grow = static_cast<float>(std::min(1.0, flash.age / kBlastGrowSeconds));
-    addBillboard(flash.at, kBlastSizePerRadius * flash.size * (0.3f + 0.7f * grow), {1, 1, 1, fade * std::sqrt(fade)}, blastTexture_,
-                 BlendMode::Additive);
-    const auto t = static_cast<float>(flash.age);
-    for (int i = 0; i < kBlastSparks; ++i) {
-        const auto n = static_cast<std::uint32_t>(i);
-        const float angle = 2 * kPi * hash01(flash.seed, n * 3);
-        const float out = (0.8f + 1.2f * hash01(flash.seed, n * 3 + 1)) * flash.size;  // units a second
-        const float up = (0.6f + 1.0f * hash01(flash.seed, n * 3 + 2)) * flash.size;
-        Vec3 at = flash.at + Vec3{std::cos(angle) * out * t, up * t - 0.5f * kSparkGravity * t * t, std::sin(angle) * out * t};
-        at.y = std::max(at.y, 0.2f);
-        addBillboard(at, 1.6f * fade + 0.3f, {1.0f, 0.5f, 0.1f, fade}, glowTexture_, BlendMode::Additive);
-    }
-}
-
-// Thirty sparks thrown from a point in every direction, slowing as they go, in one of the six pairs of colours.
-void ObjectEffects::drawBurst(const Flash& flash) {
-    const auto& colours = kBurstColours[flash.seed % kBurstColours.size()];
-    const float life = static_cast<float>(kBurstSeconds);
-    const float t = static_cast<float>(flash.age);
-    const float u = t / life;
-    for (int i = 0; i < kBurstParticles; ++i) {
-        const auto n = static_cast<std::uint32_t>(i);
-        // A direction spread evenly over the sphere: z from -1 to 1, the angle round it from a hash.
-        const float z = 2 * hash01(flash.seed, n * 3) - 1;
-        const float angle = 2 * kPi * hash01(flash.seed, n * 3 + 1);
-        const float ring = std::sqrt(1 - z * z);
-        const float speed = kBurstSpeed * (0.5f + 0.5f * hash01(flash.seed, n * 3 + 2));
-        const float reach = speed * t * (1 - 0.5f * u);
-        const Vec3 at = flash.at + Vec3{std::cos(angle) * ring, z, std::sin(angle) * ring} * reach;
-        const Color tint = mix(argb(colours[0], 1), argb(colours[1], 1), u);
-        addBillboard(at, kBurstSize * (1 - 0.5f * u), {tint.r, tint.g, tint.b, 1 - u}, dotTexture_, BlendMode::Additive);
     }
 }
 
@@ -302,35 +285,12 @@ void ObjectEffects::addShadow(Vec3 under, float size) {
 }
 
 void ObjectEffects::addBillboard(Vec3 at, float size, Color tint, TextureHandle texture, BlendMode blend) {
-    DrawItem item;
-    item.mesh = quad_;
-    item.indexCount = 6;
-    item.world = Mat4::scaling({size, size, 1}) * facing_ * Mat4::translation(at);
-    MaterialParams& m = item.material;
-    m.diffuse = tint;
-    m.texture = texture;
-    m.blend = blend;
-    m.cull = CullMode::None;
-    m.lit = false;
-    m.depthWrite = false;
-    m.depthTest = false;
-    items_.push_back(item);
+    items_.push_back(billboard(quad_, facing_, at, {size, size}, tint, texture, blend));
 }
 
 // A quad lying flat at `at`, as the balls' shadows do.
 void ObjectEffects::addFloor(Vec3 at, float size, Color tint, TextureHandle texture, BlendMode blend) {
-    DrawItem item;
-    item.mesh = quad_;
-    item.indexCount = 6;
-    item.world = Mat4::scaling({size, size, 1}) * Mat4::rotationX(kPi / 2) * Mat4::translation(at);
-    MaterialParams& m = item.material;
-    m.diffuse = tint;
-    m.texture = texture;
-    m.blend = blend;
-    m.cull = CullMode::None;
-    m.lit = false;
-    m.depthWrite = false;
-    items_.push_back(item);
+    items_.push_back(floorMark(quad_, at, size, tint, texture, blend));
 }
 
 }  // namespace mb

@@ -94,7 +94,7 @@ Outcome run(PhysicsScene& scene, float seconds) {
     std::vector<ActorIndex> tracked;
     std::vector<Mat4> start;
     for (ActorIndex i = 0; i < plan.actors.size(); ++i) {
-        if (scene.body(i) != 0 && plan.actors[i].motion != MotionType::Static) {
+        if (scene.body(i) != 0 && plan.actors[i].motion != MotionType::Static && scene.cloths().clothOf(i) < 0) {  // (the sails: mb_cloth_smoke)
             tracked.push_back(i);
             start.push_back(scene.actorPose(i));
         }
@@ -262,6 +262,8 @@ void standAlone(const Level& level, const MaterialLibrary& materials, float seco
     total.counts.staticBodies += counts.staticBodies;
     total.counts.withoutBody += counts.withoutBody;
     total.counts.clothJoints += counts.clothJoints;
+    total.counts.cloths += counts.cloths;
+    total.counts.clothParticles += counts.clothParticles;
     total.joints += counts.joints;
     total.pinned += plan.pinnedBodies;
     if (counts.dynamicBodies == 0) {
@@ -416,10 +418,10 @@ int test(const MaterialLibrary& materials, const LevelCatalog& catalog, int shot
     }
     const PhysicsScene::Counts& counts = total.counts;
     std::printf("physics: %zu levels, %zu dynamic (%zu of them running machines), %zu kinematic and %zu static bodies "
-                "(%zu actors without one; %zu bodies welded to the world are among the static), %zu joints (%zu on "
-                "cloth left out)\n",
+                "(%zu actors without one; %zu bodies welded to the world are among the static), %zu joints (and %zu more that "
+                "pin the corners of %zu sails, whose %zu actors are particles)\n",
                 total.levels, counts.dynamicBodies, total.machines, counts.kinematicBodies, counts.staticBodies,
-                counts.withoutBody, total.pinned, total.joints, counts.clothJoints);
+                counts.withoutBody, total.pinned, total.joints, counts.clothJoints, counts.cloths, counts.clothParticles);
     std::printf("%zu test balls (%d per level) touched something besides the board in %zu levels and broke %zu joints; "
                 "of %zu bodies standing on something, %zu hang in the air at the end, %zu went through the floor (in %zu shots)\n",
                 total.balls, shots, total.hits, total.broken, total.resting, total.hanging, total.sunk, total.sunkShots);

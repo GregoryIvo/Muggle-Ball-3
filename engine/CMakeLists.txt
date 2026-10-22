@@ -10,6 +10,7 @@ add_library(mb_engine
   src/Model.cpp
   src/Physics.cpp
   src/PhysicsJoints.cpp
+  src/PhysicsCloth.cpp
   src/PhysicsShapes.cpp
   src/StbImpl.cpp
   src/VorbisImpl.cpp

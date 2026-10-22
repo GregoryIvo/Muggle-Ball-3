@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build small binary .x files in memory and run them through tools/xfile.py and tools/x2glb.py."""
 import json
+import math
 import pathlib
 import struct
 import sys
@@ -283,8 +284,8 @@ class ConverterTests(unittest.TestCase):
         self.assertEqual(doc["nodes"][1]["mesh"], 0)
         self.assertNotIn("mesh", doc["nodes"][2])
         self.assertEqual(doc["scenes"][0]["nodes"], [0, 3])
-        self.assertEqual(doc["extras"], {"source": "SkinMeshes/a.X", "coordinateSystem": "d3d-left-handed",
-                                         "animations": []})
+        self.assertEqual(doc["extras"], {"source": "SkinMeshes/a.X", "coordinateSystem": "d3d-left-handed"})
+        self.assertNotIn("animations", doc)
 
     def test_quad_is_fan_triangulated_with_original_winding_and_computed_normals(self):
         stats, (doc, binary) = self.convert(xfile_bytes(frame("F", None, mesh(QUAD, [(0, 1, 2, 3)]))))
@@ -376,24 +377,126 @@ class ConverterTests(unittest.TestCase):
         self.assertEqual(doc["scenes"][0]["nodes"], [0])
         self.assertEqual(stats["nodes"], 1)
 
-    def test_animations_are_kept_in_extras(self):
-        pos = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 2, 3, 1]
-        data = xfile_bytes(
-            frame("A", None),
-            obj("AnimationSet", "Anim-1",
-                obj("Animation", "", ref("A"),
-                    obj("AnimationKey", None, ints(4, 1), ints(0, 16), floats(*pos)),
-                    obj("AnimationKey", None, ints(2, 2), ints(0, 3), floats(0, 0, 0), ints(960, 3), floats(1, 2, 3)))))
-        stats, (doc, _) = self.convert(data)
-        self.assertEqual(doc["extras"]["animations"], [{
-            "name": "Anim-1", "ticksPerSecond": 4800,
-            "tracks": [{"node": "A", "matrix": [[0] + [float(v) for v in pos]],
-                        "position": [[0, 0.0, 0.0, 0.0], [960, 1.0, 2.0, 3.0]]}]}])
-        self.assertEqual((stats["animation_sets"], stats["animation_tracks"]), (1, 1))
-        data = xfile_bytes(obj("AnimTicksPerSecond", None, ints(30)), frame("A", None),
-                           obj("AnimationSet", "S"))
-        _, (doc, _) = self.convert(data)
-        self.assertEqual(doc["extras"]["animations"][0]["ticksPerSecond"], 30)
+    def animated(self, rest, sets, ticks=None):
+        """The converted file of a frame "A" with the matrix `rest` and the given AnimationSets (stats in self.stats)."""
+        parts = [obj("AnimTicksPerSecond", None, ints(ticks))] if ticks else []
+        stats, (doc, binary) = self.convert(xfile_bytes(*parts, frame("A", rest), *sets))
+        self.stats = stats
+        return doc, binary
+
+    def test_matrix_keys_become_gltf_animations_in_seconds(self):
+        turned = [0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]  # a quarter turn about z
+        scaled = [2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 1, 2, 3, 1]
+        data = [obj("AnimationSet", "Anim-1",
+                    obj("Animation", "", ref("A"),
+                        obj("AnimationKey", None, ints(4, 4), ints(0, 16), floats(*IDENTITY),
+                            ints(4800, 16), floats(*scaled), ints(9600, 16), floats(*turned),
+                            ints(9600, 16), floats(*scaled))))]  # a tick written twice: the last one counts
+        doc, binary = self.animated(scaled, data)
+        self.assertEqual(len(doc["animations"]), 1)
+        animation = doc["animations"][0]
+        self.assertEqual(animation["name"], "Anim-1")
+        node = doc["nodes"].index(next(n for n in doc["nodes"] if n.get("name") == "A"))
+        channels = {c["target"]["path"]: c for c in animation["channels"]}
+        self.assertEqual(sorted(channels), ["rotation", "scale", "translation"])
+        self.assertTrue(all(c["target"]["node"] == node for c in channels.values()))
+        values = {}
+        for path, channel in channels.items():
+            sampler = animation["samplers"][channel["sampler"]]
+            self.assertEqual(sampler["interpolation"], "LINEAR")
+            times = accessor_values(doc, binary, sampler["input"])
+            values[path] = accessor_values(doc, binary, sampler["output"])
+            self.assertEqual(times, [0.0, 1.0, 2.0])  # 4800 ticks a second by default
+            self.assertEqual(doc["accessors"][sampler["input"]]["min"], [0.0])
+            self.assertEqual(doc["accessors"][sampler["input"]]["max"], [2.0])
+        self.assertEqual(values["translation"], [(0.0, 0.0, 0.0), (1.0, 2.0, 3.0), (1.0, 2.0, 3.0)])
+        self.assertEqual(values["scale"], [(1.0, 1.0, 1.0), (2.0, 2.0, 2.0), (2.0, 2.0, 2.0)])
+        self.assertAlmostEqual(values["rotation"][0][3], 1.0)
+        self.assertAlmostEqual(values["rotation"][1][3], 1.0)  # the scaled key turns nothing
+        self.assertAlmostEqual(values["rotation"][2][3], 1.0)  # the last tick was written twice: scaled counts
+        self.assertEqual((self.stats["animation_sets"], self.stats["animation_tracks"]), (1, 1))
+        # A node that is animated has no matrix: its own is the rest pose as translation, rotation and scale.
+        self.assertNotIn("matrix", doc["nodes"][node])
+        self.assertEqual(doc["nodes"][node]["translation"], [1.0, 2.0, 3.0])
+        self.assertEqual(doc["nodes"][node]["scale"], [2.0, 2.0, 2.0])
+        self.assertNotIn("rotation", doc["nodes"][node])
+
+    def test_a_turn_is_a_quaternion_and_neighbours_stay_on_one_side(self):
+        def about_z(degrees):
+            c, s = math.cos(math.radians(degrees)), math.sin(math.radians(degrees))
+            return [c, s, 0, 0, -s, c, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+        angles = (0, 100, 200, 300)  # w changes sign on the way round; -q is the same turn as q
+        keys = [part for i, a in enumerate(angles) for part in (ints(i * 4800, 16), floats(*about_z(a)))]
+        doc, binary = self.animated(IDENTITY, [obj("AnimationSet", "S", obj(
+            "Animation", "", ref("A"), obj("AnimationKey", None, ints(4, len(angles)), *keys)))])
+        channel = next(c for c in doc["animations"][0]["channels"] if c["target"]["path"] == "rotation")
+        q = accessor_values(doc, binary, doc["animations"][0]["samplers"][channel["sampler"]]["output"])
+        # Each key is exactly (0, 0, sin(a/2), cos(a/2)): a/2 runs 0 to 150 degrees, so every neighbour pair has a
+        # positive dot product and none of the keys is negated.
+        for a, key in zip(angles, q):
+            half = math.radians(a) / 2
+            for got, want in zip(key, (0.0, 0.0, math.sin(half), math.cos(half))):
+                self.assertAlmostEqual(got, want, places=6, msg=f"{a} degrees: {key}")
+            self.assertAlmostEqual(math.sqrt(sum(v * v for v in key)), 1.0, places=6)
+        for before, after in zip(q, q[1:]):
+            self.assertGreaterEqual(sum(a * b for a, b in zip(before, after)), 0)
+
+    def test_decompose_puts_the_matrix_back_together(self):
+        cases = {
+            "identity": IDENTITY,
+            "moved and scaled": [2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 4, 0, 5, 6, 7, 1],
+            "turned about x, y and z": [0.36, 0.48, -0.8, 0, -0.8, 0.6, 0, 0, 0.48, 0.64, 0.6, 0, 1, 2, 3, 1],
+            "a half turn": [-1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+            "a mirror": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -2, 0, 0, 0, 0, 1],
+        }
+        for label, matrix in cases.items():
+            with self.subTest(label):
+                t, q, s = x2glb.decompose([float(v) for v in matrix])
+                again = x2glb.compose(t, q, s)
+                self.assertTrue(all(abs(a - b) < 1e-6 for a, b in zip(again, matrix)), again)
+        # A shear is dropped, not refused; a flat axis or a projection cannot be decomposed.
+        sheared = [1, 0, 0, 0, 0.3, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+        self.assertIsNotNone(x2glb.decompose([float(v) for v in sheared]))
+        self.assertIsNone(x2glb.decompose([0.0] * 5 + [1.0] + [0.0] * 4 + [1.0, 0, 0, 0, 0, 1.0]))
+        self.assertIsNone(x2glb.decompose([float(v) for v in IDENTITY[:15]] + [2.0]))
+
+    def test_ticks_per_second_sets_the_time_and_scale_and_position_keys_convert(self):
+        sets = [obj("AnimationSet", "S", obj(
+            "Animation", "", ref("A"),
+            obj("AnimationKey", None, ints(2, 2), ints(0, 3), floats(0, 0, 0), ints(60, 3), floats(1, 2, 3)),
+            obj("AnimationKey", None, ints(1, 1), ints(0, 3), floats(2, 2, 2))))]
+        doc, binary = self.animated(IDENTITY, sets, ticks=30)
+        channels = {c["target"]["path"]: c for c in doc["animations"][0]["channels"]}
+        self.assertEqual(sorted(channels), ["scale", "translation"])
+        sampler = doc["animations"][0]["samplers"][channels["translation"]["sampler"]]
+        self.assertEqual(accessor_values(doc, binary, sampler["input"]), [0.0, 2.0])
+        self.assertEqual(accessor_values(doc, binary, sampler["output"]), [(0.0, 0.0, 0.0), (1.0, 2.0, 3.0)])
+
+    def test_what_cannot_be_converted_is_skipped_with_a_warning(self):
+        rotation_key = obj("AnimationKey", None, ints(0, 1), ints(0, 4), floats(1, 0, 0, 0))
+        flat = [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+        sets = [obj("AnimationSet", "Empty"),
+                obj("AnimationSet", "Rotation", obj("Animation", "", ref("A"), rotation_key)),
+                obj("AnimationSet", "Flat", obj("Animation", "", ref("A"), obj(
+                    "AnimationKey", None, ints(4, 1), ints(0, 16), floats(*flat)))),
+                obj("AnimationSet", "Nowhere", obj("Animation", "", ref("Gone"), obj(
+                    "AnimationKey", None, ints(2, 1), ints(0, 3), floats(1, 1, 1))))]
+        stats, (doc, _) = self.convert(xfile_bytes(frame("A", None), *sets))
+        self.assertNotIn("animations", doc)
+        self.assertEqual((stats["animation_sets"], stats["animation_tracks"]), (0, 0))
+        text = " ".join(stats["warnings"])
+        for needle in ("key type 0", "key has no scale", "no frame 'Gone'"):
+            self.assertIn(needle, text)
+        self.assertNotIn("Empty", text)
+
+    def test_a_frame_that_cannot_be_decomposed_keeps_its_matrix_and_is_not_animated(self):
+        flat = [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 5, 0, 0, 1]
+        key = obj("AnimationKey", None, ints(2, 1), ints(0, 3), floats(1, 1, 1))
+        stats, (doc, _) = self.convert(xfile_bytes(
+            frame("A", flat), obj("AnimationSet", "S", obj("Animation", "", ref("A"), key))))
+        self.assertEqual(doc["nodes"][0]["matrix"], [float(v) for v in flat])
+        self.assertNotIn("animations", doc)
+        self.assertTrue(any("frame's matrix" in w for w in stats["warnings"]))
 
     def test_paths_and_unknown_templates(self):
         data = xfile_bytes(obj("Weird", None, ints(1)), frame("F", None))
@@ -484,6 +587,43 @@ class ValidatorTests(unittest.TestCase):
     def test_missing_texture_file(self):
         (self.path.parent.parent / "Textures" / "t.jpg").unlink()
         self.assertTrue(any("does not exist" in p for p in self.write()))
+
+    def animation_file(self):
+        """A valid file with a one-key-pair animation of node 0, to break."""
+        rest = x2glb.xfile.parse(xfile_bytes(frame("F", None, mesh(QUAD, [(0, 1, 2, 3)])), obj(
+            "AnimationSet", "S", obj("Animation", "", ref("F"), obj(
+                "AnimationKey", None, ints(2, 2), ints(0, 3), floats(0, 0, 0), ints(4800, 3), floats(1, 0, 0))))))
+        gltf, binary, *_ = x2glb.build_glb(rest, "SkinMeshes/v.X", self.path.parent, x2glb.TextureResolver(self.path.parent))
+        self.gltf, self.binary = gltf, binary
+        self.assertEqual(self.write(), [])
+        return gltf["animations"][0], binary
+
+    def test_animation_with_a_matrix_node(self):
+        animation, _ = self.animation_file()
+        self.gltf["nodes"][animation["channels"][0]["target"]["node"]]["matrix"] = x2glb.IDENTITY
+        self.assertTrue(any("has a matrix" in p for p in self.write()))
+
+    def test_animation_times_must_increase(self):
+        animation, binary = self.animation_file()
+        sampler = animation["samplers"][0]
+        view = self.gltf["bufferViews"][self.gltf["accessors"][sampler["input"]]["bufferView"]]
+        broken = bytearray(binary)
+        struct.pack_into("<2f", broken, view["byteOffset"], 1.0, 1.0)
+        self.assertTrue(any("strictly increase" in p for p in self.write(binary=bytes(broken))))
+
+    def test_animation_values_must_match_the_times_and_the_path(self):
+        animation, _ = self.animation_file()
+        sampler = animation["samplers"][0]
+        self.gltf["accessors"][sampler["output"]]["count"] -= 1
+        self.assertTrue(any("2 times, 1 values" in p for p in self.write()))
+        self.gltf["accessors"][sampler["output"]]["count"] += 1
+        animation["channels"][0]["target"]["path"] = "rotation"
+        self.assertTrue(any("rotation values are VEC3" in p for p in self.write()))
+
+    def test_animation_with_a_bad_target(self):
+        animation, _ = self.animation_file()
+        animation["channels"][0]["target"]["node"] = 9
+        self.assertTrue(any("bad node" in p for p in self.write()))
 
     def test_broken_container(self):
         self.write()

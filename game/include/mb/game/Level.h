@@ -64,6 +64,12 @@ struct Body {
 
 struct Actor;
 
+// A cloth object's own numbers (docs/LEVEL_FORMAT.md, "Cloth"): the grid of its particles, and the wind that blows it.
+struct ClothInfo {
+    int width = 0, height = 0;  // particles across and up: the object's own actor and its clothSegments, width * height in all; 0 for no cloth
+    Vec3 wind{};                // the acceleration it blows with, world space: 10 units a second squared, square to the sail, in all 22 cloths
+};
+
 struct GameObject {
     ObjectType type = ObjectType::Unknown;
     std::uint32_t id = 0;
@@ -73,8 +79,10 @@ struct GameObject {
     std::string frame;
     std::string prize;              // Prize: which power-up it drops
     std::string target;             // Dynamite: its explosion's particle file ("explosebig", "explosesmall")
+    std::vector<std::string> names; // Flicker: its particle files ("sparkKoster", "smoke")
     std::uint32_t param = 0;        // Dynamite: the blast radius, the bits of a float (5.0 or 3.0); shadow casters: their kind
     std::vector<std::uint8_t> extra;   // flags & 0x200: 0x68 bytes (a D3DLIGHT8 for lights)
+    ClothInfo cloth;                   // Cloth: the grid and the wind
     std::vector<Actor> clothSegments;  // Cloth: the extra segment actors
 };
 

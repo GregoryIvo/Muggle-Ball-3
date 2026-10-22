@@ -2,14 +2,18 @@
 
 #include "mb/engine/Math.h"
 #include "mb/engine/Physics.h"
+#include "mb/game/Cloth.h"
+#include "mb/game/ClothPlan.h"
 #include "mb/game/Level.h"
 #include "mb/game/MaterialLibrary.h"
 #include "mb/game/PathPlayer.h"
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <set>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace mb {
@@ -52,6 +56,7 @@ struct PhysicsOptions {
     // body's frame of every joint from the saved poses, so that every joint starts at rest and nothing snaps
     // together; false uses the frames as stored and lets the solver pull the bodies together.
     bool rebuildJointFrames = true;
+    ClothSettings cloth;  // how the sails are simulated
 };
 
 // One actor's body, as the level describes it. Actors with no collision shape (the markers) get no body.
@@ -84,13 +89,15 @@ struct PhysicsPlan {
     std::vector<ActorPlan> actors;  // indexed by ActorIndex, see flattenActors()
     std::vector<JointPlan> joints;
     std::vector<ZoneBox> zones;
+    std::vector<ClothPlan> cloths;  // the sails, see planCloths()
     std::size_t pinnedBodies = 0;  // dynamic bodies made static because an unbreakable joint welds them to the world
 
-    // What was left out, and why; all zero for the shipped levels but the cloth joints, see PhysicsScene.
+    // What was left out, and why; all zero for the shipped levels.
     std::size_t unresolvedJoints = 0;   // a reference names no actor, or both ends are the world
     std::size_t unsupportedJoints = 0;  // a joint type the shipped levels do not use
     std::size_t jointsWithoutBody = 0;  // one end is an actor that has no body
     std::size_t unsupportedShapes = 0;  // planes, triangle meshes, hulls without points
+    std::size_t unsupportedCloths = 0;  // a cloth object whose segments do not make up its grid, or that has no sphere to place a particle
 };
 
 // Maps a level to bodies and joints; pure, no physics world and no GPU.
@@ -98,7 +105,8 @@ struct PhysicsPlan {
 //   - Boxes, spheres, capsules (halfHeight = height / 2) and convex hulls keep their shapes.
 //   - Motion: all six frozen bits set (markers, the board) -> static; the kinematic flag -> kinematic;
 //     otherwise dynamic with the frozen bits as locks and "disable gravity" as no gravity. Cloth and its
-//     segments are kinematic: the original simulates them in game code, not in PhysX.
+//     segments are kinematic in the plan and have no bodies of their own: planCloths() makes the sail of them
+//     (ClothPlan), and the scene one cloth body (ClothSet).
 //   - A dynamic body that an unbreakable fixed joint welds to the world is static, and the joint is dropped.
 //   - Mass, inertia, mass frame, damping and sleep thresholds are the body's, as saved. Dynamic bodies get swept
 //     collision.
@@ -137,6 +145,16 @@ inline constexpr float kBallRadius = 0.6f;
 inline constexpr std::uint64_t kTestBallData = kNoActor;
 inline constexpr std::uint64_t kGameBallData = std::uint64_t{kNoActor} - 1;
 inline constexpr std::uint64_t kBatData = std::uint64_t{kNoActor} - 2;
+inline constexpr std::uint64_t kProjectileData = std::uint64_t{kNoActor} - 3;
+
+// The kinds of body (BodyDesc::group) that tell what touches what. A level's actors are the default kind and touch everything
+// that does not leave them out. A projectile touches the level's actors and nothing else (not the balls, the bat, other
+// projectiles or the teleports, which weapons ignore: docs/GAMEPLAY.md section 18.2).
+inline constexpr std::uint32_t kKindLevel = 1;
+inline constexpr std::uint32_t kKindBall = 2;
+inline constexpr std::uint32_t kKindBat = 4;
+inline constexpr std::uint32_t kKindProjectile = 8;
+inline constexpr std::uint32_t kKindPortal = 16;
 
 // How far under its lowest points a body may have the surface it rests on and still count as supported by it: the
 // levels were saved with bricks above what holds them (320 dynamic bodies, by 8 mm to 15 cm, 175 of them by more than
@@ -146,10 +164,11 @@ inline constexpr float kSupportGap = 0.15f;
 // A level running in a physics world, with the test balls that are shot into it.
 class PhysicsScene {
 public:
-    // The 84 joints that hold a cloth's corners (75 ball joints and 9 fixed ones, on ships, boats and plots) are
-    // not made: the cloth is kinematic until step 5 simulates it, so they would pin the ship to the air where its
-    // sail was saved. Everything else of the plan is built. The actors that follow a path (docs/LEVEL_FORMAT.md,
-    // "Path motion") start on it.
+    // The 84 joints that hold a cloth's corners (75 ball joints and 9 fixed ones, on ships, boats and plots) are not
+    // made as joints: a sail is one cloth body (ClothSet) whose pinned particles follow what the joints tied them to (Jolt
+    // has no constraint that reaches a soft body's particle: its own way is a particle of no mass that the game moves; the
+    // holders are yards and masts of 1 to 68 mass, so it is not the weight of a particle of 5 grams that rules a joint out,
+    // docs/GAMEPLAY.md 20.1). Everything else of the plan is built. The actors that follow a path (docs/LEVEL_FORMAT.md, "Path motion") start on it.
     PhysicsScene(const Level& level, const MaterialLibrary& materials, const PhysicsOptions& options = {},
                  const PhysicsSettings& settings = {});
 
@@ -157,10 +176,16 @@ public:
     PhysicsWorld& world() { return world_; }
     const PhysicsWorld& world() const { return world_; }
 
-    // 0 for an actor that has no body (markers, and anything the world refused).
+    // 0 for an actor that has no body (markers, and anything the world refused, and the segments of a sail). The lead actor of a
+    // sail has the cloth's body, whose pose is the identity and whose particles are in world space: see cloths().
     BodyId body(ActorIndex actor) const { return bodies_[actor]; }
-    // Where the actor is now; for one with no body, where it was saved.
+    // Where the actor is now; for one with no body, and for a sail's, where it was saved.
     Mat4 actorPose(ActorIndex actor) const;
+    // The box round the actor's shapes where it is now (round a sail's particles, where they are), and the middle of its mass.
+    Bounds bounds(ActorIndex actor) const;
+    Vec3 centreOf(ActorIndex actor) const;
+    // The sails of the level.
+    const ClothSet& cloths() const { return *cloths_; }
     // Whether a surface is within kSupportGap under its lowest points.
     bool supported(ActorIndex actor) const;
     // Whether a joint that has not broken still holds the actor.
@@ -185,7 +210,9 @@ public:
         std::size_t withoutBody = 0;  // actors that take no part in the simulation
         std::size_t joints = 0;
         std::size_t jointsRefused = 0;  // in the plan, but the world could not make them
-        std::size_t clothJoints = 0;    // left out until the cloth is simulated, see PhysicsScene::PhysicsScene
+        std::size_t clothJoints = 0;    // not joints of the world: the pins of the sails, see PhysicsScene::PhysicsScene
+        std::size_t cloths = 0;         // sails, each one body of the world
+        std::size_t clothParticles = 0; // actors that are particles of a sail: they have no body of their own
         std::size_t pathMovers = 0;     // kinematic bodies that follow a path, see pathMovers()
     };
     const Counts& counts() const { return counts_; }
@@ -238,6 +265,16 @@ public:
     // its body (0 if the world refused).
     BodyId addBat(Vec3 position, float radius);
 
+    // A projectile (a bullet, a cannonball, a rocket, a thunderbolt, a meteor): a dynamic body of one shape in `pose` (the shape's own
+    // placement is `shape.localPose`) with continuous collision, `velocity`, no turning, and gravity if `gravity`. The material is
+    // the shape's; its mass its volume times `density`. It touches the level's actors only (kKindLevel; see kKindProjectile), and
+    // carries kProjectileData, so that its first contact shows in contacts() with the actor in the other slot; the caller takes it
+    // out at that contact with removeProjectile(). It pushes what it meets as its momentum says. Returns its body (0 if the world
+    // refused).
+    BodyId addProjectile(const Mat4& pose, const PhysicsShape& shape, Vec3 velocity, bool gravity, float density);
+    // Takes a projectile out of the world.
+    void removeProjectile(BodyId body);
+
     // Actors a test ball has touched, counting from the start.
     const std::set<ActorIndex>& touchedByBalls() const { return touched_; }
 
@@ -252,11 +289,13 @@ private:
     PhysicsMaterial ballMaterial_;
     float ballDensity_ = 1;
     std::vector<Ball> balls_;
+    std::vector<std::pair<BodyId, float>> projectileMasses_;  // the projectiles in the world, for what a hit of one breaks
     std::vector<ContactEvent> contacts_;
     std::set<ActorIndex> touched_;
     PathPlayer paths_;
     std::vector<PathMover> movers_;  // the ones of paths_ with a kinematic body
     double pathTime_ = 0;
+    std::optional<ClothSet> cloths_;  // made once the bodies are
 
     std::vector<ActorIndex> fallingActors_;  // dynamic, with gravity and free to move down: see wakeUnsupported()
     std::vector<std::uint8_t> wasAwake_;     // by ActorIndex
@@ -280,7 +319,8 @@ private:
     void releaseJoint(std::size_t planJoint);  // the joint is gone: its bodies wake, or one asleep would hang
     void jointBroke(std::size_t planJoint);
     void wakeUnsupported();
-    void movePathActors();  // before each fixed step
+    void beforeFixedStep();  // the path actors and the pins of the sails go where they belong
+    void movePathActors();
 };
 
 }  // namespace mb

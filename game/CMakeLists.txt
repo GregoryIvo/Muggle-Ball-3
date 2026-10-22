@@ -7,6 +7,9 @@ add_library(mb_game
   src/SoundLibrary.cpp
   src/SceneBuilder.cpp
   src/PhysicsPlan.cpp
+  src/ClothPlan.cpp
+  src/Cloth.cpp
+  src/ClothDraw.cpp
   src/PathPlayer.cpp
   src/PhysicsScene.cpp
   src/BallReach.cpp
@@ -14,10 +17,18 @@ add_library(mb_game
   src/Prizes.cpp
   src/SessionPrizes.cpp
   src/SpecialObjects.cpp
+  src/Weapons.cpp
   src/Autopilot.cpp
   src/ModelCache.cpp
   src/LevelScene.cpp
+  src/ParticleDef.cpp
+  src/ParticleSystem.cpp
+  src/ParticleDraw.cpp
+  src/BrickEffects.cpp
   src/ObjectEffects.cpp
+  src/BatBarrels.cpp
+  src/WeaponEffects.cpp
+  src/WeaponScene.cpp
   src/Billboard.cpp
   src/PrizeScene.cpp
   src/PrizeHud.cpp

@@ -58,4 +58,16 @@ MeshHandle ModelCache::quad() {
     return quad_;
 }
 
+MeshHandle ModelCache::dynamicMesh(std::span<const Vertex> vertices, std::span<const std::uint32_t> indices) {
+    return renderer_.createMesh(vertices, indices);
+}
+
+void ModelCache::updateMesh(MeshHandle mesh, std::span<const Vertex> vertices) {
+    renderer_.updateMesh(mesh, vertices);
+}
+
+void ModelCache::destroyMesh(MeshHandle mesh) {
+    renderer_.destroyMesh(mesh);
+}
+
 }  // namespace mb

@@ -74,6 +74,11 @@ struct BodyDesc {
     float sleepLinearVelocity = 0.15f;
     float sleepAngularVelocity = 0.14f;
     bool continuousCollision = false;  // for small fast bodies such as the ball
+    // Which bodies touch which. `group` is the kind of body this is (one bit) and `collidesWith` the kinds it touches; two
+    // bodies touch only when each one's `collidesWith` has the other's `group`. The defaults touch everything, so only
+    // the bodies that must pass through some others (a bullet through the ball and the bat) set them.
+    std::uint32_t group = 1;
+    std::uint32_t collidesWith = ~std::uint32_t{0};
     std::uint64_t userData = 0;
 };
 
@@ -115,6 +120,33 @@ struct JointDesc {
     float motorMaxForce = 0;  // torque
     bool springEnabled = false;
     float spring = 0, damper = 0, springTarget = 0;
+};
+
+// A sheet of cloth: a grid of particles, each tied to its neighbours by springs that hold its length, its diagonals and (more
+// loosely) its folds. Jolt simulates it as a soft body: the particles fall under the world's gravity and are pushed out of
+// whatever they touch, and push nothing (a few grams: see PhysicsWorld::addCloth()). Row-major, row 0 first, so the particle at
+// column c of row r is r * width + c.
+struct ClothDesc {
+    int width = 0, height = 0;       // particles across and up, both at least 2
+    std::vector<Vec3> positions;     // width * height points in world space: the sheet at rest, and where it starts
+    float particleMass = 1;          // each; sets how hard a particle pushes what it meets
+    float particleRadius = 0;        // how far a particle stays from the surface of what it meets
+    // XPBD compliance (the inverse of a stiffness; 0 is as stiff as the solver can make it) of the springs along the
+    // grid, across its cells, and across its folds. A negative bend compliance leaves the folds free.
+    float stretchCompliance = 0;
+    float shearCompliance = 0;
+    float bendCompliance = -1;
+    // The springs are this much longer than the distance between their particles at rest (0.05: 5 %): the sheet is cut with
+    // slack, and a sheet pinned at its four corners where it lies has to bow out, the way the wind goes, instead of lying taut.
+    // The springs grow to that length over `slackSeconds`, so that the sheet fills out instead of snapping into its bow: a sheet
+    // that starts compressed and flat gives way all at once.
+    float slack = 0;
+    float slackSeconds = 0;
+    float damping = 0.1f;            // of the particles' speed, per second
+    float friction = 0.2f;           // against what it touches
+    float restitution = 0;           // of its bounce off what it touches
+    int iterations = 5;              // solver passes a step
+    std::uint64_t userData = 0;      // what ContactEvent says of it, see addCloth()
 };
 
 struct ContactEvent {
@@ -193,6 +225,43 @@ public:
     std::vector<JointId> takeBrokenJoints();
 
     std::optional<RayHit> raycast(Vec3 origin, Vec3 direction, float maxDistance) const;
+    // Every body the ray crosses within maxDistance, nearest first, each once, at the point where the ray enters it (a body
+    // that holds the origin is hit at distance 0). Ignores the kinds of body, as raycast() does.
+    std::vector<RayHit> raycastAll(Vec3 origin, Vec3 direction, float maxDistance) const;
+
+    // ---- Cloth
+    // A sheet of cloth is a body of its own, with an id that removeBody(), userData(), raycast() (which hits its surface from
+    // either side) and the contact events know it by; its pose is the identity and its particles are in world space. Returns 0
+    // (and logs why) when the description is unusable.
+    //
+    // It collides particle by particle, with a particle's radius, against every body but the ones it was told to go through
+    // (clothIgnores()); the surface between the particles is not there to a body that moves (it is to a ray), so what is smaller
+    // than the gap goes through, as it did the original's spheres. Nothing it touches is moved or woken by it. A touch begins a
+    // ContactEvent with `a` the cloth and `b` what it met, the normal pointing from the cloth to it and normalSpeed the speed at
+    // which that closed on the particle (the particle counted as still: the sheet is light); like the rigid bodies', only the step
+    // a touch begins in reports it. A cloth that has settled goes to sleep, and wakes when a pin goes elsewhere or something that
+    // moves comes near.
+    BodyId addCloth(const ClothDesc& desc);
+    // Where the particles are now, in the order of ClothDesc::positions; empty for an id that is no cloth.
+    std::vector<Vec3> clothPositions(BodyId cloth) const;
+    // Holds a particle at `position` from the next fixed step on, the springs carrying the rest of the sheet after it, until
+    // releaseClothParticle(): call again before each step to move it (the speed that takes it there is its own).
+    void pinClothParticle(BodyId cloth, int particle, Vec3 position);
+    // Lets a pinned particle go, moving as the pin was.
+    void releaseClothParticle(BodyId cloth, int particle);
+    // The wind: an acceleration (units per second squared) that every particle takes, along the surface's normal, by its
+    // share of the wind square to the sheet there (a sheet edge-on to it feels nothing). Zero is no wind.
+    void setClothWind(BodyId cloth, Vec3 acceleration);
+    // Adds `velocity` to every particle that is not pinned, and wakes the cloth: the way a loose body is kicked or blown, whatever
+    // faces the push (the wind above only takes what is square to the sheet).
+    void pushCloth(BodyId cloth, Vec3 velocity);
+    // The cloth goes through `other` from now on: what it hangs from. It still touches everything else.
+    void clothIgnores(BodyId cloth, BodyId other);
+    void clothIgnoresNothing(BodyId cloth);
+    // How many times the solver has sent a cloth's particles off beyond reach (a pin dragged out of the world, a squeeze it could not
+    // solve), which put them back where they last were; after the third the cloth is held still where it is. Zero for a cloth that
+    // is well and for an id that is none.
+    int clothResets(BodyId cloth) const;
 
     // The settings in use: the ones given, with values that cannot work replaced.
     const PhysicsSettings& settings() const;

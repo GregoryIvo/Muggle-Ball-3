@@ -72,13 +72,33 @@ void PlaySounds::play(const GameEvent& event) {
         case EventType::PrizeMissed:
         case EventType::EffectStarted:
         case EventType::EffectEnded:
-        case EventType::StrikeGranted:  // (the strikes' own sounds come with them)
+        case EventType::StrikeGranted:
             break;
         case EventType::BatLeft:
             sounds_.play("bat_dead", 1, pan);
             break;
         case EventType::LevelComplete:
             sounds_.play("endlevel");
+            break;
+        // The weapons and the strikes: the `period` sound of the projectile's material is its shot (a falling meteor's) and its `dead` sound
+        // the impact's [D: materials.xml, sounds.xml]. One ShotFired is one shot, so the Machine Gun's two bullets make one sound: the data
+        // marks the right bullet as the one that does (`shootSound`).
+        case EventType::ShotFired:
+        case EventType::MeteorFalling:
+            if (event.material) {
+                sounds_.play(*event.material, MaterialSound::Period, 1, pan);
+            }
+            break;
+        case EventType::ProjectileHit:
+        case EventType::BoltStruck:
+        case EventType::MeteorImpact:
+            if (event.material) {
+                sounds_.play(*event.material, MaterialSound::Dead, 1, pan);
+            }
+            break;
+        case EventType::ProjectileExploded:  // (the bricks it destroys sound as they go)
+        case EventType::ProjectileGone:
+        case EventType::LaserBeam:
             break;
         case EventType::DynamiteBlast:  // (the charge makes its own sound as it is destroyed)
         case EventType::ShotHit:

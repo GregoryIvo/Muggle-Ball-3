@@ -112,6 +112,30 @@ add_executable(mb_physics_test physics_test.cpp)
 target_link_libraries(mb_physics_test PRIVATE mb_engine)
 add_test(NAME mb_physics_test COMMAND mb_physics_test)
 
+# Cloth over Jolt's soft bodies: pins, wind, what it meets. CPU only.
+add_executable(mb_physics_cloth_test physics_cloth_test.cpp)
+target_link_libraries(mb_physics_cloth_test PRIVATE mb_engine)
+add_test(NAME mb_physics_cloth_test COMMAND mb_physics_cloth_test)
+
+# Sails on made-up levels: the plan, the scene, the rules and the mesh. CPU only.
+add_executable(mb_cloth_tests test_cloth.cpp)
+target_link_libraries(mb_cloth_tests PRIVATE mb_game)
+add_test(NAME mb_cloth_tests COMMAND mb_cloth_tests)
+
+# The sails of all converted levels in the physics world when MB3_ASSETS points at the data; exits 77 (skipped) otherwise.
+add_executable(mb_cloth_smoke cloth_smoke.cpp)
+target_link_libraries(mb_cloth_smoke PRIVATE mb_game)
+add_test(NAME mb_cloth_smoke COMMAND mb_cloth_smoke)
+set_tests_properties(mb_cloth_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# The sails on screen, on the real data and the GPU without a window: a mesh each in its material's texture, drawn with the level they change
+# only the place of their particles, they follow the physics and go when the rules destroy them. Exits 77 (skipped) without MB3_ASSETS or a GPU.
+add_executable(mb_cloth_view_smoke cloth_view_smoke.cpp)
+target_include_directories(mb_cloth_view_smoke PRIVATE ${PROJECT_SOURCE_DIR}/app)
+target_link_libraries(mb_cloth_view_smoke PRIVATE mb_game)
+add_test(NAME mb_cloth_view_smoke COMMAND mb_cloth_view_smoke)
+set_tests_properties(mb_cloth_view_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
 # Paths: the curve through a path's points and the actors bound to it, on made-up paths. CPU only.
 add_executable(mb_path_tests test_paths.cpp)
 target_link_libraries(mb_path_tests PRIVATE mb_game)
@@ -157,6 +181,33 @@ add_executable(mb_special_object_smoke special_objects_smoke.cpp)
 target_link_libraries(mb_special_object_smoke PRIVATE mb_game)
 add_test(NAME mb_special_object_smoke COMMAND mb_special_object_smoke)
 set_tests_properties(mb_special_object_smoke PROPERTIES SKIP_RETURN_CODE 77)
+# The weapons and the strikes of the prizes (the click that fires, the projectiles, the laser, the Thunderbolt and the Meteorite Rain) on made-up
+# levels. CPU only.
+add_executable(mb_weapon_tests test_weapons.cpp)
+target_link_libraries(mb_weapon_tests PRIVATE mb_game)
+add_test(NAME mb_weapon_tests COMMAND mb_weapon_tests)
+
+# The weapons and the strikes of all converted levels, played by the autopilot with the click held down, when MB3_ASSETS points at the data; exits
+# 77 (skipped) otherwise.
+add_executable(mb_weapon_smoke weapon_smoke.cpp)
+target_link_libraries(mb_weapon_smoke PRIVATE mb_game)
+add_test(NAME mb_weapon_smoke COMMAND mb_weapon_smoke)
+set_tests_properties(mb_weapon_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# What the weapons look like: the clock of the barrels' animation, the particle effects the events and the flying projectiles call for, and the
+# HUD's shot count, on made-up particle files and levels. CPU only.
+add_executable(mb_weapon_view_tests test_weapon_view.cpp)
+target_link_libraries(mb_weapon_view_tests PRIVATE mb_game)
+add_test(NAME mb_weapon_view_tests COMMAND mb_weapon_view_tests)
+
+# The weapons' picture on the real data and the GPU without a window: the barrels in bat.x's own animation, what flies, the beam, the
+# lightning, the meteors and their effects, in three worlds. Exits 77 (skipped) without MB3_ASSETS or a GPU.
+add_executable(mb_weapon_view_smoke weapon_view_smoke.cpp)
+target_include_directories(mb_weapon_view_smoke PRIVATE ${PROJECT_SOURCE_DIR}/app)
+target_link_libraries(mb_weapon_view_smoke PRIVATE mb_game)
+add_test(NAME mb_weapon_view_smoke COMMAND mb_weapon_view_smoke)
+set_tests_properties(mb_weapon_view_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
 # The prizes: what drops, how it falls and is caught, and what each of the 28 does, on made-up levels. CPU only.
 add_executable(mb_prize_tests test_prizes.cpp)
 target_link_libraries(mb_prize_tests PRIVATE mb_game)
@@ -191,3 +242,26 @@ add_executable(mb_player_input_tests test_player_input.cpp ${PROJECT_SOURCE_DIR}
 target_include_directories(mb_player_input_tests PRIVATE ${PROJECT_SOURCE_DIR}/app)
 target_link_libraries(mb_player_input_tests PRIVATE mb_game)
 add_test(NAME mb_player_input_tests COMMAND mb_player_input_tests)
+
+# The particle definitions (the parser and what it reports) and the particle simulation, on made-up files with the real numbers: each
+# type's behaviour, beams and bolts, the system's handles and the batches. CPU only.
+add_executable(mb_particle_tests test_particles.cpp)
+target_link_libraries(mb_particle_tests PRIVATE mb_game)
+add_test(NAME mb_particle_tests COMMAND mb_particle_tests)
+
+# Every file of Data/Particles against the docs and the data that names them, and each definition run through the system, when
+# MB3_ASSETS points at the data; exits 77 (skipped) otherwise.
+add_executable(mb_particle_smoke particle_smoke.cpp)
+target_link_libraries(mb_particle_smoke PRIVATE mb_game nlohmann_json::nlohmann_json)
+add_test(NAME mb_particle_smoke COMMAND mb_particle_smoke)
+set_tests_properties(mb_particle_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# The particle effects in the game's scene, from the rules' events, on the real data and the GPU without a window: a flicker's fire, blasts,
+# the flash of each kind of brick, a tree's leaves, the night, and a firework's rocket with its trail and burst. Exits 77 (skipped) without
+# MB3_ASSETS or a GPU.
+add_executable(mb_effects_smoke effects_smoke.cpp ${PROJECT_SOURCE_DIR}/app/PlaySession.cpp ${PROJECT_SOURCE_DIR}/app/PlayerInput.cpp
+               ${PROJECT_SOURCE_DIR}/app/GameAudio.cpp)
+target_include_directories(mb_effects_smoke PRIVATE ${PROJECT_SOURCE_DIR}/app)
+target_link_libraries(mb_effects_smoke PRIVATE mb_game)
+add_test(NAME mb_effects_smoke COMMAND mb_effects_smoke)
+set_tests_properties(mb_effects_smoke PROPERTIES SKIP_RETURN_CODE 77)

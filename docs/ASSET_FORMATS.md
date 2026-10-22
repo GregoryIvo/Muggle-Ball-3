@@ -64,17 +64,22 @@ Written by `tools/x2glb.py` (parser: `tools/xfile.py`):
   (`c-trees.X`; the file is `derewo_fon2.jpg`) and `w.jpg` (`water.X`).
   `house2.X` has two different materials called `Material__1`; its meshes
   refer to the first.
-- **Animations** are not glTF animations. They are kept losslessly in the
-  root `extras.animations` for later use:
-  `[{"name": set name, "ticksPerSecond": n, "tracks": [{"node": frame name,
-  "rotation": [[tick, w, x, y, z], ...], "scale": [[tick, x, y, z], ...],
-  "position": [[tick, x, y, z], ...], "matrix": [[tick, m0..m15], ...]}]}]`.
-  Only the key types present are written. `ticksPerSecond` comes from
-  `AnimTicksPerSecond`, or 4800 (the D3DX default) if the file has none. In
-  the shipped files no mesh has `AnimTicksPerSecond`, every track holds
-  `matrix` keys only, and 184 of the 264 sets have no tracks at all.
-- Root `extras`: `{"source": "SkinMeshes/cannon.X", "coordinateSystem": "d3d-left-handed", "animations": [...]}`.
-  `animations` is always present, `[]` when the file has no animation sets.
+- **Animations** are glTF animations (`animations`), one per `.x` `AnimationSet` that moves a frame: `name` is the set's
+  name (`Anim-1` in all but `bat.x`, whose sets are `Common`, `Hit`, `Right` and `Left`), and each `Animation` of the set
+  is a channel for the frame's translation, rotation and scale (`LINEAR` samplers sharing the key times). Times are in
+  seconds: the keys' ticks over `AnimTicksPerSecond`, or 4800 (the D3DX default, 160 ticks a frame at 30 frames a
+  second) if the file has none, which none of the shipped files has. Their keys are all `matrix` keys; each is taken
+  apart as D3DX does when it loads one (the scale is the length of each axis, the rotation what is left once the axes
+  are made square to one another, so a shear is dropped: the cannon's `Pushka` recoils with one, and the shipped files'
+  worst key is 0.4 off in one element of a matrix with a scale of 10). A rotation is stored as a quaternion `x, y, z,
+  w` in the same handedness as everything else, neighbours on one side so that the interpolation takes the short way.
+  `scale` and `position` keys convert too; a `rotation` key (a quaternion in the .x's own convention) is skipped with a
+  warning: no shipped file has one. A tick written twice keeps its last key. The frames an animation moves have
+  `translation`, `rotation` and `scale` instead of a `matrix` (glTF wants that; the transform is the same to within the
+  shear of the largest, 0.01 in one element, in `Prizes/scull.X`), and a frame whose matrix cannot be taken apart (a
+  flat axis) is left alone with its animation skipped. 184 of the 264 sets in the shipped files have no tracks and are
+  not written; 80 are, in 77 files. The engine reads them as `Model::animations` (`ARCHITECTURE.md`).
+- Root `extras`: `{"source": "SkinMeshes/cannon.X", "coordinateSystem": "d3d-left-handed"}`.
 
 ## Materials: `assets/Data/Materials/materials.json`
 

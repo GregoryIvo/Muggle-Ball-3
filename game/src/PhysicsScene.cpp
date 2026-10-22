@@ -104,13 +104,30 @@ PhysicsScene::PhysicsScene(const Level& level, const MaterialLibrary& materials,
     }
 
     bodies_.assign(plan_.actors.size(), 0);
+    std::vector<bool> inSail(plan_.actors.size(), false);  // the cloth bodies come with the sails, not with the actors
+    for (const ClothPlan& cloth : plan_.cloths) {
+        for (const ActorIndex actor : cloth.actors) {
+            inSail[actor] = true;
+        }
+    }
     for (std::size_t i = 0; i < plan_.actors.size(); ++i) {
         const ActorPlan& actor = plan_.actors[i];
+        if (inSail[i]) {
+            ++counts_.clothParticles;
+            continue;
+        }
         if (!actor.simulated) {
             ++counts_.withoutBody;
             continue;
         }
-        bodies_[i] = world_.addBody(actor.body);
+        if (actor.type == ObjectType::TeleportSrc || actor.type == ObjectType::TeleportDest) {
+            BodyDesc portal = actor.body;  // weapons ignore teleports (docs/GAMEPLAY.md section 18.2)
+            portal.group = kKindPortal;
+            portal.collidesWith = ~kKindProjectile;
+            bodies_[i] = world_.addBody(portal);
+        } else {
+            bodies_[i] = world_.addBody(actor.body);
+        }
         if (bodies_[i] == 0) {
             ++counts_.withoutBody;
             continue;
@@ -121,6 +138,9 @@ PhysicsScene::PhysicsScene(const Level& level, const MaterialLibrary& materials,
             case MotionType::Static: ++counts_.staticBodies; break;
         }
     }
+
+    cloths_.emplace(plan_, world_, bodies_, options.cloth);
+    counts_.cloths = cloths_->size();
 
     // A path actor starts where its path has it, not where it was saved: the poses were saved a frame or two behind
     // the path, and a key can lie a few units off a path that was edited afterwards.
@@ -145,8 +165,8 @@ PhysicsScene::PhysicsScene(const Level& level, const MaterialLibrary& materials,
         const BodyDesc& body = plan_.actors[i].body;
         // Only a body that gravity pulls can be left asleep in the air (one that has none, or is held at its height,
         // is meant to hover).
-        if (bodies_[i] != 0 && world_.motionType(bodies_[i]) == MotionType::Dynamic && body.gravity &&
-            !body.lockTranslation[1]) {
+        if (bodies_[i] != 0 && cloths_->clothOf(i) < 0 && world_.motionType(bodies_[i]) == MotionType::Dynamic &&
+            body.gravity && !body.lockTranslation[1]) {
             fallingActors_.push_back(i);
             wasAwake_[i] = world_.isAwake(bodies_[i]);
             restsOn_[i] = supported(i);
@@ -189,7 +209,19 @@ PhysicsScene::PhysicsScene(const Level& level, const MaterialLibrary& materials,
 }
 
 Mat4 PhysicsScene::actorPose(ActorIndex actor) const {
-    return bodies_[actor] != 0 ? world_.pose(bodies_[actor]) : plan_.actors[actor].pose;
+    return bodies_[actor] != 0 && cloths_->clothOf(actor) < 0 ? world_.pose(bodies_[actor]) : plan_.actors[actor].pose;
+}
+
+Bounds PhysicsScene::bounds(ActorIndex actor) const {
+    const int cloth = cloths_->clothOf(actor);
+    return cloth >= 0 ? cloths_->bounds(static_cast<std::size_t>(cloth)) : boundsOf(plan_.actors[actor].body, actorPose(actor));
+}
+
+Vec3 PhysicsScene::centreOf(ActorIndex actor) const {
+    // The pose is the model's origin, which can be well away from the pieces (a ship's is on the water line).
+    const int cloth = cloths_->clothOf(actor);
+    return cloth >= 0 ? cloths_->centre(static_cast<std::size_t>(cloth))
+                      : transformPoint(plan_.actors[actor].body.massLocalPose.translationPart(), actorPose(actor));
 }
 
 bool PhysicsScene::supported(ActorIndex actor) const {
@@ -202,9 +234,14 @@ bool PhysicsScene::supported(ActorIndex actor) const {
     for (const Vec3 p : points) {
         lowest = std::min(lowest, p.y);
     }
+    // What holds a body up is the level's solid actors and the balls: not a sail, whose faces the rays hit (a body lying on a sail goes down with
+    // it), and not a projectile passing under.
     for (const Vec3 p : points) {
-        if (world_.raycast({p.x, lowest - 0.005f, p.z}, {0, -1, 0}, kSupportGap)) {
-            return true;
+        for (const RayHit& hit : world_.raycastAll({p.x, lowest - 0.005f, p.z}, {0, -1, 0}, kSupportGap)) {
+            const std::uint64_t data = world_.userData(hit.body);
+            if (data != kProjectileData && !(isActor(data) && cloths_->clothOf(static_cast<ActorIndex>(data)) >= 0)) {
+                return true;
+            }
         }
     }
     return false;
@@ -242,8 +279,18 @@ float PhysicsScene::massOf(std::uint64_t userData, BodyId body) const {
     if (userData == kGameBallData) {
         return world_.mass(body);  // (its radius is the prizes' to change: Big Ball, Weak Ball)
     }
+    if (userData == kProjectileData) {
+        const auto it = std::ranges::find(projectileMasses_, body, &std::pair<BodyId, float>::first);
+        return it != projectileMasses_.end() ? it->second : kBallMass;
+    }
     if (!isActor(userData)) {
         return kBallMass;
+    }
+    // A sail is a few grams of cloth, however its actors were saved (kinematic, which is immovable to every other kind of body): a ship that
+    // closes on a free sail does not hit a wall (it would break its own joints).
+    if (const int cloth = cloths_->clothOf(static_cast<ActorIndex>(userData)); cloth >= 0) {
+        const ClothPlan& sail = cloths_->plan(static_cast<std::size_t>(cloth));
+        return std::max(sail.particleMass * static_cast<float>(sail.actors.size()), 1e-3f);
     }
     const ActorPlan& actor = plan_.actors[userData];
     return actor.motion == MotionType::Dynamic ? std::max(actor.body.mass, 1e-3f) : kImmovable;
@@ -285,6 +332,7 @@ void PhysicsScene::breakByHit(const ContactEvent& contact) {
         if (!isActor(userData)) {
             continue;
         }
+        cloths_->holderHit(static_cast<ActorIndex>(userData), force);  // the sails it holds are joints too
         for (const std::size_t joint : jointsOfActor_[userData]) {
             if (jointIds_[joint] != 0 && force > plan_.joints[joint].desc.breakForce) {
                 breakJoint(joint);
@@ -302,8 +350,13 @@ void PhysicsScene::movePathActors() {
     }
 }
 
+void PhysicsScene::beforeFixedStep() {
+    movePathActors();
+    cloths_->carryPins(*this);
+}
+
 void PhysicsScene::step(float dt) {
-    world_.step(dt, [this] { movePathActors(); });
+    world_.step(dt, [this] { beforeFixedStep(); });
     wakeUnsupported();
 
     contacts_ = world_.takeContacts();
@@ -337,9 +390,15 @@ void PhysicsScene::removeActor(ActorIndex actor) {
     if (bodies_[actor] == 0) {
         return;
     }
+    if (const int cloth = cloths_->clothOf(actor); cloth >= 0) {  // a sail: it supports nothing, and nothing joins it
+        cloths_->remove(static_cast<std::size_t>(cloth));
+        bodies_[actor] = 0;
+        return;
+    }
     const Bounds gone = boundsOf(plan_.actors[actor].body, actorPose(actor));
     world_.removeBody(bodies_[actor]);  // its joints go with it
     bodies_[actor] = 0;
+    cloths_->holderGone(actor);  // the sails it held fall free
     std::erase(fallingActors_, actor);
     for (const std::size_t joint : jointsOfActor_[actor]) {
         if (jointIds_[joint] != 0) {
@@ -409,6 +468,7 @@ BodyId PhysicsScene::addGameBall(Vec3 position, Vec3 velocity, float radius) {
     desc.lockRotation[0] = desc.lockRotation[2] = true;
     desc.sleepLinearVelocity = 0;  // never falls asleep
     desc.continuousCollision = true;
+    desc.group = kKindBall;
     desc.userData = kGameBallData;
     return world_.addBody(desc);
 }
@@ -427,8 +487,37 @@ BodyId PhysicsScene::addBat(Vec3 position, float radius) {
     desc.motion = MotionType::Kinematic;
     desc.shapes = {sphere};
     desc.density = 1;
+    desc.group = kKindBat;
     desc.userData = kBatData;
     return world_.addBody(desc);
+}
+
+BodyId PhysicsScene::addProjectile(const Mat4& pose, const PhysicsShape& shape, Vec3 velocity, bool gravity, float density) {
+    BodyDesc desc;
+    desc.pose = pose;
+    desc.shapes = {shape};
+    desc.density = density;
+    desc.linearVelocity = velocity;
+    desc.gravity = gravity;
+    desc.lockRotation[0] = desc.lockRotation[1] = desc.lockRotation[2] = true;
+    desc.sleepLinearVelocity = 0;  // never falls asleep
+    desc.continuousCollision = true;
+    desc.group = kKindProjectile;
+    desc.collidesWith = kKindLevel;
+    desc.userData = kProjectileData;
+    const BodyId body = world_.addBody(desc);
+    if (body != 0) {
+        const float r = shape.radius;
+        const float volume = 4.0f * kPi / 3.0f * r * r * r +
+                             (shape.type == PhysicsShapeType::Capsule ? kPi * r * r * 2.0f * shape.halfHeight : 0.0f);
+        projectileMasses_.emplace_back(body, std::max(volume * density, 1e-3f));
+    }
+    return body;
+}
+
+void PhysicsScene::removeProjectile(BodyId body) {
+    std::erase_if(projectileMasses_, [body](const std::pair<BodyId, float>& entry) { return entry.first == body; });
+    world_.removeBody(body);
 }
 
 }  // namespace mb

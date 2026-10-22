@@ -57,6 +57,14 @@ std::string_view eventName(EventType type) {
         case EventType::BallStuck: return "BallStuck";
         case EventType::Blast: return "Blast";
         case EventType::BallRubbered: return "BallRubbered";
+        case EventType::ShotFired: return "ShotFired";
+        case EventType::ProjectileHit: return "ProjectileHit";
+        case EventType::ProjectileExploded: return "ProjectileExploded";
+        case EventType::ProjectileGone: return "ProjectileGone";
+        case EventType::LaserBeam: return "LaserBeam";
+        case EventType::BoltStruck: return "BoltStruck";
+        case EventType::MeteorFalling: return "MeteorFalling";
+        case EventType::MeteorImpact: return "MeteorImpact";
         case EventType::LifeLost: return "LifeLost";
         case EventType::BatLeft: return "BatLeft";
         case EventType::BatEntered: return "BatEntered";
@@ -85,6 +93,10 @@ Vec3 turnedOut(Vec3 heading, float atX, float sinFlat, float sinSteep) {
 bool finite(Vec3 v) {
     return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
 }
+
+// The weapons' random generator (how many bolts, where they fall, when) is the session's prize seed turned by this, so that it runs apart
+// from the drops and the Earthquake's kicks.
+constexpr std::uint64_t kWeaponSeed = 0x57454150ull;
 
 // Turns the phases of the Drunken Ball's wobble apart from ball to ball: the golden angle, in radians.
 constexpr float kGoldenAngle = 2.3999632f;
@@ -117,6 +129,8 @@ std::string describe(const GameEvent& event) {
         case EventType::PrizeCaught: add("points", event.points); break;
         case EventType::LifeLost:
         case EventType::GameOver: add("hearts", event.hearts); break;
+        case EventType::ShotFired: add("left", event.count); break;
+        case EventType::LaserBeam: add("reached", event.count); break;
         default: break;
     }
     if (event.speed != 0) {
@@ -127,6 +141,10 @@ std::string describe(const GameEvent& event) {
     }
     text += std::format(" at ({:.2f}, {:.2f}, {:.2f})", static_cast<double>(event.position.x),
                         static_cast<double>(event.position.y), static_cast<double>(event.position.z));
+    if (event.end.x != 0 || event.end.y != 0 || event.end.z != 0) {
+        text += std::format(" to ({:.2f}, {:.2f}, {:.2f})", static_cast<double>(event.end.x), static_cast<double>(event.end.y),
+                            static_cast<double>(event.end.z));
+    }
     return text;
 }
 
@@ -144,6 +162,7 @@ bool canBeDamaged(ObjectType type, const GameMaterial* material) {
         case ObjectType::Flicker:
         case ObjectType::Metall:
         case ObjectType::Dynamite:
+        case ObjectType::Cloth:
             return material != nullptr && material->brickType != 2 && material->brickEnergy > 0;
         default:
             return false;
@@ -214,6 +233,7 @@ GameSession::GameSession(const Level& level, const MaterialLibrary& materials, c
       levelEnd_(options.levelEnd),
       scene_(level, materials, options.physics, options.physicsSettings),
       objects_(level, scene_.plan(), options.rules.objects),
+      weapons_(materials, options.rules.weapons, options.prizeSeed ^ kWeaponSeed),
       fixedStep_(scene_.world().settings().fixedStep),
       score_(options.score),
       hearts_(options.hearts.value_or(options.rules.startHearts)),
@@ -361,15 +381,19 @@ void GameSession::tick() {
     const bool launch = std::exchange(launchPending_, false);
 
     moveBat();
+    // A click does one thing: launches the ball held on the bat, else lets go of the balls the Magnet holds, else fires the weapon.
     if (launch && phase_ == SessionPhase::Ready) {
         launchHeldBall();
-    } else if (launch) {
+    } else if (launch && std::ranges::any_of(balls_, [](const Ball& ball) { return ball.stuck; })) {
         releaseStuck(false);
+    } else if (launch) {
+        weapons_.fire(*this);
     }
     scene_.step(static_cast<float>(fixedStep_));
     processContacts();
     keepBalls();
     objects_.update(*this);
+    weapons_.update(*this);
     stepPrizes();
     explodeDue();
     removeShrunk();
@@ -582,7 +606,7 @@ bool GameSession::hit(ActorIndex actor, Vec3 at, bool dropsPrize) {
     return actor < bricks_.size() && hitBrick(actor, at, 0, -1, dropsPrize);
 }
 
-bool GameSession::hitBrick(ActorIndex actor, Vec3 at, float speed, int ball, bool dropsPrize) {
+bool GameSession::hitBrick(ActorIndex actor, Vec3 at, float speed, int ball, bool dropsPrize, std::optional<PrizeKind> by) {
     Brick& brick = bricks_[actor];
     if (!brick.damageable || brick.removed || brick.exploding || brick.shrinking) {
         return false;
@@ -603,6 +627,7 @@ bool GameSession::hitBrick(ActorIndex actor, Vec3 at, float speed, int ball, boo
     if (brick.energy <= 0) {
         brick.exploding = true;
         brick.noPrize = !dropsPrize;
+        brick.killedBy = by;
         brick.explodeAt = time_ + brick.material->exploseDelay / 1000.0;
         exploding_.push_back(actor);
     }
@@ -752,8 +777,7 @@ void GameSession::runLifeSequence() {
 }
 
 Vec3 GameSession::centreOf(ActorIndex actor) const {
-    // The pose is the model's origin, which can be well away from the pieces (a ship's is on the water line).
-    return transformPoint(scene_.plan().actors[actor].body.massLocalPose.translationPart(), scene_.actorPose(actor));
+    return scene_.centreOf(actor);
 }
 
 void GameSession::explodeDue() {
@@ -774,6 +798,7 @@ void GameSession::explodeDue() {
         event.position = centreOf(actor);
         event.points = brick.material->brickScore;
         event.material = brick.material;
+        event.prize = brick.killedBy;
         emit(event);
         objects_.destroyed(*this, actor, event.position);
         if (shrinksAway(brick.material)) {
@@ -801,16 +826,9 @@ void GameSession::removeShrunk() {
 }
 
 void GameSession::removeFallen() {
-    for (const ActorIndex actor : dynamicActors_) {
+    // A body that has left the board: out of play, no explosion, nothing scored (unless fallScores).
+    const auto fell = [&](ActorIndex actor) {
         Brick& brick = bricks_[actor];
-        const BodyId body = scene_.body(actor);
-        if (body == 0 || brick.shrinking) {  // (one that is shrinking is paid for and nearly gone)
-            continue;
-        }
-        const Vec3 at = scene_.world().pose(body).translationPart();
-        if (at.y >= rules_.fallLimitY && finite(at)) {
-            continue;
-        }
         if (brick.exploding) {
             std::erase(exploding_, actor);
             brick.exploding = false;
@@ -828,6 +846,25 @@ void GameSession::removeFallen() {
         }
         emit(event);
         removeBrick(actor);
+    };
+    for (const ActorIndex actor : dynamicActors_) {
+        const BodyId body = scene_.body(actor);
+        if (body == 0 || bricks_[actor].shrinking) {  // (one that is shrinking is paid for and nearly gone)
+            continue;
+        }
+        const Vec3 at = scene_.world().pose(body).translationPart();
+        if (at.y < rules_.fallLimitY || !finite(at)) {
+            fell(actor);
+        }
+    }
+    // A sail that has lost its holders and fallen off the board falls for ever.
+    const ClothSet& cloths = scene_.cloths();
+    for (std::size_t i = 0; i < cloths.size(); ++i) {
+        const ActorIndex lead = cloths.plan(i).lead;
+        const Vec3 at = cloths.centre(i);
+        if (cloths.alive(i) && !bricks_[lead].shrinking && (at.y < rules_.fallLimitY || !finite(at))) {
+            fell(lead);
+        }
     }
 }
 

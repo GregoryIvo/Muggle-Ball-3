@@ -5,6 +5,7 @@
 #include <Jolt/Core/JobSystemThreadPool.h>
 #include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
 #include <Jolt/Physics/Collision/NarrowPhaseQuery.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/RegisterTypes.h>
@@ -48,9 +49,6 @@ constexpr float kMaxPenetrationRecovery = 0.05f;
 // Bodies added since the last time the broad phase tree was rebuilt before that is worth doing
 // again; a level loads hundreds of bodies at once, a spawned prize is one.
 constexpr std::size_t kOptimizeAfterAdds = 64;
-
-// Events nobody collected; a game that never calls takeContacts() must not eat the memory.
-constexpr std::size_t kMaxQueuedContacts = 1u << 16;
 
 constexpr std::size_t kTempBytes = 16u << 20;
 
@@ -142,10 +140,19 @@ const PhysicsMaterial& materialOf(const JPH::Body& body, const JPH::SubShapeID& 
     return material != nullptr ? material->values : fallback;
 }
 
+// A cloth's particles ask for their contacts' materials with no sub shape, which a compound body cannot answer. So a pair with a
+// cloth in it gets the cloth's own friction and restitution (ClothDesc::friction; none bounces), whatever the other body is.
+const JPH::Body* clothOf(const JPH::Body& a, const JPH::Body& b) {
+    return a.IsSoftBody() ? &a : (b.IsSoftBody() ? &b : nullptr);
+}
+
 // Jolt has a single friction coefficient per contact, so the dynamic one is used and the static
 // one is ignored: resting bodies are held by the same coefficient that slows sliding ones.
 float combinedFriction(const JPH::Body& a, const JPH::SubShapeID& subA, const JPH::Body& b,
                        const JPH::SubShapeID& subB) {
+    if (const JPH::Body* cloth = clothOf(a, b)) {
+        return cloth->GetFriction();
+    }
     const PhysicsMaterial& x = materialOf(a, subA);
     const PhysicsMaterial& y = materialOf(b, subB);
     return std::max(0.0f, combine(x.frictionCombine, y.frictionCombine, x.dynamicFriction, y.dynamicFriction));
@@ -153,6 +160,9 @@ float combinedFriction(const JPH::Body& a, const JPH::SubShapeID& subA, const JP
 
 float combinedRestitution(const JPH::Body& a, const JPH::SubShapeID& subA, const JPH::Body& b,
                           const JPH::SubShapeID& subB) {
+    if (const JPH::Body* cloth = clothOf(a, b)) {
+        return cloth->GetRestitution();
+    }
     const PhysicsMaterial& x = materialOf(a, subA);
     const PhysicsMaterial& y = materialOf(b, subB);
     return std::max(0.0f, combine(x.restitutionCombine, y.restitutionCombine, x.restitution, y.restitution));
@@ -262,6 +272,7 @@ PhysicsWorld::Impl::Impl(Vec3 gravity, const PhysicsSettings& requested)
     system.SetPhysicsSettings(joltSettings);
     system.SetGravity(toJolt(gravity));
     system.SetContactListener(this);
+    system.SetSoftBodyContactListener(this);
     system.SetBodyActivationListener(this);
     system.SetCombineFriction(combinedFriction);
     system.SetCombineRestitution(combinedRestitution);
@@ -379,6 +390,7 @@ void PhysicsWorld::Impl::fixedStep() {
     }
     flushActivations();
     applyKinematicTargets();
+    driveCloths();
 
     const std::size_t firstNew = contacts.size();
     const JPH::EPhysicsUpdateError error =
@@ -388,6 +400,8 @@ void PhysicsWorld::Impl::fixedStep() {
         logWarn("PhysicsWorld: Jolt ran out of room (error flags {}); raise maxBodyPairs / maxContactConstraints",
                 static_cast<int>(error));
     }
+    guardCloths();
+    reportClothTouches();
     // Worker threads report in any order; sort what this step produced so runs compare equal.
     std::stable_sort(contacts.begin() + static_cast<std::ptrdiff_t>(firstNew), contacts.end(),
                      [](const ContactEvent& x, const ContactEvent& y) {
@@ -468,6 +482,7 @@ BodyId PhysicsWorld::addBody(const BodyDesc& desc) {
     }
     const BodyId id = w.nextBody;
     settings.mUserData = id;  // Jolt's own user data holds our id; the caller's lives in the record
+    settings.mCollisionGroup = JPH::CollisionGroup(w.kinds, desc.group, desc.collidesWith);
     JPH::Body* body = w.bodies.CreateBody(settings);
     if (body == nullptr) {
         logWarn("PhysicsWorld::addBody: out of bodies (PhysicsSettings::maxBodies is {})", w.settings.maxBodies);
@@ -502,6 +517,7 @@ void PhysicsWorld::removeBody(BodyId body) {
         w.destroyJoint(record->joints.back());
     }
     w.kinematicTargets.erase(body);
+    w.cloths.erase(body);
     if (record->sleepThreshold > 0) {
         w.sleepThresholds.erase(w.sleepThresholds.find(record->sleepThreshold));
         w.updateSleepThreshold();
@@ -727,6 +743,41 @@ std::optional<RayHit> PhysicsWorld::raycast(Vec3 origin, Vec3 direction, float m
     result.normal = fromJolt(lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, point));
     result.distance = hit.mFraction * maxDistance;
     return result;
+}
+
+std::vector<RayHit> PhysicsWorld::raycastAll(Vec3 origin, Vec3 direction, float maxDistance) const {
+    const Impl& w = *impl_;
+    std::vector<RayHit> hits;
+    const float directionLength = length(direction);
+    if (!isFinite(origin) || !isFinite(direction) || !(directionLength > 0) || !(maxDistance > 0) ||
+        !std::isfinite(maxDistance)) {
+        return hits;
+    }
+    const JPH::RRayCast ray(JPH::RVec3(origin.x, origin.y, origin.z),
+                            toJolt(direction * (maxDistance / directionLength)));
+    JPH::RayCastSettings settings;
+    settings.mTreatConvexAsSolid = true;
+    JPH::AllHitCollisionCollector<JPH::CastRayCollector> collector;
+    w.system.GetNarrowPhaseQuery().CastRay(ray, settings, collector);
+    collector.Sort();
+    for (const JPH::RayCastResult& hit : collector.mHits) {
+        const JPH::BodyLockRead lock(w.system.GetBodyLockInterfaceNoLock(), hit.mBodyID);
+        if (!lock.Succeeded()) {
+            continue;
+        }
+        const BodyId body = static_cast<BodyId>(lock.GetBody().GetUserData());
+        if (std::ranges::any_of(hits, [body](const RayHit& seen) { return seen.body == body; })) {
+            continue;  // (a body of several shapes: the first of them the ray meets is the entry)
+        }
+        const JPH::RVec3 point = ray.GetPointOnRay(hit.mFraction);
+        RayHit result;
+        result.body = body;
+        result.point = toVec3(point);
+        result.normal = fromJolt(lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, point));
+        result.distance = hit.mFraction * maxDistance;
+        hits.push_back(result);
+    }
+    return hits;
 }
 
 const PhysicsSettings& PhysicsWorld::settings() const {

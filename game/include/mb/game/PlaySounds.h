@@ -17,7 +17,10 @@ namespace mb {
 // section 3): bat_dead as the bat flies off after the last ball is lost, endlevel as the level is won (it is also the
 // sound of the prize that does the same). A prize that is caught makes its material's `dead` sound (a few name a sound with no
 // file, which is silent), the Magnet's catch ballMagnited, the Yo-Yo's string turning the ball back ballRubbered and the
-// Explosive Ball's blast explosion_ball.
+// Explosive Ball's blast explosion_ball. A weapon's shot makes the `period` sound of its projectile's material (bullet_shoot,
+// kernel_shoot, rocket_shoot, lazer_shoot) and an impact its `dead` sound (the Thunderbolt's thunderbolt_dead, the meteor's
+// meteor_dead); a meteor makes its `period` sound (meteor) as it comes in. Several of those name no file, and are silent
+// (docs/AUDIO.md).
 class PlaySounds {
 public:
     explicit PlaySounds(SoundLibrary& sounds) : sounds_(sounds) {}

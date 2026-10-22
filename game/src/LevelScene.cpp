@@ -65,6 +65,7 @@ LevelScene::LevelScene(ModelCache& cache, const MaterialLibrary& materials, cons
     for (const SceneDraw& draw : scene.draws) {
         auto [item, animation] = prepare(draw);
         actorItems_[filled[draw.actor]++] = static_cast<std::uint32_t>(items_.size());
+        itemNode_.push_back(draw.node);
         if (animation) {
             animation->item = items_.size();
             animations_.push_back(std::move(*animation));
@@ -157,6 +158,20 @@ void LevelScene::appendActor(ActorIndex actor, std::vector<DrawItem>& out) const
     }
     for (std::uint32_t i = actorStart_[actor]; i < actorStart_[actor + 1]; ++i) {
         out.push_back(items_[actorItems_[i]]);
+    }
+}
+
+void LevelScene::appendActorPosed(ActorIndex actor, std::span<const Mat4> nodeWorlds, std::vector<DrawItem>& out) const {
+    if (actor >= actorStart_.size() - 1) {
+        return;
+    }
+    for (std::uint32_t i = actorStart_[actor]; i < actorStart_[actor + 1]; ++i) {
+        const std::uint32_t item = actorItems_[i];
+        out.push_back(items_[item]);
+        const int node = itemNode_[item];
+        if (node >= 0 && static_cast<std::size_t>(node) < nodeWorlds.size()) {
+            out.back().world = nodeWorlds[static_cast<std::size_t>(node)];
+        }
     }
 }
 

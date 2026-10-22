@@ -1,6 +1,7 @@
 #include "mb/game/PlayScene.h"
 
 #include "mb/game/Billboard.h"
+#include "mb/game/BrickEffects.h"
 #include "mb/game/GameCamera.h"
 
 #include <algorithm>
@@ -12,7 +13,7 @@ namespace mb {
 namespace {
 
 // The frames of bat.x that make the default bat (Korpus brings the wings and the little gear with it); the weapons'
-// frames are for the prizes that carry them.
+// frames are BatBarrels'.
 constexpr const char* kBatFrames[] = {"Korpus", "Shesterenka-Left", "Shesterenka-Right", "Hand", "Small-Hand", "Bita"};
 // Red, blue, yellow: Settings::bat.
 constexpr const char* kBatMaterials[] = {"Metall-Raketka-Red.jpg", "Metall-Raketka-Blue.jpg", "Metall-Raketka-Yellow.jpg"};
@@ -30,8 +31,6 @@ constexpr float kShadowSize = 2.4f;   // a soft blob on the floor under the ball
 constexpr float kShadowAlpha = 0.85f;
 constexpr float kShadowLift = 0.04f;  // above the floor, which is at y = 0 in every level
 
-constexpr double kExplosionSeconds = 0.4;
-constexpr int kSparks = 12;
 constexpr float kMostRolledPerFrame = 3.0f;  // a ball that jumped (it was freed from a pin) did not roll that far
 
 const char* batMaterial(int bat) {
@@ -60,15 +59,6 @@ float progress(const BatView& bat) {
 // How far the bat is carried on past the session's last step: it moves only while it stands.
 float batCarry(const BatView& bat, float lead) {
     return bat.phase == BatPhase::Present ? bat.velocityX * lead : 0.0f;
-}
-
-// A number in [0, 1) from two others, for the sparks: the same explosion always throws the same ones.
-float hash01(std::uint32_t seed, std::uint32_t n) {
-    std::uint32_t h = seed * 2654435761u ^ (n + 1) * 40503u;
-    h ^= h >> 15;
-    h *= 2246822519u;
-    h ^= h >> 13;
-    return static_cast<float>(h & 0xFFFFu) / 65536.0f;
 }
 
 }  // namespace
@@ -135,15 +125,24 @@ Vec3 ballPosition(const BallView& ball, const BatView& bat, float lead) {
 }
 
 PlayScene::PlayScene(ModelCache& cache, const MaterialLibrary& materials, const TextureIndex& textures,
-                     const Level& level, const GameSession& session, int bat)
+                     const ParticleLibrary& particles, const Level& level, const GameSession& session, int bat)
     : level_(cache, materials, textures, level, session.scene().plan()),
+      sails_(cache, materials, textures, level, session.scene()),
       bat_(cache, materials, textures, batLevel(bat), PhysicsPlan{}),
       quad_(cache.quad()),
-      flashTexture_(cache.texture(textures.find("Oreols/02.png"))),
       sparkTexture_(cache.texture(textures.find("Particles/PARTICLE.PNG"))),
-      facing_(facingGameCamera()),
+      view_(particleViewOf(facingGameCamera())),
       prizes_(cache, materials, textures, batMaterial(bat)),
-      effects_(cache, materials, textures) {
+      particles_(particles),
+      batches_(particles,
+               [&cache, &textures](std::string_view name) {
+                   const std::filesystem::path file = textures.find(name);
+                   return file.empty() ? TextureHandle{0} : cache.texture(file);
+               }),
+      effects_(cache, materials, textures, level, particles_),
+      barrels_(cache, materials, textures, batMaterial(bat)),
+      weapons_(cache, materials, textures, particles_, session.rules().weapons) {
+    batches_.preload();  // (the textures are uploaded now, not by the first flash or trail in the middle of a game)
     update(session, {}, 0);
 }
 
@@ -151,8 +150,11 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
     time_ += seconds;
     level_.update(time_);
     level_.follow(session.scene());
+    sails_.update(session.scene());
     effects_.update(session, events, seconds, level_, lead);
     prizes_.update(events, seconds);
+    barrels_.update(session, events, seconds);
+    weapons_.update(session, events, lead);
 
     for (const GameEvent& event : events) {
         switch (event.type) {
@@ -162,11 +164,17 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
                 }
                 break;
             case EventType::BrickDestroyed:
-                if (shrinksAway(event.material)) {  // no flash: the footage has none on a pirate
+                if (shrinksAway(event.material)) {
                     shrinking_.push_back(event.actor);
                 } else {
                     level_.hide(event.actor);
-                    explosions_.push_back({event.position, 0, event.actor * 977u + static_cast<std::uint32_t>(event.time * 1000)});
+                }
+                // The flash is the material's exploseType's: none for a pirate [M], for an island that sinks [M] (explosionEffects), and
+                // none for what a bolt of lightning destroyed [M].
+                if (event.prize != PrizeKind::Thunderbolt) {
+                    for (const std::string_view effect : explosionEffects(event.material)) {
+                        particles_.spawn(effect, event.position);
+                    }
                 }
                 break;
             case EventType::ActorFell:
@@ -199,13 +207,11 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
         ball.age += seconds;
     }
     std::erase_if(vanishing_, [&](const Vanishing& ball) { return ball.age >= session.rules().ballVanishTime; });
-    for (Explosion& explosion : explosions_) {
-        explosion.age += seconds;
-    }
-    std::erase_if(explosions_, [](const Explosion& explosion) { return explosion.age >= kExplosionSeconds; });
+    particles_.update(seconds);
 
     items_.clear();
     level_.appendDrawn(items_);
+    sails_.appendDrawn(session.scene(), items_);
     prizes_.appendWall(session, items_);
 
     const BatPose bat = batPose(session.bat(), static_cast<float>(lead));
@@ -217,6 +223,7 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
             items_.push_back(item);
         }
         prizes_.appendMagnet(session, place, items_);
+        barrels_.append(place, items_);
     }
 
     std::erase_if(rolls_, [&](const auto& entry) {
@@ -256,16 +263,15 @@ void PlayScene::update(const GameSession& session, std::span<const GameEvent> ev
         const float left = 1 - static_cast<float>(ball.age / session.rules().ballVanishTime);
         addBall(ball.at + ball.velocity * static_cast<float>(ball.age), ball.turn, left * ball.size, ball.look);
     }
-    for (const Explosion& explosion : explosions_) {
-        addExplosion(explosion);
-    }
     items_.insert(items_.end(), effects_.items().begin(), effects_.items().end());
+    items_.insert(items_.end(), weapons_.items().begin(), weapons_.items().end());
     prizes_.appendPrizes(session, lead, items_);
 
     night_ = session.nightLevel();
     if (night_ > 0) {
         dimUnlit(items_, night_);
     }
+    batches_.build(particles_, view_, unlitNightShare(night_));
 }
 
 void PlayScene::addBall(Vec3 at, const Mat4& turn, float scale, BallLook look) {
@@ -287,30 +293,6 @@ void PlayScene::addBall(Vec3 at, const Mat4& turn, float scale, BallLook look) {
     m.lit = false;
     m.depthWrite = false;
     items_.push_back(shadow);
-}
-
-// A burst of light and sparks, as the original's bricks go off: an orange flash that swells and fades, and a few sparks
-// thrown up and out. Which of its particle files a material's exploseType would pick is not known (docs/OBJECTS.md
-// section 6), so every brick has this one; the particle systems come with step 5.
-void PlayScene::addExplosion(const Explosion& explosion) {
-    const float u = static_cast<float>(explosion.age / kExplosionSeconds);
-    const float fade = 1 - u;
-    addBillboard(explosion.at, 7.0f + 8.0f * u, {1, 1, 1, fade * std::sqrt(fade)}, flashTexture_, BlendMode::AlphaBlend);
-    constexpr float kGravity = 18.0f;
-    const auto t = static_cast<float>(explosion.age);
-    for (int i = 0; i < kSparks; ++i) {
-        const auto n = static_cast<std::uint32_t>(i);
-        const float angle = 2 * kPi * hash01(explosion.seed, n * 3);
-        const float out = 4.0f + 6.0f * hash01(explosion.seed, n * 3 + 1);
-        const float up = 4.0f + 6.0f * hash01(explosion.seed, n * 3 + 2);
-        Vec3 at = explosion.at + Vec3{std::cos(angle) * out * t, up * t - 0.5f * kGravity * t * t, std::sin(angle) * out * t};
-        at.y = std::max(at.y, 0.2f);
-        addBillboard(at, 1.6f * fade + 0.3f, {1.0f, 0.5f, 0.1f, fade}, sparkTexture_, BlendMode::Additive);
-    }
-}
-
-void PlayScene::addBillboard(Vec3 at, float size, Color tint, TextureHandle texture, BlendMode blend) {
-    items_.push_back(billboard(quad_, facing_, at, {size, size}, tint, texture, blend));
 }
 
 }  // namespace mb

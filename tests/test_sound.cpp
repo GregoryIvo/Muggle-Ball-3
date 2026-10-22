@@ -335,7 +335,13 @@ void testPlaySounds() {
       {"name": "money", "samples": []},
       {"name": "ballMagnited", "samples": [{"file": "magnited.ogg"}]},
       {"name": "ballRubbered", "samples": [{"file": "rubbered.ogg"}]},
-      {"name": "explosion_ball", "samples": [{"file": "blast.ogg"}]}]})";
+      {"name": "explosion_ball", "samples": [{"file": "blast.ogg"}]},
+      {"name": "bullet_shoot", "samples": [{"file": "bulletshoot.ogg"}]},
+      {"name": "bullet_dead", "samples": []},
+      {"name": "thunderbolt", "samples": []},
+      {"name": "thunderbolt_dead", "samples": [{"file": "thunder.ogg"}]},
+      {"name": "meteor", "samples": [{"file": "meteorfall.ogg"}]},
+      {"name": "meteor_dead", "samples": [{"file": "meteorhit.ogg"}]}]})";
     RecordingAudio audio;
     SoundLibrary library(audio, SoundCatalog::parse(soundsJson, kMusicsJson, kSounds, kMusics), 3);
     PlaySounds sounds(library);
@@ -425,6 +431,34 @@ void testPlaySounds() {
         check(audio.sounds.empty(), "a prize that appears, is missed or runs out makes no sound of its own");
     }
     prize.reset();
+
+    // The weapons and the strikes: a shot makes its projectile's material's `period` sound once, an impact its `dead` sound, and a
+    // meteor its `period` sound as it comes in; a name with no file (bullet_dead, thunderbolt) is silent.
+    GameMaterial bullet, bolt, meteor;
+    bullet.periodSound = "bullet_shoot";
+    bullet.deadSound = "bullet_dead";
+    bolt.periodSound = "thunderbolt";
+    bolt.deadSound = "thunderbolt_dead";
+    meteor.periodSound = "meteor";
+    meteor.deadSound = "meteor_dead";
+    play(EventType::ShotFired, 10, &bullet);
+    check(heard() == "bulletshoot.ogg" && audio.sounds[0].params.pan == 0.5f, "a shot makes its projectile's shoot sound, once, panned by where it is");
+    play(EventType::ProjectileHit, 0, &bullet);
+    check(audio.sounds.empty(), "a bullet hits in silence: bullet_dead has no file");
+    play(EventType::BoltStruck, -20, &bolt);
+    check(heard() == "thunder.ogg" && audio.sounds[0].params.pan == -1.0f, "a bolt strikes with thunder");
+    play(EventType::MeteorFalling, 0, &meteor);
+    check(heard() == "meteorfall.ogg", "a meteor whistles as it comes in");
+    play(EventType::MeteorImpact, 0, &meteor);
+    check(heard() == "meteorhit.ogg", "and lands with its dead sound");
+    play(EventType::ShotFired, 0, &silent);
+    check(audio.sounds.empty(), "a projectile whose material names no sound is silent");
+    for (const EventType quiet : {EventType::ProjectileExploded, EventType::ProjectileGone, EventType::LaserBeam}) {
+        play(quiet, 0, &bullet);
+        check(audio.sounds.empty(), "a burst, a stray shot and a beam make no sound of their own");
+    }
+    play(EventType::ShotFired);
+    check(audio.sounds.empty(), "a shot that names no material is silent");
 
     // A name a material uses that sounds.xml does not have (wood_hit, wood_dead, cannon_hit, cannon_dead and mikrofon_hit in the
     // real data, docs/AUDIO.md) is silent, and warned about once however often it comes up.

@@ -142,14 +142,17 @@ struct Watch {
     }
 };
 
-SessionOptions optionsFor() {
+// `place`: the level's place in the catalog, so that each level has prizes of its own (the default seed would drop the same first dozen in every
+// level, see gameplay_smoke.cpp).
+SessionOptions optionsFor(std::size_t place) {
     SessionOptions options;
     options.hearts = 99;
+    options.prizeSeed = 0x9E3779B97F4A7C15ull + static_cast<std::uint64_t>(place);
     return options;
 }
 
-void autoplaySession(const Level& level, const MaterialLibrary& materials, double seconds, Outcome& out) {
-    GameSession session(level, materials, optionsFor());
+void autoplaySession(const Level& level, const MaterialLibrary& materials, double seconds, std::size_t place, Outcome& out) {
+    GameSession session(level, materials, optionsFor(place));
     out.counts = count(session);
     Watch watch{"autoplay", &out.problems};
     const PlayResult result = autoplay(session, seconds, [&](const GameSession& s) { watch.check(s); });
@@ -163,8 +166,8 @@ void sendBallAt(GameSession& session, ActorIndex actor) {
     session.addBall({at.x, 0, at.z - 3.5f}, {0, 0, 1});
 }
 
-void pokedSession(const Level& level, const MaterialLibrary& materials, Outcome& out) {
-    GameSession session(level, materials, optionsFor());
+void pokedSession(const Level& level, const MaterialLibrary& materials, std::size_t place, Outcome& out) {
+    GameSession session(level, materials, optionsFor(place));
     Watch watch{"poked", &out.problems};
     const PhysicsPlan& plan = session.scene().plan();
 
@@ -274,11 +277,12 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, double se
         const Level level = loadLevelJson(entry.path);
         Outcome out;
         try {
-            autoplaySession(level, materials, seconds, out);
+            const auto place = static_cast<std::size_t>(&entry - catalog.levels().data());
+            autoplaySession(level, materials, seconds, place, out);
             if (!out.counts.any()) {
                 continue;
             }
-            pokedSession(level, materials, out);
+            pokedSession(level, materials, place, out);
         } catch (const std::exception& e) {
             out.problems.push_back(std::format("exception: {}", e.what()));
         }

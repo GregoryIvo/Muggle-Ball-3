@@ -1,11 +1,17 @@
 #pragma once
 
 #include "mb/engine/Renderer.h"
+#include "mb/game/BatBarrels.h"
+#include "mb/game/ClothDraw.h"
 #include "mb/game/Gameplay.h"
 #include "mb/game/LevelScene.h"
 #include "mb/game/ModelCache.h"
 #include "mb/game/ObjectEffects.h"
+#include "mb/game/ParticleDef.h"
+#include "mb/game/ParticleDraw.h"
+#include "mb/game/ParticleSystem.h"
 #include "mb/game/PrizeScene.h"
+#include "mb/game/WeaponScene.h"
 
 #include <cstdint>
 #include <span>
@@ -35,19 +41,24 @@ float ballScale(const BallView& ball, const BatView& bat);
 Vec3 ballPosition(const BallView& ball, const BatView& bat, float lead);
 
 // A GameSession on screen: the level as the rules have it (what exploded or fell is gone, what was hit shows its
-// damage, a person or an animal that was destroyed shrinks away), the bat, the balls and the flashes where bricks
-// explode, as a list of draws; the prizes and their effects are PrizeScene's. It reads the session and the events it
-// reported; it draws nothing itself and knows no window.
+// damage, a person or an animal that was destroyed shrinks away), the bat and the balls, as a list of draws; the prizes
+// and their effects are PrizeScene's, the special objects' ObjectEffects, the weapons' barrels on the bat BatBarrels' and what
+// they fire WeaponScene's. Every effect the particle files describe (the
+// flashes where bricks explode, blasts, sparks, smoke, trails, leaves) is the one ParticleSystem's, which it owns, steps and
+// turns into batches. It reads the session and the events it reported; it draws nothing itself and knows no window.
 //
-//     PlayScene scene(cache, materials, textures, level, session, settings.bat);
+//     PlayScene scene(cache, materials, textures, particles, level, session, settings.bat);
 //     // every frame, after session.update():
 //     scene.update(session, session.takeEvents(), dt);
-//     renderer.renderToWindow(frame, scene.items(), {}, overlay);   // with scene.light() in the frame
+//     renderer.renderToWindow(frame, scene.items(), {}, overlay, scene.effects());   // with scene.light() in the frame
 class PlayScene {
 public:
-    // `bat` is Settings::bat: 0 red, 1 blue, 2 yellow.
-    PlayScene(ModelCache& cache, const MaterialLibrary& materials, const TextureIndex& textures, const Level& level,
-              const GameSession& session, int bat);
+    // `bat` is Settings::bat: 0 red, 1 blue, 2 yellow. `particles` is Data/Particles; it must outlive the scene.
+    PlayScene(ModelCache& cache, const MaterialLibrary& materials, const TextureIndex& textures, const ParticleLibrary& particles,
+              const Level& level, const GameSession& session, int bat);
+    // The parts that draw effects keep a reference to the scene's own particle system, so a copy would draw into the original's.
+    PlayScene(const PlayScene&) = delete;
+    PlayScene& operator=(const PlayScene&) = delete;
 
     // Brings the picture up to the session as it stands, `seconds` after the last call, with the events it reported since
     // then (not kept). The session steps by 1/60 s and does not interpolate; `lead` is how far past its last step the
@@ -56,6 +67,11 @@ public:
     void update(const GameSession& session, std::span<const GameEvent> events, double seconds, double lead = 0);
 
     std::span<const DrawItem> items() const { return items_; }
+    // The particles as of the last update(), to be drawn after the items (Renderer::renderToWindow's `effects`).
+    std::span<const EffectBatch> effects() const { return batches_.batches(); }
+    // The particle system of the scene, for whatever else wants an effect: spawn() a flash, attach() a trail, beam() a bolt
+    // (ParticleSystem.h); it is stepped and drawn with the rest.
+    ParticleSystem& particles() { return particles_; }
     // The level's light, dimmed while the Night prize is on.
     DirectionalLight light() const { return nightLight(level_.light(), night_); }
     const SceneReport& report() const { return level_.report(); }
@@ -76,29 +92,26 @@ private:
         BallLook look = BallLook::Plain;
         double age = 0;
     };
-    struct Explosion {
-        Vec3 at{};
-        double age = 0;
-        std::uint32_t seed = 0;
-    };
 
     void addBall(Vec3 at, const Mat4& turn, float scale, BallLook look);
-    void addExplosion(const Explosion& explosion);
-    void addBillboard(Vec3 at, float size, Color tint, TextureHandle texture, BlendMode blend);
 
     LevelScene level_;
+    ClothDraw sails_;  // the sails, which follow their particles
     LevelScene bat_;  // the bat's own frames, at the origin
     MeshHandle quad_ = 0;
-    TextureHandle flashTexture_ = 0, sparkTexture_ = 0;
-    Mat4 facing_;  // turns a quad to face the game's camera
+    TextureHandle sparkTexture_ = 0;
+    ParticleView view_;  // the game's camera, which the particles face
     PrizeScene prizes_;
     float night_ = 0;  // how dark it is, 0 to 1, as of the last update
     double time_ = 0;
     std::unordered_map<int, Roll> rolls_;  // by BallView::id
     std::vector<Vanishing> vanishing_;
     std::vector<ActorIndex> shrinking_;  // paid for and shrinking, until the session has removed them
-    std::vector<Explosion> explosions_;
+    ParticleSystem particles_;
+    ParticleBatches batches_;
     ObjectEffects effects_;  // the special objects' (dynamite, cannons, rockets, teleports ...)
+    BatBarrels barrels_;     // the weapons' barrels on the bat
+    WeaponScene weapons_;    // what the weapons and the strikes fire, and the effects they make
     std::vector<DrawItem> items_;
 };
 

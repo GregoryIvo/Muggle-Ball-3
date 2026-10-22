@@ -158,7 +158,7 @@ Total about 2.6 s from loss to ready.
 **Behaviour:**
 1. **Hits.** A hit costs 1 energy. Energy-1 bricks die on the first hit [M]. The shark (E1, S91) was hit at V1 54.13 and its score arrived at 54.4 (V1 54.4).
 2. **Delay.** After the last hit the object explodes after **`exploseDelay` ms**, then it is removed and the score is added at that moment. The shark: exploseDelay 250, score +91 at 54.3-54.4 and flash at 54.40. The island: exploseDelay 50, score +66 at 55.2-55.3 (V1 55.2, 55.3).
-3. **Effect.** The effect is a short orange flash with particles and the material's "dead" sound (shark, V1 54.4-54.5). `exploseType` selects it: 3, 5, 6, 8 (dynamite), 9 (fire rocket). Exact looks per type were not catalogued [?]. `explosePower` is 6.789 for live/people/prize objects and 1.0 for the rest; it is probably a blast impulse [I].
+3. **Effect.** The effect is a short orange flash with particles and the material's "dead" sound (shark, V1 54.4-54.5). `exploseType` selects it: 3, 5, 6, 8 (dynamite), 9 (fire rocket). Exact looks per type were not catalogued [?]; the game's choice for each, from the particle files, is in 19.5. `explosePower` is 6.789 for live/people/prize objects and 1.0 for the rest; it is probably a blast impulse [I].
 4. **Damage textures [D + M].** Materials with `brickType` 4 list one texture per energy level, worst first: `Box.jpg` (E4: Box-1D, -1C, -1B, -1A), `Skala.jpg` rock (E4: Skala--3 to --0), `Ground-2*`/`trava*` (E3: Ground-2-2, -1, -0). The last file is the intact look (see `data-damage-stage-textures-Box_Skala_Ground.png`). In footage black crack decals appear on ground and rock blocks as they are hit: V2 478-542 (a green tile with a black crack) and V2 566-598 (rock and ground blocks darkening). Which collisions count as hits for E > 1 was not isolated [?].
 5. **Hit counting.** Bricks have `brickEnergy` hits; E3 bricks like the pirates and prizes were not shown being hit repeatedly [?].
 6. **Score.** The score added is exactly the material's `brickScore` [M]: shark +91, island +66, then +132 at 55.4-55.5 and +360 at 55.7-55.8 (compound objects). **No combo or multiplier was seen** in about 10 events.
@@ -364,9 +364,10 @@ numbers are the constants of `GameplayRules` (the rules) and of `PlayScene` and 
 
 **Bricks and the ball.**
 - A brick that is hit shows the texture of its damage state (`damageTextureIndex`): a crate (Box.jpg) goes from whole to cracked, smashed and
-  black as its energy falls from 4 to 1 [D]; one that explodes is gone at that moment, with an orange flash (`Oreols/02.png`, 0.4 s, swelling and
-  fading) and twelve sparks thrown up and out [I: the footage's flash is orange and short, V1 54.40; which particle file an `exploseType` would
-  pick is not known, so every brick has this one].
+  black as its energy falls from 4 to 1 [D]; one that explodes is gone at that moment, with the flash of its material's `exploseType` (section 19.5: the small `exploseball` flash
+  for type 3, the larger `explosesmall` for 6, none for a person, a tree, dynamite, the island or what a bolt of lightning destroyed) and no sparks
+  [I: the footage's flash is orange and short, V1 54.40; which particle file an `exploseType` would pick is not known, so the table of 19.5 is a
+  choice; the first version gave every brick one orange flash of `Oreols/02.png` and twelve sparks].
 - A person or an animal (a material of `exploseType` 5, `shrinksAway`) pays its score as it is destroyed and then shrinks away, in a straight line
   to nothing about the centre of its body, over `GameplayRules::shrinkTime` = 0.35 s, and nothing hurts it meanwhile; it is a target until it is
   gone, so the level ends after the shrink. It has no flash: the pirate's frames (V1 143.70-144.15) show none, and show it at about half its size
@@ -384,8 +385,10 @@ tell whether it had a help of its own (the lightning bolts, "Still open", 2):
 - A target the ball cannot get at is not one (`BallReach`): the plane the ball moves on is flood-filled from the bat's end of the board around the
   walls, platforms and pinned buildings, a ball's radius from each; a target at the ball's height with no such ground near it (beyond a wall or the
   board's edge, in a slot narrower than the ball) is out, and so is one above the ball that is pinned, on a path, has no gravity or has no such
-  ground under it (on a platform or a wall top). The look is made at the start and twice a second for the loose ones. In the real levels it finds 151
-  targets (of 12,444) in 43 of the 83 (15 in knight-castle, 12 in knight-river, 9 in knight-garden and in knight-nazad-k-mame, the others by ones and twos).
+  ground under it (on a platform or a wall top). The look is made at the start and twice a second for the loose ones. In the real levels it finds 11
+  targets (of 12,444) in 8 of the 83 in the first second, and 193 in 44 by the end of a 900 s run of the autopilot with everything on (what falls or is thrown out
+  of reach as a level breaks up: `knight-fruktovie-derevia` 41, `knight-miss-1457` 18, `knight-na-kacheli` 13, `Village-Dvorik` 11, the others 8 or fewer); before the special
+  objects and the prizes it was 151 in 43 (15 in knight-castle, 12 in knight-river, 9 in knight-garden and in knight-nazad-k-mame, the others by ones and twos).
 - When balls have been in flight for 90 s without touching a brick and at most 12 targets (or a quarter of those the level began with) are left,
   they are let go. This is for what the look cannot see: a mast held in the air by joints with nothing left to hold them, a cactus that settled
   10 cm above the ball's reach, a bird that hangs where the physics left it [?]. It is generous (a player could stall a level out), but only with
@@ -415,12 +418,25 @@ like) the same run finishes **62 of 83**, 39 by destroying every target and 23 b
 leaves more levels with a few targets that nothing reaches, which the stall rule lets go). `village-apple`, whose two fences open only through a
 crate of `Box.jpg` and the firework crate that falls into the gap (17.1), is slow for it, not shut: its gaps are open at 40 to 51 s and 265 to 306 s and
 100 of 118 targets are left at 900 s; the rest vary with the paths the ball takes (a ball that slips into the lane behind one of its fences is
-lost there after three frees, above). With the prizes as well (section 15; a blow follows the session's ball speed and the blast skips every brick the ball touched, as 15.3
-has them, and a pinned ball is given up on, above) the run finishes **71 of 83**, 57 by destroying every target and 14 by the stall rule; the Next Level star ended 28 of
+lost there after three frees, above). With the prizes as well (section 15, in their first version, one prize seed for all the levels, 15.5; a blow follows the session's ball speed and the blast
+skips every brick the ball touched, as 15.3 has them, and a pinned ball is given up on, above) the run finished **71 of 83**, 57 by destroying every target and 14 by the stall rule; the Next Level star ended 28 of
 them (2,025 prizes dropped, 713 caught). The 12 left open had 6 to 113 targets left: `village-apple` 28, `Village-Basketball` 59, `Village-Cafe` 113,
 `village-domino` 93, `village-school` 42, `Piratos-Logovo` 45, `knight-eggs` 17, `knight-fruktovie-derevia` 77, `knight-miss-1457` 8,
 `knight-na-kacheli` 83, `knight-na-nas-napali` 39 and `knight-river` 6. 13 balls were freed from a pin in 4 levels, and 3 of those were given up on (one in `knight-na-kacheli`, two in
 `cowboys-trenirovka`): freed three times in the same pocket of metal, and lost.
+With the weapons as well (section 18: the autopilot clicks every frame while it holds a weapon and something it can hurt is the first thing in the line of a barrel, which the
+shot interval holds to four or five shots a second), the sails of section 20 and a prize seed of its own for each level (15.5) the run finishes **71 of 83** (seed 1,
+the default; seed 11 gives 74, 66 by destroying every target and 8 by the stall rule): 62 by destroying every target and 9 by the stall rule, which let go of 12 targets in all
+(a single one in 6 of the 9, two in the other 3). Only 3 of the 9 needed it to finish within the time (`cowboys-banditos`, `cowboys-prival` and `village-ritual`; the 6 others finish
+without it, later), and the look at what the ball can reach lets 2 more levels finish: 68 with the look alone (`--no-stall`) and 66 without either safety net (`--strict`). The look
+puts 193 targets out of play in 44 levels by the end of the run (11 in 8 levels in the first second: the rest are pieces that a quake, a wind or a blast puts beyond a wall or out of
+reach; it was 151 in 43 before the prizes). The Next Level star ended 23 of the 71 (1,716 prizes dropped, 602 caught and 1,093 missed; with seed 11 it ended 42 of 74: a bat that is
+under the ball catches the star by chance). The 12 left open had 4 to 65 targets left: `knight-fruktovie-derevia` 29, `knight-labirint` 11, `knight-na-kacheli` 64,
+`knight-nazad-k-mame` 24, `Piratos-Logovo` 32, `village-apple` 44, `Village-Basketball` 65, `Village-Cafe` 45, `village-domino` 47, `village-labirint` 4, `village-park` 13
+and `village-school` 20; 7 were still destroying bricks in the last 30 s, the other 5 had stood still for 35 to 84 s: slow, not stuck, as before. The autopilot caught 92
+weapon prizes and 42 strike prizes and fired 303 Machine Gun, 168 Cannon, 111 Bazooka and 105 Laser shots at what stood ahead of it, and 140 bolts and 52 meteors struck. One ball was freed from a pin
+in 1 level and none was given up on (seed 11: 15 in 9 levels, 3 given up on). All 28 kinds of prize dropped. A fixed step took 0.052 ms on average, 0.363 ms in the
+slowest level (`piratos-dom-na-vode`), with the sails and the projectiles in the world.
 
 ## 13. Moving sharks and birds (step 5)
 
@@ -509,7 +525,7 @@ Added after the second study. Same tags: **[M]** measured from video, **[D]** re
 
 **Metall** (452 in levels). **[M]** Dynamite kills a fence in 0.1 s (above). The second study saw five lightning bolts hit the Metall wall of level 31 with no score (`rules-V1-t3790.9-3793.1-L31-five-lightning-strikes-...`). So metal is hurt by blasts, not by bolts. How the ball bounces off it and whether the ball alone can destroy it: [?].
 
-**Cloth** (sails and flags). **[D]** `wind` (0,0,+-10) and 3-8 particles per side; **[M, second study]** a sail scored +60, a small sail +20. Tearing: not seen [?].
+**Cloth** (sails and flags). **[D]** `wind` (0,0,+-10) and 3-8 particles per side; **[M, second study]** a sail scored +60, a small sail +20. Tearing: not seen [?]. As built (section 20): the +60 is the sail's own material (`Clothmat`, 60); the +20 is `fparus.jpg`, a brick of the mast, and no sail scores 20; a sail does not tear.
 
 **Trees** (128 in levels). **[D]** Trunk energy 5, 130 points, `LeafFall` particles; fruit held by breakable joints (force 10-20 on the apple tree). Not isolated in footage [?].
 
@@ -552,7 +568,7 @@ Added after the second study. Same tags: **[M]** measured from video, **[D]** re
 
 **Night** (10 s). **[M]** The board's mean luminance falls from 52-58 to 21 (x0.38) and the sky from 72 to 35 (x0.49) within one second (124.0-125.0), holds for 9 s, and is back to about 80 % at 134.0 (F29, F30). Everything stays visible, dimmer: bricks, the white ball, prize halos, the HUD.
 
-**Thunderbolt.** **[M, weak]** A catch gives a **burst of 2-3 bolts within 0.7 s** at different places (V2 407.97-408.70; white-blue jagged lines from the top edge, each visible about 0.1 s, F40), and more strikes later (415.9, 419.8). V1 level 2 gave bolts at 200 and 206.5 after one caption (second study). Targets are bricks of the pile; how many strikes, over how long, and what chooses the target: [?]. The first study's doubts about who throws the bolts stand.
+**Thunderbolt.** **[M, weak]** A catch gives a **burst of 2-3 bolts within 0.7 s** at different places (V2 407.97-408.70; white-blue jagged lines from the top edge, each on show about 0.3 s and overlapping the next, F40: the first of the frame sheet is there from before 408.00 to 408.24 and gone at 408.27, so 0.27 s at least, the second shows from 408.27 to 408.63; the first reading here said 0.1 s), and more strikes later (415.9, 419.8). V1 level 2 gave bolts at 200 and 206.5 after one caption (second study). Targets are bricks of the pile; how many strikes, over how long, and what chooses the target: [?]. The first study's doubts about who throws the bolts stand.
 
 **Meteorite Rain.** **[M]** About five meteors over five seconds after the catch (V2 859.5-865): a red-orange streak falling diagonally, then a white expanding ring on the water about 0.4 s long (rings at 860.5, 861.3, 863.1, 864.3) (F44). `meteor` velocity (-10,-30,10) [D].
 
@@ -584,7 +600,7 @@ F1 `V1-t1013.20-1014.23-L10-firework-crate-ball-passes-rocket-leaves-0.7s-later`
 
 F26 and F49 are plots drawn from the tracked positions (not screenshots).
 
-### 14.7 Still open (answered for the game in 17.8)
+### 14.7 Still open (answered for the game in 17.8; the weapons' and strikes' items in 18.9)
 
 - Spring: does it kick the ball or just bounce it, and does one hit destroy it (energy 1, 10 points)? Only a graze at 2.6 u (V1 2634.0, level 24) was seen. A clean hit in one of the 21 levels (22, 25, 28, 33, 38, 46 and the cowboys levels have springs near walls or the near half) would settle it.
 - Interactive cannon: how many hits destroy it (energy 2), what damage the cannonball does and how far it flies (a lob with y velocity 3 under gravity would land at about 23 u), whether a very slow ball or a bat shot fires it, and whether a cannon ever fires on a timer (none in 28 s).
@@ -592,7 +608,7 @@ F26 and F49 are plots drawn from the tracked positions (not screenshots).
 - Dynamite: the blast reach is only bracketed (trigger between 4.0 and 6.9 u centre to centre), small dynamite (radius 3) was not seen, and the +1333 beyond the five 120-point charges in the level 67 chain is not decomposed.
 - Firework: is the launch triggered by the ball touching the crate (one touch at 1013.33 gave a launch 0.7 s later), a periodic timer, or a hit after a delay? How many rockets per crate, and does a harder hit destroy it for its 120 points?
 - Volcano and generators: no eruption in 70 s and no prize from generators in 10-38 s of footage; if they do act, what triggers them? Unknown whether the ball can destroy them.
-- Metall: how the ball bounces off it and whether the ball alone ever destroys it; cloth sails: do they tear; trees: do the fruit fall when the trunk or a fruit is hit.
+- Metall: how the ball bounces off it and whether the ball alone ever destroys it; cloth sails: do they tear (answered in 20: no); trees: do the fruit fall when the trunk or a fruit is hit.
 - Power Ball: does it pass through bricks? Explosive Ball: the blast radius, the number of blasts per catch, and what it damages. Yo-Yo: confirm the caption and the duration (7.5 s in one case) and the 7 u string limit. Magnet: is the release a click or a timer (2.7+ s stuck in one case)?
 - Multiball: the exact angles of the two new balls (one case measured: -20 and +98 degrees about the original) and whether the extra balls spawn at the ball nearest the bat or at the bat.
 - Surprise: which prize it gives, since no icon or effect was visible in 9 s. Wind: any effect on loose pieces. Thunderbolt: strikes per catch, the span in time (bolts up to 12 s after a catch) and what picks the target. Meteor Rain: count (about 5), targets and damage. Earthquake: force and which bodies move.
@@ -610,10 +626,10 @@ What the game does with the prizes of sections 7 and 14 where they leave room; `
 | rule | in the game |
 |---|---|
 | when | each destroyed object (`BrickDestroyed`, any damageable object: bricks, trees, metal, dynamite...) is rolled once, with a random generator seeded per session (`SessionOptions::prizeSeed`, SplitMix64, the same numbers on every machine); a piece that fell off the board is no kill and leaves nothing; nothing drops once the level is complete; a hit that carries `disablePrize` (`GameSession::hit(actor, at, false)`, for the Thunderbolt and the meteors [D]) leaves nothing |
-| how often | by what the object was worth (`PrizeRules::tiers`): 15.8 % below 80 points, 10 % to 119, 6.5 % to 199, 5 % to 299, 7 % from 300. The second study's fit by value is 13.5, 8.5, 5.5, 4.2 and 5.9 % of the kills that had a caught prize; the numbers here are those raised by 1.18, so that the mean over the 13,209 destroyable objects of the 83 levels (11,260, 889, 789, 210 and 61 in the five tiers: the 22 teleports no longer count, 17.1) is **14.64 %**, the 14.7 % of all kill events [M, I]. `mb_prize_smoke` prints the mean from the data |
+| how often | by what the object was worth (`PrizeRules::tiers`): 15.8 % below 80 points, 10 % to 119, 6.5 % to 199, 5 % to 299, 7 % from 300. The second study's fit by value is 13.5, 8.5, 5.5, 4.2 and 5.9 % of the kills that had a caught prize; the numbers here are those raised by 1.18, so that the mean over the 13,231 destroyable objects of the 83 levels (11,282, 889, 789, 210 and 61 in the five tiers: the 22 teleports no longer count, 17.1, and the 22 sails do, once each by their lead actor, not their 431 segments, 20.3) is **14.64 %**, the 14.7 % of all kill events [M, I]. `mb_prize_smoke` prints the mean from the data |
 | bad prizes | the seven with a red halo (Skull, Decrease Bat Size, Increase Ball Speed, Weak Ball, Normal Ball, Drunken Ball, Night) drop from campaign level `PrizeRules::badFromLevel` = 10 on, none before [M]; `SessionOptions::campaignLevel` carries the level's place (the HUD's number) |
 | which | drawn by weight from the table below, over the prizes allowed. There is no weight in the data [D]; the weights are the second study's counts of caught prizes by score jump (levels 2 to 83, 1,320 of its 1,355), a value shared by two prizes split by what the footage shows of each [I]. They give the bad ones 11.5 % of the drops (9 % of the catches of levels 10 to 83 in the footage had a red-only value, a few more with the three that share one) |
-| the Next Level star | **rolled apart from the others**, once for each destroyed object, and left out of the weights: it ended 70 of 83 levels, always with most of the board gone, and was 5 % of the catches [M], so it cannot be a drop of constant chance (that would end levels early, and a fifth of them never). The chance is 0 until fewer than a tenth of the level's targets (at least 6) are left, then rises in a straight line to 0.5 for the last one (`starChance`). A star in the air blocks another, and a level that never ends (`TargetRule::Never`) has none. It falls in nine levels of ten (97 % of the levels of 100 bricks destroyed one by one, never before the last ten; in the 83 levels the autopilot plays for 15 minutes, 66, and the 12 it does not finish are most of the rest: 15.5), and a player who catches nine stars in ten would end four levels in five, the footage's 70 of 83 [I] |
+| the Next Level star | **rolled apart from the others**, once for each destroyed object, and left out of the weights: it ended 70 of 83 levels, always with most of the board gone, and was 5 % of the catches [M], so it cannot be a drop of constant chance (that would end levels early, and a fifth of them never). The chance is 0 until fewer than a tenth of the level's targets (at least 6) are left, then rises in a straight line to 0.5 for the last one (`starChance`). A star in the air blocks another, and a level that never ends (`TargetRule::Never`) has none. It falls in nine levels of ten (97 % of the levels of 100 bricks destroyed one by one, never before the last ten; in the 83 levels the autopilot plays for 15 minutes, 65 (68 with another seed), and the 12 it does not finish (9 with that seed) are most of the rest: 15.5), and a player who catches nine stars in ten would end four levels in five, the footage's 70 of 83 [I] |
 
 The weights (`PrizeInfo::weight`), their halo and what the footage had: Bonus 146 and Life 7 (777 together: 153 jumps; the hearts rose from 2 to 6 in three hours, two lost), Increase Bat Size 135, Decrease Bat Size 26 and Big Ball 40 (180 together: 66), Increase Ball Speed 83 and Night 5 (the 88 jumps of 280, 5 darkened the scene), Decrease Ball Speed 22 and Normal Ball 17 (the 39 jumps of 120 that are not stars), Wind 87, Explosive Ball 81, Thunderbolt 81, Power Ball 77, Multiball 40 and Earthquake 25 (190 together: 65), Machine Gun 64, Magnet 58, Cannon 54, Surprise 51, Bazooka 45, Wall 39, Laser 39, Yo-Yo 11, Drunken Ball 8, Weak Ball 6, Skull 2 and Meteorite Rain 30 (worth 4 points, which no score jump shows: a guess). The values of 110, 120 and 150 are also the price of bricks, so Increase Bat Size, Explosive Ball and Normal Ball may be too high [?].
 
@@ -646,29 +662,29 @@ A **timed** effect starts over from its full time when the prize is caught again
 | Drunken Ball | 30 s. Each ball's heading is turned by 20 degrees/s x sin(2 pi t / 1.6 s + a phase of its own) every step, so it wobbles about 10 degrees from side to side with the speed unchanged [M, I] |
 | Multiball | on the ball nearest the bat (not a held or stuck one; with none, nothing happens), two balls beside it, 1.3 u away on headings turned by -20 and +98 degrees from its own [M, one case]; at most 12 balls. A life is still lost only with the last |
 | Magnet | 30 s. A ball that touches the bat sticks where it touched (`BallStuck`, `BallView::stuck`, still, on the bat at the same offset) and goes with it; a click (`GameInput::launch` with no ball held), 4 s without one, or the end of the magnet lets it go along the line from the bat's centre through the ball, and it does not stick again until it has left the bat [M, the release I]. The autopilot clicks |
-| Yo-Yo | 7.5 s. A ball farther than 7 u from the bat's centre and going further is turned back (mirrored about the string's direction) [M, I]. No icon (the footage shows none) |
+| Yo-Yo | 7.5 s. A ball farther than 7 u from the bat's centre and going further is turned back (mirrored about the string's direction) [M, I]. The 7 is measured at the plain bat: the string is tied to the bat's rim, so it is as much longer as the bat is bigger than the plain one (a bat of 1.9 times, radius 5.7, has 9.7) and shorter for a smaller bat [I]; with a fixed 7 the biggest bat left a ball that touches it 0.7 to turn in, and the ball bounced between the bat and the string every tenth of a second (found by a smoke run, with the Multiball). No icon (the footage shows none) |
 | Wall | 30 s. A ball on its way to the near edge turns back at z = -19.04 (the far face of the 0.74 deep rope box at z -20.01 [D], plus the ball's radius), as off a wall (`BoardHit`), anywhere across the board's width |
 | Night | 10 s. `nightLevel()` runs 0 to 1 over the first second, holds, and goes back to 0 over the last 1.5 s (the board's brightness falls to 0.38 of itself within a second and is back at about 80 % at the end [M]) |
-| Earthquake | 3 s. Every 0.1 s each dynamic body, asleep or not, gets a kick of up to 0.5 u/s sideways (x and z) and 1 u/s up [I]; nothing for the camera |
-| Wind | 5 s. Every dynamic body that is awake is accelerated 2.5 u/s^2 along x, to the left or the right (drawn when it is caught); resting pieces and the balls are left alone [I: the footage shows nothing] |
+| Earthquake | 3 s. Every 0.1 s each dynamic body, asleep or not, gets a kick of up to 0.5 u/s sideways (x and z) and 1 u/s up [I]; each sail gets one of its own, as a whole (`PhysicsWorld::pushCloth`: it wakes a sail that lies asleep; the pins hold its corners) [I]; nothing for the camera |
+| Wind | 5 s. Every dynamic body that is awake is accelerated 2.5 u/s^2 along x, to the left or the right (drawn when it is caught); resting pieces and the balls are left alone [I: the footage shows nothing]. Every sail takes the same push, awake or asleep (`pushCloth`: a settled sail hangs by its pins and would never feel it); a sail hung from yards across x can only follow them, which the pins hold in its plane, so what it moves are the ships (loose bodies) and the sails that face x or hang free [I] |
 | Surprise | an instant gift: a random **good** prize that is no Surprise and no Next Level, by the same weights, announced as a second `PrizeCaught` worth 0 [?] |
-| Machine Gun, Cannon, Bazooka, Laser | 12, 6, 7 and 5 shots (`weapon()`, `shotsLeft()`, `useShot()`). The weapons are for wave 3: a weapon is granted and counted, nothing fires. The weapon caught last is the one a click fires; the others keep their shots, as the footage's HUD shows two at once (V2 108-117); the effect ends with its last shot |
-| Thunderbolt, Meteorite Rain | `StrikeGranted` with the prize; the strikes are for wave 3 |
+| Machine Gun, Cannon, Bazooka, Laser | 12, 6, 7 and 5 shots (`weapon()`, `shotsLeft()`, `useShot()`). The weapon caught last is the one a click fires (section 18); the others keep their shots, as the footage's HUD shows two at once (V2 108-117); the effect ends with its last shot |
+| Thunderbolt, Meteorite Rain | `StrikeGranted` with the prize, and the strikes begin (18.5, 18.6) |
 
-When the **bat is lost** (the last ball, or the Skull) every effect of the bat and the ball ends (`EffectEnded`) and the next bat is plain; the night, the quake and the wind run on, and so does the speed. Timed effects end with the level, which is a new session.
+When the **bat is lost** (the last ball, or the Skull) every effect of the bat and the ball ends (`EffectEnded`) and the next bat is plain; the night, the quake and the wind run on, and so does the speed. So do the strikes of a Thunderbolt and a Meteorite Rain that are still to come: they are no effects (no `EffectEnded`, no icon) but the board's, and run until the level ends (18.2), in the seconds the bat is gone and in the next life [I]. Timed effects end with the level, which is a new session.
 
 ### 15.4 What the presentation reads
 
 - `fallingPrizes()` (`FallingPrize`: kind, position of the orb, age, source), `activeEffects()` (`ActiveEffect`: kind, `timeLeft`, `duration`, `shots`; those with `prizeInfo(kind).icon` go on the HUD, oldest first, as the number `ceil(timeLeft)` or `shots`), `weapon()`, `ballRadius()`, `ballSpeed()`, `batRadius()`, `batScale()`, `nightLevel()`, `BallView::stuck` and `radius`.
-- Events: `PrizeDropped`, `PrizeCaught` (prize, points, material), `PrizeMissed`, `EffectStarted`, `EffectEnded`, `StrikeGranted`, `BallStuck`, `Blast`; `SessionStats::prizesDropped/Caught/Missed`.
+- Events: `PrizeDropped`, `PrizeCaught` (prize, points, material), `PrizeMissed`, `EffectStarted`, `EffectEnded`, `StrikeGranted`, `BallStuck`, `Blast` (the weapons' and strikes' own are 18.8); `SessionStats::prizesDropped/Caught/Missed`.
 - `GameSession::dropPrize(kind, from)` starts a prize falling and `givePrize(kind)` applies one, for tests and tools.
 
 ### 15.5 The autopilot with the prizes
 
-`mb_gameplay_smoke --seconds 900`, each level played as the n-th of the campaign, the prizes on, the autopilot as before (the bat under the ball, no aim, 99 hearts; it clicks to let go of the Magnet and catches prizes only when they fall on the bat by chance):
+`mb_gameplay_smoke --seconds 900`, each level played as the n-th of the campaign, the prizes on, the autopilot as before (the bat under the ball, no aim, 99 hearts; it clicks to let go of the Magnet and catches prizes only when they fall on the bat by chance). Each level has a prize seed of its own (`--seed N`, default 1, times a large odd number plus the level's place in the campaign; the summary prints it and how many of the 28 kinds dropped): with one seed for all 83 levels every level replayed the same first dozen drops, and nine of the 28 prizes (Laser, Multiball, Skull, Life, Drunken, Yo-Yo, Night, Weak Ball, Decrease Bat) never dropped in 300 s of play, so the weapons, the strikes and the stall rule were all seen with one sequence; a run of 300 s or more over all the levels fails now when more than 6 kinds never drop. The smoke's level filter matches any part of a name, in any case. The first numbers below were played with the one seed of the first version, with the prizes only (no weapons, special objects or sails):
 
-**71 of 83** levels finished (60 without the prizes): 54 by destroying every target and 17 only because the stall rule let go of the last few (it was 46 and 14), 12 not finished (6 knights', 5 village's and 1 pirates' boards, 1 to 116 targets left; 11 were still destroying bricks in the last 40 s, the 12th, knight-nazad-k-mame, with one target left, stood still for 37 s: slow, not stuck, as before). 2,063 prizes dropped (25 a level, as 14.7 % of about 170 destroyed objects), 709 caught (a third: the bat is under the ball, not under the prize) and 1,339 missed. The Next Level star fell in 66 of the 83 levels, was caught in 25 and ended 25 of the 71 finished (a player who goes for it ends most, section 14.4); the other 46 ended as before. The look at what the ball can reach puts 194 targets out of play (it was 151): a quake or a wind that throws a piece out of reach takes it out of the count, which is the rule working as meant. Three balls were freed from a pin in as many levels. Nothing broke: the ball keeps its speed (the session's, which the speed prizes move) and its plane after every frame, in every level.
-These numbers are without the special objects of section 17; with them the run finishes 71 of 83 (section 12).
+**71 of 83** levels finished (60 without the prizes): 54 by destroying every target and 17 only because the stall rule let go of the last few (it was 46 and 14), 12 not finished (6 knights', 5 village's and 1 pirates' boards, 1 to 116 targets left; 11 were still destroying bricks in the last 40 s, the 12th, knight-nazad-k-mame, with one target left, stood still for 37 s: slow, not stuck, as before). 2,063 prizes dropped (25 a level, as 14.7 % of about 170 destroyed objects), 709 caught (a third: the bat is under the ball, not under the prize) and 1,339 missed. The Next Level star fell in 66 of the 83 levels, was caught in 25 and ended 25 of the 71 finished (a player who goes for it ends most, section 15.1); the other 46 ended as before. The look at what the ball can reach puts 194 targets out of play (it was 151): a quake or a wind that throws a piece out of reach takes it out of the count, which is the rule working as meant. Three balls were freed from a pin in as many levels. Nothing broke: the ball keeps its speed (the session's, which the speed prizes move) and its plane after every frame, in every level.
+These numbers are without the special objects of section 17, the weapons and strikes of section 18 and the sails of section 20, and with one seed for every level. With all of step 5 in and a seed of its own for each level (the final code, seed 1, 900 s, all 83 levels) the run finishes **71 of 83**: 62 by destroying every target and 9 by the stall rule (seed 11: 74, 66 and 8). 1,716 prizes dropped (21 a level; all 28 kinds dropped), 602 were caught and 1,093 missed. The Next Level star fell in 65 levels, was caught in 23 and ended 23 of the 71 (seed 11: 68, 42 and 42 of 74: the bat that is under the ball catches a star by chance, so this swings with the seed). The autopilot caught 92 weapon prizes and 42 strike prizes and fired 303 Machine Gun, 168 Cannon, 111 Bazooka and 105 Laser shots; 140 bolts and 52 meteors struck. One ball was freed from a pin and none was given up on (seed 11: 15 and 3, in 9 levels). The 12 levels left open (9 with seed 11), the targets they have left and the stall rule are in section 12; nothing broke in any level: the ball keeps its speed and its plane after every frame, no pose is not finite, and no ball sits frozen.
 
 ## 16. Prizes on screen and in sound (step 5, stage 2)
 
@@ -703,7 +719,7 @@ The icons (`Hud.cpp`, `PrizeHud.h`): one for each effect in force that has one (
 | Multiball, Drunken Ball | the extra balls and the wobbling path are the session's |
 | Night | the scene's light is dimmed to 0.38 of itself at full night (`nightLevel()`), and the sky, the halos and the flashes, which have no light, to 0.49 [M, section 14.3]; the HUD, drawn over it, is not dimmed |
 | Earthquake, Wind | the session throws the loose pieces about, and that is all there is to see; the camera does not shake [M] |
-| the weapons | **not drawn yet**: the barrels (`Pulemet-*`, `Pushka`, `Bazuka-*`, `lazer-*`) are frames of `bat.x` that the game moves: in its `Common` animation each grows from a tenth of its size to full size in 0.6 s, recoils and shrinks again, and the glTF files keep that animation in `extras.animations` (`ASSET_FORMATS.md`). The picture of a weapon comes with the firing, which needs it |
+| the weapons | the barrels (`Pulemet-*`, `Pushka`, `Bazuka-*`, `lazer-*`, frames of `bat.x`) grow on the bat in the model's own `Common` animation, recoil at each shot and shrink away when the weapon ends; what flies, the laser's beam, the Thunderbolt's lightning and the meteors are drawn: sections 18.11 and 18.12 |
 
 ### 16.4 Sounds
 
@@ -721,7 +737,7 @@ The icons (`Hud.cpp`, `PrizeHud.h`): one for each effect in force that has one (
 
 ### 16.6 Still open
 
-- The weapons' barrels (above).
+- The bat's own motion: the same `Common` take of `bat.x` has keys for the body (`Korpus` bobs 0.2 units up and down), the wings, the gears and the hand, which the game does not play: whether the original moves the bat so is [?] (the footage's bat is too small to say).
 - The halo's real size, the orbs' spin and the models' height above the floor are not measured.
 - The icons' own place in the original's HUD (the numbers sit right of the icon at the right edge in the footage; the icon's exact x is a guess).
 - Whether the Explosive Ball is the bomb in the original's footage (it looks like the plain ball in the one case seen).
@@ -731,16 +747,23 @@ What the game does with section 14. The rules are `SpecialObjects` (`game/Specia
 
 ### 17.1 What hurts what
 
-The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, one energy a blow, as before (section 5). The other special objects (cannons, springs, volcanoes, generators and metal) react to it and are hurt by other things: a blast (17.2), a cannonball (17.3) and whatever a weapon does through `GameSession::hit()` (the prizes, one energy a hit).
+The ball hurts bricks, trees, dynamite, firework crates, vibros, flickers and sails, one energy a blow, as before (section 5). The other special objects (cannons, springs, volcanoes, generators and metal) react to it and are hurt by other things: a blast (17.2), a cannonball (17.3) and what a weapon does (the prizes: `SpecialObjects::weaponHit` and `burst`, one to three energy a hit by the projectile, 18.4).
 
 | object (in the 83 levels) | the ball | a blast, a cannonball | a weapon |
 |---|---|---|---|
 | dynamite (116) | sets it off: 0.1 s later (its `exploseDelay`) it goes, 120 points | the same, one fixed step later | the same |
-| cannon (21) | fires it, any touch; no damage | 2 energy: destroyed, 100 points | 1 energy |
+| cannon (21) | fires it, any touch; no damage | 2 energy: destroyed, 100 points | a bullet 1, a rocket 2, a kernel 3 (18.4); it does not fire it [I, below] |
 | firework crate (63) | launches a rocket, any touch; a blow destroys it too, 120 points (17.5) | destroyed, 120 points | destroyed |
 | spring (21) | kicks it away; no damage | destroyed, 10 points | destroyed |
 | volcano (13), generators (43), metal (452) | bounces off; they make their `hit` sound | destroyed, 10, 77 or 66 and 50 points | destroyed |
 | teleports (22) | passes into a source (17.4), bounces off the rest | nothing | nothing |
+| sails (22) | one energy a blow at a particle: destroyed, 60 to 32 points (20.3) | destroyed | destroyed |
+
+**Why a weapon does not fire a cannon [I].** 14.1 and 17.3 have a cannon fire when the ball, loose debris or a cannonball hits it, the three cases of the footage (F15 to F18);
+no weapon was seen to hit one [?]. A projectile of the bat is none of the three: it is spent in its hit (18.2) and is no loose actor for the debris rule of 17.3, so the weapon's own
+rule (18.4) decides. A rocket (2 energy) or a kernel (3) destroys a cannon of two in the hit, so that nothing is left to fire; a bullet takes one of the two and the next takes the
+cannon. Firing it for the first bullet would make the Machine Gun, 24 bullets from 12 shots, a launcher of cannonballs from every cannon it aims at, which nothing in the footage or
+the data asks for. `mb_weapon_tests` pins it (a weapon does not set a cannon off).
 
 **Why the ball does not hurt cannons, springs, volcanoes, generators and metal [M for the standing, I for the rule].**
 - The whole wall of 83 Metall pieces of level 31 (`village-labirint`, the labyrinth of metal walls that the ball is in for the whole level) and an `int_cannon` in level 10 stood at the natural ends (second study, "Settled", 3), and the gift boxes of the generators stood through whole levels (2, 21, 22, 76).
@@ -762,7 +785,7 @@ The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, on
 - **Goes off [M, D].** A ball hit takes the charge's one energy, and 0.1 s later (the material's `exploseDelay`; the footage's hit at 8192.76 and flash at 8192.83) it is destroyed: its 120 points, its `dynamite_dead` sound (two samples), and the blast.
 - **The blast [I for the law, M for the numbers it must meet].** Every damageable object whose box is within the radius of the charge's centre of mass is struck `blastDamage` times; a charge it reaches goes off one fixed step (1/60 s) later, so a chain runs one link a step (the footage's five charges flashed over 0.07 s, V1 8192.83 to 8192.90: four links of 17 ms; its "20 to 30 ms" are frames of 33 ms). The reach, box to centre, comes to about 5.9 units centre to centre for a charge 1.8 wide, inside the bracket 4.0 to 6.9 (14.2); it stops at the gap of 6.9 in level 67. A loose body in reach is pushed away from the centre and up: a change of velocity of `blastSpeed` 14 units/s times the material's `explosePower` (1.0 for the dynamite [D]) times the nearness (1 at the centre, 0 at the edge), up to half as much again upward, and less for a heavy body (by the square root of 100 over its mass, so that a building is not thrown). The balls are not pushed (the rules set their speed).
 - **Checked [M].** Replaying level 67: a hit to the charge at x = 18.2 sets off the five on the right, 17 ms apart, and not the five on the left; nine pieces of metal (450 points), ten stones (250), a dragon (360), the cauldron (70), a pointer (101), a flower (42), a log (50) and the five charges (600) make **1,923 points** within 0.32 s, against the footage's **+1,933** (+1,187 and +746 at V1 8192.80 and 8192.90, the other 1,333 "beyond the charges" of 14.7). The footage has the two steps 0.04 and 0.14 s after the touch at 8192.76 (frames of 33 ms); here the payments come between 0.10 s (the charge's own `exploseDelay`) and 0.32 s, the metal and stones after their own delays of 100 to 250 ms [?]. The same total comes out for a blast of 1, 2, 3 or 5 energy, since the neighbouring charges' blasts overlap and the damage adds: the footage does not say how much one blast does, only that it takes this.
-- **The look.** A flash of `Oreols/02.png`, five times the radius across (explosebig's `size` 25 for the radius 5 [D]), swelling in 0.08 s and fading over 0.5 s [D], and twenty sparks. The ordinary orange flash of a brick goes off with it.
+- **The look.** The explosion file the level names (`explosebig` for the radius 5, `explosesmall` for 3: a flash of `Oreols/02.png` 25 and 15 across, [D]), swelling at its `speed` and fading over 0.5 s [D]; the particle system draws it (19.6). The sparks of the first version are gone: the footage has none (the orange fog and a bright core for each charge, `special-V1-t8192.76-8192.97`), and the data names none. The dynamite's own brick goes off with no flash of its own (19.5).
 - **Not required [M].** A level ends with its dynamite standing (second study, "Settled", 3).
 
 ### 17.3 Interactive cannon
@@ -770,10 +793,10 @@ The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, on
 - **What fires it [M for the ball, I for the rest].** The ball touching it at any speed (the footage's cannons fired for a ball 1.5 to 2 units off, which is a graze), a loose body that hits it as hard as the ball's blow (V1 6446.85, F18), and a cannonball. At most one shot in 0.5 s. It never fires on a timer (none in 28 s).
 - **What leaves it [D, M].** A cannonball of radius 0.59 [D, `yadro.XML`] from the muzzle, (1.99, 1.69, 0) in the cannon's frame, with the velocity (30, 3, 0) in that frame [D; measured 29.4 to 33.3 units/s]: along the cannon's own +x, whatever way the level turned it (the three of level 51 face +z).
 - **Its flight [I].** A lob under the level's gravity: it falls 0.87 s after leaving a cannon on the floor and lands about 26 units on (the footage's tracked flights, 0.3 to 0.7 s, show no arc over 20 units, which this does not show either). It is swept by five rays (the middle and the rim) and bursts on the first actor it meets; balls and the bat it goes through; after 3 s it is gone.
-- **What it does [M for the destroyed, I for the rest].** On impact the target is struck `cannonballDamage` (2) times, so what has one or two energy goes, a cannon of two included (a cannon is "not consumed" by the ball, 17.1), a charge it hits goes off at the next link (V1 6446.8: the chain went off, F17); a loose target is pushed (the two leave together: momentum is kept, the ball's mass 8.65 is its volume times `Telega1.jpg`'s density 10); a cannon it hits and does not destroy fires. A burst of `Oreols/11.png` 10 units across for 0.5 s [D, `exploseyadro`].
-- **Hits to destroy [I].** The ball never does. A cannonball or a blast does at once (damage 2 against its energy 2), and a weapon takes it in two hits.
+- **What it does [M for the destroyed, I for the rest].** On impact the target is struck `cannonballDamage` (2) times, so what has one or two energy goes, a cannon of two included (a cannon is "not consumed" by the ball, 17.1), a charge it hits goes off at the next link (V1 6446.8: the chain went off, F17); a loose target is pushed (the two leave together: momentum is kept, the ball's mass 8.65 is its volume times `Telega1.jpg`'s density 10); a cannon it hits and does not destroy fires. A burst of `Oreols/11.png` 10 units across for 0.5 s [D, `exploseyadro`: the particle system's].
+- **Hits to destroy [I].** The ball never does. A cannonball or a blast does at once (damage 2 against its energy 2), and a weapon takes two bullets, or a rocket or a kernel (18.4).
 - **Not required [M].** `canBeDamaged` yes, a target no (second study, "Settled", 3).
-- **Sound.** `brick_cannon_shoot` (`br_cannon.ogg`), at the muzzle; the flash and a puff of smoke there.
+- **Sound.** `brick_cannon_shoot` (`br_cannon.ogg`), at the muzzle; a short flare there and a puff of `Smoke` along the barrel (19.6).
 
 ### 17.4 Teleports
 
@@ -781,7 +804,7 @@ The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, on
 - **Gone [M].** 0.2 s (0.13 to 0.25 seen). Then it appears at the exit's middle, growing from a speck in 0.1 s (3 frames), and drifts 0.2 s along the way it will leave (6 units/s; 0.7 units in the first 0.1 s seen), then leaves at the ball's speed, 15 [M: 15 to 17].
 - **The way out [M for three cases, I for the law].** Toward the bat side, -z, at an angle drawn evenly from within 45 degrees of straight on (0, -14 and +45 degrees were seen); the draw is a seeded generator (`SpecialObjectRules::seed`), so a game repeats exactly. It does not follow the exit's orientation. The ball is made where the drift ends, 1.2 units from the exit's middle along that way, or, when a plate of the exit is there (the tent is solid and turned any way: for the plain ball that point is inside a plate for 49 to 100 % of the draws in five of the levels), further on along it until the ball touches none, by `portalClearance` [I]. A ball made inside a plate was pushed about between the plates until the jam rule freed it a second later (knight-v-yablochko, 2 emerges of 8).
 - **Pairs [I].** Two sources (`knight-zoo`, `village-dvorik2`) send their balls to the one exit; with equal numbers the k-th source goes to the k-th exit.
-- **What enters [I].** Only the balls. Debris collides with the pyramid like anything else, and bullets and prizes are not asked. A ball that is in a teleport has no body and is not lost: the Multiball takes no balls from it (it needs one in flight), the Skull takes it with the rest (it is lost at the source, whole, and never comes out), and the Big Ball and the Weak Ball give it the new size, which it comes out with.
+- **What enters [I].** Only the balls. Debris collides with the pyramid like anything else; what the bat shoots goes through it (18.2: a projectile touches the level's actors and not the teleports, which are their own kind of body); a cannonball's rays meet it as they meet any actor, so it bursts on the pyramid and hurts nothing (17.3); the prizes are no bodies and fall past it. A ball that is in a teleport has no body and is not lost: the Multiball takes no balls from it (it needs one in flight), the Skull takes it with the rest (it is lost at the source, whole, and never comes out), and the Big Ball and the Weak Ball give it the new size, which it comes out with.
 - **Sound and look.** `teleport` at both ends; a ring on the floor and a glow where it goes in and where it comes out.
 - **Not required, and nothing hurts them [M].** 17.1.
 
@@ -791,7 +814,7 @@ The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, on
 - **No score for the rocket [M].** The launch scores nothing and the rocket and the burst hurt nothing.
 - **A touch that is no blow leaves the crate standing [M]; a blow destroys it [I].** The footage's crate stayed after a brush (V1 1013.33). In the game that is a ball whose edge goes no deeper than about 0.05 units into the crate's side: its closing speed along the contact is under a blow's (`hitFraction`, section 5). Any other hit is a blow and takes the crate's one energy as it does a brick's: after the material's 100 ms it is destroyed for its 120 points (a person's `exploseType` 5: it shrinks away). The footage does not say whether a harder hit kills a crate [?]; the first version of this section said never, and `village-apple` could not be won (17.1).
 - **A lit crate fires [I].** The rocket is lit by the touch, so a blow that destroys the crate does not stop it: the rocket comes 0.7 s later from where the crate stood, and so does one whose crate a blast took in those 0.7 s. A crate that a blast, a cannonball or a weapon destroys without the ball having touched it gives no rocket, and a touch on one that is already shrinking away (0.1 s after its destruction, for 0.35 s) lights none.
-- **The look.** The rocket (`Fire-rocket.x`) with a trail of eight sprites and a shadow on the floor; the burst, 30 sparks flying out at speed 30 and slowing, in one of the six colour pairs of `Fireworks.xml` [D], for 0.6 s [M], mostly above the picture's top edge for a crate at the back, as in the footage. The sound is `firerocket_dead` at the burst.
+- **The look.** The rocket (`Fire-rocket.x`) with the `TrailOrange` trail from its tail and a shadow on the floor; the burst, 30 sparks flying out and slowing in one of the six of `Fireworks.xml` [D], for about 0.7 s [M], mostly above the picture's top edge for a crate at the back, as in the footage. The particle system draws the trail and the burst (19.6). The sound is `firerocket_dead` at the burst.
 
 ### 17.6 Springs, volcanoes, generators and metal
 
@@ -802,7 +825,7 @@ The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, on
 ### 17.7 Vibros and flickers
 
 - **Vibro [M].** The barrels and rings (kinematic, 23) bob and tilt in place: the body goes up and down by 0.1 unit and tilts 6 degrees [I] about its own origin with a period of 2.4 s, each with a phase of its own, so that the ball is pushed by what it sees. The ball destroys one like a brick (14 to 24 points); it is not required.
-- **Flicker [M, I].** The cauldron and the torches (14) are bricks of the ball's kind (70 points for the cauldron, `exploseDelay` 150). The light "around them changes by 1.4 %" (F13) and the renderer has one directional light, so the point light is left out; each gets a warm glow sprite that wavers (two sines of unrelated rates, a phase of its own), and goes with it.
+- **Flicker [M, I].** The cauldron and the torches (14) are bricks of the ball's kind (70 points for the cauldron, `exploseDelay` 150). The light "around them changes by 1.4 %" (F13) and the renderer has one directional light, so the point light is left out; each gets a warm glow sprite that wavers (two sines of unrelated rates, a phase of its own), and goes with it. The particle files they name burn too: sparks (`Spark` for a torch, `SparkKoster` for the cauldron) and `Smoke` rise from the top of the fire (19.6).
 
 ### 17.8 The open questions of 14.7
 
@@ -810,12 +833,12 @@ The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, on
 |---|---|---|
 | Spring: kick or bounce, one hit destroys? | kicks away from its middle at the ball's speed; the ball does not destroy it | I |
 | Cannon: hits to destroy; the cannonball's damage and range; a slow ball or a bat shot; a timer | the ball never; a cannonball or a blast at once; damage 2; a lob of about 26 units; any touch fires it, however slow (the ball is never slow, and the bat is behind the line); no timer | I |
-| Teleports: the exit angle; prizes, debris, bullets; which exit two sources share | drawn evenly within 45 degrees of straight on toward -z; only balls; the one exit | I |
+| Teleports: the exit angle; prizes, debris, bullets; which exit two sources share | drawn evenly within 45 degrees of straight on toward -z; only balls enter, debris is stopped by the pyramid, the bat's projectiles go through it (18.2), a cannonball bursts on it, the prizes fall past; the one exit | I |
 | Dynamite: the reach; small dynamite; the +1333 | box to centre within the radius (about 5.9 centre to centre for 5); the same rule for 3; replayed: 1,923 against 1,933 (17.2) | I, M |
 | Firework: launch by a touch, a timer or a delay; rockets a crate; does a harder hit destroy it | by a touch, 0.7 s later; one a touch, one at a time; yes: a blow does (120 points) and the rocket it lit comes anyway, a brush does not; so do blasts, cannonballs and weapons | I |
 | Volcano and generators: any eruption; can the ball destroy them | none and no; blasts do | M, I |
 | Metal: how the ball bounces; can it destroy it | by its material; no | D, I |
-| Cloth and trees | unchanged: not built here | |
+| Cloth and trees | a sail is simulated and hurt like a brick of one energy, and does not tear (section 20); a tree that is hit sheds its leaves (`LeafFall`, 19.6) | I |
 
 ### 17.9 The numbers (`SpecialObjectRules`)
 
@@ -833,3 +856,433 @@ The ball hurts bricks, trees, dynamite, firework crates, vibros and flickers, on
 | `vibroPeriod`, `vibroBob`, `vibroTiltDegrees` | 2.4 s, 0.1, 6 | M, M, I |
 
 What is tested: `mb_special_object_tests` (made-up levels: the blast, its reach and radius, a chain that stops at a gap, 25 charges in a block, what the ball does not hurt and a blast takes, the cannon in two orientations with its flight, cooldown and debris, the teleports with their timing, angle, seed and shared exit, the crate's rocket after a brush and after a blow, the crate that stands in a gap, the stall rule among metal, the spring's kick, the vibro's period, the end of a level with all of it standing; a spring and a crate that are shrinking away; the speed prizes against the kick, the exit and the debris that sets a cannon off; a Big Ball into a real tent; a ball made at an exit whose plates stand across its way; a ball in a teleport meeting the Multiball, the Big Ball and the Skull; the Explosive Ball's blast among metal, dynamite and a spring) and `mb_special_object_smoke` (the 71 real levels with such objects, played by the autopilot and poked: every charge, cannon, crate, spring and source; no pose or ball that is not finite, a chain that ends, every ball that went into a teleport comes out, every rocket bursts).
+
+## 18. Weapons and strikes as built (step 5, weapons)
+
+What the game does with the four weapons and the two strike prizes of sections 7 and 14.3 where the footage and the data leave room: the rules (18.1 to 18.10) and then what is shown and heard (18.11 to 18.14: the barrels of the bat, what flies, the beam, the lightning, the meteors, and their sounds). Tags as before; `[I]` is a choice made where both are silent. The rules are `Weapons` (`game/Weapons.h`, `game/src/Weapons.cpp`), a member of `GameSession` that is its friend, called at three places of `Gameplay.cpp` and `SessionPrizes.cpp`: a click that no ball takes (`fire`), the catch of a Thunderbolt or a Meteorite Rain (`startStrike`) and once a fixed step after the contacts (`update`). Its numbers are `WeaponRules`, `GameplayRules::weapons` (18.10). The projectiles are bodies of the session's `PhysicsScene` (`addProjectile`); what they do to an object goes through `SpecialObjects::weaponHit` and `burst`, so that 17.1 stands. Tests: `mb_weapon_tests` (made-up levels), `mb_weapon_smoke` (the 83 levels), `mb_gameplay_smoke` (the autopilot fires what it has caught), and for the picture and the sounds `mb_weapon_view_tests` and `mb_weapon_view_smoke` (18.14).
+
+### 18.1 Firing
+
+| rule | in the game |
+|---|---|
+| the trigger | a click (`GameInput::launch`: the mouse button going down, or Space) fires **one shot** of `weapon()`, the weapon caught last that has shots left; no auto-repeat. The footage's counts fall at irregular moments, so a press is the guess [M, I] |
+| what else a click does | one thing, in this order: it launches the ball held on the bat; else lets go of the balls the Magnet holds; else fires. A ball held on the bat is waiting for the click (section 4), and the Magnet's release is a click (15.3), so each keeps it, and the weapon needs one more: with both, the first click frees the balls and the second shoots [I] |
+| when | only with balls in play (`SessionPhase::Playing`) and the bat there. Not while the bat swoops in with the ball on it (`Entering`) or the ball waits (`Ready`), not after the last ball is lost (`Lost`: a weapon caught in those seconds does not fire either) and not once the level is won or the game over [I] |
+| the shot count | falls by one at the shot (`ShotFired`, then `GameSession::useShot()`), and the weapon's effect ends with the last (`EffectEnded` follows) [M]. A click that fires nothing (too soon, nothing armed, the world refused the body) costs no shot |
+| the interval | at least `shotInterval` = 0.2 s between two shots, whatever the weapon: the Machine Gun's own quickest, 4 to 5 shots a second [M, weak]; the others showed none (their quickest were 0.55 s, the Cannon, and 0.5 s, the Laser), so they share it [I] |
+| a new weapon | `weapon()` is the one caught last. **The earlier ones are not lost**: they keep their shots and fire again when the later one is spent, as the footage's HUD shows (the Cannon with 1 shot beside the Bazooka's 7, 6, 5, 3: V2 108-117, `special-V2-t108-117-hud-cannon-1-left-drunken-30s-bazooka-7-6-5-3`); a second catch of the same weapon adds its shots and makes it the weapon again. That is what `startEffect` (15.3) already did; `mb_weapon_tests` checks it |
+| where from | the barrels are frames of the bat's model, whose origin is on the floor under the centre of the bat's sphere and which is drawn `batScale()` times its size (16.3): a shot starts at the data's spawn point in that frame (x across, y up from the floor, z up the board), scaled with the bat [D for the points, I for the scale]. The bat's own speed is not added to the shot's [I] |
+
+### 18.2 Projectiles
+
+- Each is a **dynamic body** in the session's `PhysicsScene` (`PhysicsScene::addProjectile`): one sphere or capsule, continuous collision, never asleep, not turning, with gravity only where the data has no `disableGravity`. A capsule lies along z, the way it flies (the data's rotations turn its axis to z). The material is the data's [D]: density 5, friction 0.7, restitution 0.3 for the four `bat_*` materials, and 10, 0.9, 0.5 for `thunderbolt` and `meteor`; the mass is the volume times the density (a bullet 2.5, a rocket 5.1, a kernel 13.7, a bolt or a meteor 5.0).
+- **What it touches [I]**: the level's actors, nothing else. Not the balls, the bat, other projectiles or the teleports, and the prizes are no bodies. In the engine that is `BodyDesc::group` and `collidesWith` (a body touches another only when each one's `collidesWith` has the other's `group`; the defaults touch everything): the kinds are `kKindLevel`, `kKindBall`, `kKindBat`, `kKindProjectile` and `kKindPortal` (`PhysicsScene.h`), and the teleports are made `kKindPortal` that leaves `kKindProjectile` out (17.4: only balls enter).
+- **Its first touch of an actor ends it.** The projectile is taken out of the world in that step and reports `ProjectileHit` (`BoltStruck`, `MeteorImpact`) with the actor and the contact point; the impulse of the contact has by then pushed what it met as its momentum says (a bullet of 2.5 at 30 sends a loose block of 30 off at about 3 units/s). A projectile that touches nothing is gone after `projectileLife` = 5 s, or when it is beyond +-80 or below -20, with `ProjectileGone`; the board's walls and floor are actors, so every shot ends in a hit in a closed level. A hit that begins at more than a joint's `maxForce` breaks it as any impact does (`JointBreaking::Impact`), with the projectile's own mass.
+- What ends the level ends them: once `LevelComplete` or `GameOver` comes, every projectile in the air is taken out (`ProjectileGone`) and no strike is thrown.
+
+### 18.3 The four weapons
+
+| weapon | shots | what leaves the bat (the bat's frame) | flies |
+|---|---|---|---|
+| Machine Gun | 12 | **two bullets** at x +-2.156, y 1.198, z 3.411, capsules of radius 0.4 and length 0.44 [D] | (0, 0, 30), no gravity [D]: 30 to 37 units/s measured [M]; to the far wall in about 1.3 s |
+| Cannon | 6 | one kernel, a sphere of radius 0.868 at (0, 1.704, 3.067) [D] | (0, 3, 40) **with gravity** [D] (-9.8): a lob that comes down on level ground after 0.82 s, at z about 14 of the board, 35 units from the bat (`mb_weapon_tests` measures z 14.3), so it cannot reach the last 7 units of a board unless it hits something tall on the way [I from D]; the footage's 42.6 units/s is the part along z [M] |
+| Bazooka | 7 | one rocket, a capsule of radius 0.452 and length 1.0 at (0.006, 1.406, 4.791) [D] | (0, 0, 52.5), no gravity [D]; 54.5 measured [M]; to the far wall in 0.75 s |
+| Laser | 5 | a beam, no body (below) from the barrel at (0, 1.0, 2.91) [D] | the beam is full length within 0.1 s [M] |
+
+**The Laser's rule [I].** The footage has a thin beam that is full length within 0.1 s and fades in about 0.45 s (V2 62.78-63.26), that killed planks with the ball far away (V1 59.25, 90.2 to 91.2) and two of them at once (+34 and +34, V1 59.2-59.37), and a pirate of three energy that survived one (V2 62.9). Hence:
+- the beam is **resolved at the shot**, a line along +z from the barrel, three rays 0.15 apart (the data's capsules have the radius 0.15), at the height of the barrel;
+- it **pierces**: every actor it crosses that something can hurt (`canBeDamaged`) takes `laserDamage` = 1 energy, **once**, however many shapes of it the beam crosses: planks (one energy) die, a pirate (three) is left with two;
+- it **stops at the first actor that nothing damages** (a wall, the board, a solid piece of scenery: a material of type 2, which the tests' made-up Steel.jpg is), at the point where it meets it (`LaserBeam::to`); with nothing in the way it reaches `laserRange` = 60. In the real levels that is the far wall or a platform. **Metal is not one of them**: it is damageable (17.1: energy 1, 50 points), so the beam goes through it and destroys it, and one shot clears the metal fences of `village-apple` and `village-labirint` along its line and what stands behind them;
+- the balls and the bat are no actors, and the **teleports are not there**: it goes through them. What is already exploding, shrinking away or gone is not there either: the beam goes through it, takes no energy off it and does not count it (`LaserBeam::hits` and the `ProjectileHit`s are what it can still hurt, and what stopped it);
+- it pushes nothing.
+`beams()` has it on show for `laserLife` = 0.45 s, growing to its length within `laserGrow` = 0.1 s [M] (what the picture does with the numbers is 18.12). **The footage over the data [I].** The `Laser` particle file has `speed` 150 and `fade_time_msec` 1500: a front that takes 0.4 s to run the 60 units of the range and a beam that takes 1.5 s to fade. The footage's beam is full length within 0.1 s and gone by 0.45 s, so the game takes the footage's numbers, through `EffectOptions::grow` and `fade` (the particle system's own reading of the file is unchanged: any other caller gets the file's numbers); how the original read the file's numbers is open [?] (19.9).
+
+### 18.4 What a hit does
+
+Per projectile, the energy it takes off what it hits and its burst (`WeaponRules`, 18.10). **Decided [I], from the footage where it speaks:**
+
+| projectile | takes off the actor it hits | burst on impact |
+|---|---|---|
+| Machine Gun bullet | 1 | none |
+| Cannon kernel | 3 | radius 2.0: 1 off everything else damageable within it, and a push |
+| Bazooka rocket | 2 | radius 2.25: 1 off the rest within it, and a push |
+| Laser beam | 1, to each actor it crosses | none |
+| Thunderbolt's bolt | 1 | none |
+| Meteor | 2 | radius 2.0: 1 off the rest, and a push |
+
+- The footage fixes the least: a beam leaves a pirate of three alive [M] and a bolt does not kill one either: the pirate of V2 83.6-86.4 lived through a bolt and a blast and died to the next bolt, which is 1 + 1 + 1 [M, weak]. The order bullet, rocket, kernel (1, 2, 3) is [I]: the Cannon has 6 shots and a lob, the Bazooka 7 and a straight shot, the Machine Gun 12 shots of two bullets; the meteor takes two as a heavy thing falling from the sky.
+- **Bursts.** The rocket's is the footage's white-orange star 4 to 5 units wide [M], radius 2.25. The kernel's flash is about 3 units wide in the footage (F48), and the data's `exploseyadro` is 10 across, which is a radius of 2 for the dynamite's five-times rule (17.2); the rule takes the data's. The meteor's `explosemeteor` is 10 across too. A burst takes `blastDamage` = 1 off every damageable actor within its radius, the distance to the box round it, as the Explosive Ball does (15.3), but the one the projectile hit; a charge of dynamite in reach goes off at the next link (17.2). It pushes the loose bodies in reach away from its centre and up, as dynamite does at `blastPower` = 0.5 of its strength (up to 7 units/s at the centre).
+- **Why the bolt has no burst and the meteor has one [I].** The data cannot say: `thunderbolt` and `meteor` are both `exploseType` 9 in `materials.json`, as is the firework's rocket (`Fire-rocket`), whose burst hurts nothing [M] (17.5), so the type decides nothing about hurting. The files and the footage differ: the particle folder has a ring that lies flat for the meteor's landing (`explosemeteor`, 10 across, named by no object, `OBJECTS.md` 6; the white rings on the water of `special-V2-t858-865` [M]) and only the plain `Flash` (size 30, 0.2 s, also named by nothing and unused, 19.6) that could be a bolt's, which the footage does not show: its bolts end on the blocks in white splinters with no flash (`special-V2-t408.00-408.70`, 19.5). So the meteor's ring is taken as a blast of its size, as the kernel's and the rocket's flashes are of theirs (radius 2.0, 1 off the rest), and a bolt, a line of lightning, hurts only what it strikes. Neither has been seen to hurt a neighbour [?].
+- **Through `SpecialObjects` (17.1)**, so nothing is done twice: `weaponHit(actor, at, damage, dropsPrize)` takes `damage` energy one at a time, `burst(struck, centre, radius, power, damage, dropsPrize)` is a burst, the law of the dynamite's blast. So **dynamite is set off by any projectile**, 0.1 s later (its `exploseDelay`) as for the ball, and its chain runs as in 17.2; a **cannon** of two energy takes two bullets, a rocket or a kernel, and is not set off by them; a **firework crate** is destroyed (120 points) and gives no rocket, since the ball did not light it (17.5); **springs, volcanoes, generators and metal** are destroyed for their points; the **teleports** are not damageable and the projectiles pass them; bricks and trees take the energy and a person or an animal shrinks away as ever. An object that is already exploding, shrinking or gone is not hurt again, and a projectile that meets one is spent on it all the same.
+- **Sails (20.3).** A sail is one object, its lead actor, with one energy and 60 points: the beam crosses its faces (once, as for any actor), and what has a body touches its particles, spheres of 0.5 that a bullet (0.4), a kernel or a rocket can pass between, so it is spent on the sail when it meets one: `ProjectileHit` names the lead actor, the sail is destroyed and the burst of a kernel or a rocket is there. A burst takes a sail by the distance to its particles as it stands now, not to the box round them and not to where it was saved [I]. `mb_weapon_tests` has each weapon against a sail.
+- **Who killed it.** The hit that takes the last energy is the weapon's or strike's, and `BrickDestroyed` says which in its `prize` (the weapon, the Thunderbolt or the Meteor; none for the ball, a blast or a chain): the picture leaves out the flash of what a bolt destroyed (19.5).
+- **Prizes: the data decides [D].** `disablePrize` is on `thunderbolt.XML` and `meteor.XML` and on none of the four weapons' bullets, so what a bullet, a kernel, a rocket or a beam destroys leaves a prize at the usual chance (15.1), and what a bolt or a meteor destroys leaves none (`GameSession::hit(actor, at, false)`). V2 81.0-81.5 saw a prize orb where a bolt struck, which does not fit; it stays open (14.7). The score is the destroyed object's own `brickScore`, as for anything the ball destroys.
+
+### 18.5 Thunderbolt
+
+| rule | in the game |
+|---|---|
+| a catch | `StrikeGranted`, then a **burst of 2 or 3 bolts** (drawn), thrown `boltGap` = 0.2 s apart from the catch, so that they strike one after another within 0.7 s [M], and `boltsLater` = 2 **more**, each at a moment drawn evenly between 2 and 12 s after the catch [M, weak: bolts at 8 and 12 s in V2, at 0.5 s and 7 s after the caption in V1 level 2]. A second catch adds another set |
+| the target | picked at random, at the moment the bolt is thrown, among the **standing bricks and trees**: damageable, and not gone, exploding or shrinking; whatever the level's end rule, and out of the ball's reach or not. Metal, cannons, sails and the rest are spared (the Metall wall of V1 level 31 stood through five bolts, 14.2; a sail is no target, 20.3). With none left, a point of the field drawn evenly [I]. **The bolts of a burst strike different places** [M]: one that a bolt of its burst has struck is left out, unless it is all that stands (without that, 6 of the 498 bursts of a run over six seeds struck one actor twice); the later bolts are drawn on their own |
+| the bolt | a sphere of radius 0.492 that **falls at 50 units/s** [D], straight down, from the top edge of the screen above the target's centre (18.7), so it falls 15 to 30 units: 0.3 to 0.6 s. It strikes the first actor under it, in practice the top of the target or of what stands over it, and takes one energy. It is a physics body like the rest, so it strikes whatever is under it when it arrives, which is not the target if that has moved, or a sail that hangs over it (the bolt is spent on the sail, which is destroyed, and the target is left for the next bolt) [I] |
+| what it reports | `BoltStruck`: the actor, where it struck, and `end`, the point of the screen's top edge above it, where the picture draws the lightning from. If what it struck reaches above the top edge (a tall tower), `end` is below `position`: draw nothing, it is out of the picture |
+| prizes | none (disablePrize [D]) |
+| what is not built | **Not every bolt of the footage is shown to be the Thunderbolt prize** (the second study's "Still open", 2): V1 level 1 has no Thunderbolt caption from 54 to 144.8, yet bolts strike at 133.0, 139.2, 142.0 and 143.9, all in its last 11 s, and V2 level 1 has a bolt about every 2 s from 81.0 to 89.0 with no caption in its first 90 s. The level's end may have had a help of the game's own that throws lightning when few bricks are left [?]. The game builds none: its bolts come only with the prize, and what a level that is stuck needs is the look at what the ball can reach and the stall rule (section 12) |
+| the bat | the strikes are the board's, not the bat's: a lost bat (the last ball, the Skull) ends the weapons and the ball's prizes, and the bolts and meteors still due are thrown all the same, while the bat flies off, while the heart is spent and for the next bat, until the level ends (18.2). The footage does not say whether a lost bat cancels them [?]; `mb_weapon_tests` pins the rule [I] |
+| the seeds | `SessionOptions::prizeSeed` turned by a constant, SplitMix64, so that a game repeats exactly |
+
+### 18.6 Meteorite Rain
+
+About five meteors over five seconds [M] (rings at V2 860.5, 861.3, 863.1, 864.3): `meteors` = 5, one in each fifth of `meteorSpan` = 5 s, at a moment drawn within it. Each one:
+- aims at a **point of the field drawn evenly** (x +-18, z -10 to 20), since the footage shows the rings on the water and no brick [M, I], so the ones that happen to fall on something hurt it. The aim is where the sphere touches the water; the meteor flies along the line through that point with the velocity (-10, -30, 10) [D] and no gravity;
+- starts where that line crosses the top edge of the screen (18.7), a little beyond it, so it falls 20 to 30 units, 0.7 to 1.0 s at 33 units/s;
+- hurts what it touches first: 2 energy, then the burst of radius 2 that takes 1 off the rest. `MeteorImpact` has the actor: the water is the board's own actor, and the ring on it is the picture's; a sail it meets on the way is what it touches first, and it is spent on it;
+- leaves no prize (disablePrize [D]).
+
+### 18.7 Where from: the top edge of the screen
+
+The camera never moves (section 8: eye (0, 42.7, -58.5), target (0, 0, 2.7), vertical FOV 32.8 degrees), and the vertical FOV is fixed whatever the window's shape, so the top edge of the picture does not depend on the aspect. `screenTopHeight(below)` is the height at which the vertical line through a point leaves the picture at the top: **28 units up over the near end of the field (z -15), 23 over the middle (z 0), 16 over the far end (z 20)**. `screenTopPoint(target, direction)` is the point on the line through `target` with a direction (a meteor's) that is on the top edge. A bolt starts `offscreen` = 2 units above its edge, a meteor 2 units along its line beyond it, so neither is ever seen to appear. `mb_weapon_tests` checks both against the camera's own view and projection (NDC y of 1).
+
+### 18.8 What the presentation reads
+
+**State** (`GameSession::weapons()`, `projectiles()`, `laserBeams()`; a span like `fallingPrizes()`):
+- `Projectile`: `id`, `kind` (`Bullet`, `Kernel`, `Rocket`, `Bolt`, `Meteor`), `prize` (the weapon, or Thunderbolt or Meteor), `position` (its centre), `velocity`, `bornAt`, `age`, `barrel` (the Machine Gun's: 0 left, 1 right), `body`. Positions and velocities are those of the last fixed step; the picture carries them on by the lead as it does the balls'. In the order they left; at most a few dozen at a time (the smoke bounds it at 128).
+- `LaserBeam`: `from`, `to`, `firedAt`, `hits` (the actors it reached, the one that stopped it included). Gone after `laserLife`.
+- `Weapons::strikesPending()`, `Weapons::stats()` (shots, projectiles, hits, gone, beams, bolts, meteors, hurt).
+- Already there: `weapon()`, `shotsLeft()`, `activeEffects()` (the HUD's shot numbers), `batScale()`.
+
+**Events** (`GameEvent`, with the two new fields `end` and `count`; `material` is the projectile's game material: its `periodSound` is the shot's sound and its `deadSound` the impact's, `bat_bullet`, `bat_kernel`, `bat_rocket`, `bat_lazer`, `thunderbolt`, `meteor`):
+
+| event | fields |
+|---|---|
+| `ShotFired` | `prize` (the weapon), `position` (the muzzle: the middle of the barrels), `velocity` (of a projectile; none for the laser), `count` (shots left), `material`. One a shot, so one sound for the Machine Gun's pair |
+| `ProjectileHit` | `prize`, `actor` (what it touched: the board and what nothing damages too), `position`, `velocity` (its own), `material`. The laser reports one for each actor it reached |
+| `ProjectileExploded` | `prize`, `position`, `speed` (the burst's radius). Kernel and rocket, after their hit |
+| `ProjectileGone` | `prize`, `position`: it left the world, ran out of time, or the level ended |
+| `LaserBeam` | `position` (the barrel), `end` (the tip), `count` (the actors it reached), `material`. Before its `ProjectileHit`s and the damage |
+| `BoltStruck` | `actor`, `position` (where), `end` (the top edge above), `material` |
+| `MeteorFalling` | `position` (where it starts), `velocity`, `end` (where it will come down, on the water), `material`: at its start |
+| `MeteorImpact` | `actor` (the board's for the water), `position`, `material`, then its `ProjectileExploded` |
+
+Every projectile ends with exactly one of `ProjectileHit`, `BoltStruck`, `MeteorImpact` or `ProjectileGone`. The damage is the usual `BrickHit` (`ball` -1) and `BrickDestroyed` (whose `prize` is the weapon or strike that took the last energy: Machine Gun, Cannon, Bazooka, Laser, Thunderbolt or Meteor, none for the ball, a blast, a chain or a fall), and the prize drops the usual `PrizeDropped`.
+
+### 18.9 The open questions of 14.7 that were about the weapons
+
+| question | what the game does | tag |
+|---|---|---|
+| hits needed against energy 2 to 4 for the cannonball, the rocket, the bullets, the laser | a bullet 1 (a brick of 4 takes 4), a rocket 2, a kernel 3, a beam 1 to each actor in line; bursts 1 more to what is within reach | I |
+| the blast radii of the cannonball and the rocket | 2.0 and 2.25 | D, M |
+| a minimum interval between shots | 0.2 s for all | M for the gun, I |
+| Thunderbolt: strikes per catch, their span, the target | 2 or 3 at once and 2 more up to 12 s later; a random standing brick or tree | M weak, I |
+| Meteor Rain: count, targets, damage | 5 over 5 s, random points of the field, 2 energy and a burst | M, I |
+| does a weapon push | by its momentum, bursts by 0.5 of dynamite's | I |
+| do weapon kills leave prizes | yes, but not the bolt's and the meteor's | D |
+| do teleports, balls and the bat stop projectiles | no | I |
+
+### 18.10 The numbers (`WeaponRules`)
+
+| constant | value | tag |
+|---|---|---|
+| `shotInterval` | 0.2 s | M (gun), I |
+| `bullet`, `kernel`, `rocket`: `spawn`, `velocity`, `gravity`, `radius`, `halfHeight`, material | the data of 18.3 | D |
+| damage: bullet, kernel, rocket, laser, bolt, meteor | 1, 3, 2, 1, 1, 2 | I |
+| burst: kernel, rocket, meteor (radius; damage 1, power 0.5) | 2.0, 2.25, 2.0 | D, M, D |
+| `laserSpawn`, `laserRadius`, `laserRange`, `laserGrow`, `laserLife` | (0, 1.0, 2.91), 0.15, 60, 0.1 s, 0.45 s | D, D, I, M, M |
+| `projectileLife`, `farLimit`, `lowLimit` | 5 s, 80, -20 | I |
+| `bolt`: velocity, radius | (0, -50, 0), 0.492 | D |
+| `boltBurstLeast`, `boltBurstMost`, `boltGap`, `boltsLater`, `boltLaterFrom`, `boltLaterUntil` | 2, 3, 0.2 s, 2, 2 s, 12 s | M, M, I, M weak, I, M weak |
+| `meteor`: velocity, radius | (-10, -30, 10), 0.492 | D |
+| `meteors`, `meteorSpan`, `meteorX`, `meteorZLow`, `meteorZHigh` | 5, 5 s, 18, -10, 20 | M, M, I |
+| `offscreen` | 2 units | I |
+
+What is tested: `mb_weapon_tests` (made-up levels: the engine's kinds of body and `raycastAll`; the top edge against the camera; the click with no weapon, with a held ball, while the bat swoops in, with the Magnet, in the Lost phase and after the level is won; the shot count, the interval, a weapon running out and replacing another; each weapon's spawn point, velocity and gravity, where the kernel lands, and the barrels of a wider bat; a projectile that leaves the board; the damage of each projectile against bricks of one to four energy, the burst's reach and push, what is spent on steel and walls; the laser's piercing, width, stop, one hit a body, teleports and balls, what is already exploding, fading and range; dynamite set off by a bullet and its chain, a cannon, a firework crate, metal, springs, volcanoes, generators and teleports; the prizes a kill may leave; the Thunderbolt's burst, spread, targets, top edge, metal spared and seeds, the bolts of a burst at different places; who destroyed a brick (`BrickDestroyed::prize`); each weapon and the bolt against a sail; the meteors' count, timing, slant, aim and damage; the strikes' damage; that nothing is thrown once the level is won and that the strikes go on when the bat is lost; the autopilot's look ahead (through teleports, at the barrels' height); two identical games) and `mb_weapon_smoke` (the 83 levels, each with prize seeds of its own, every weapon and both strikes given at once, the click held down, 24 s each: nothing not finite or off the board, shots counted, every projectile accounted for, the strikes all thrown, the balls' speed and plane, the time of a step).
+
+### 18.11 The barrels on the bat
+
+**What is in the data [D].** `bat.x` has four takes (`Common`, `Hit`, `Right`, `Left`); the converter writes them as glTF animations (`ASSET_FORMATS.md`, the model's `animations`). The weapons are frames of the model that the default bat does not draw: `Pulemet-Left` and `Pulemet-Right` (each with its `Pulemet-Stvol-*`) for the Machine Gun, `Pushka` for the Cannon, `Bazuka-Korpus` (with `Bazuka-Stvol`) for the Bazooka and `lazer-Korpus` (with `Lazer-Stvol`) for the Laser. `Common` is one take of 4 seconds (19200 ticks) keyed for all of them at once (the weapons' keys end at 16800, 3.5 s, except `Pushka`'s, which go on to 19040 standing still), in 4800 ticks a second (D3DX's default; the keys are 160 ticks, one frame of 30 a second, apart): the barrels grow from a small size, push their guns out, stand, recoil once and settle, stand, and draw back and shrink away. Each weapon's frames are at their rest pose at tick 0, small: the body of `Pulemet-*` at 0.095, `lazer-Korpus` at 0.107 and `Bazuka-Korpus` at 0.138 of its size, and `Pushka`, whose mesh is authored tiny, at a tenth of the 10.4 it grows to.
+
+**Where the take is cut [D for the times, I for the cut].** The keys stand still between the three moves, so the take is cut into four pieces with the times the keys give (`BarrelClip`, `BatBarrels.cpp`):
+
+| piece | ticks | seconds | what the keys do |
+|---|---|---|---|
+| growing | 0 to 4000 | 0.83 | the body is full size at 3200 (0.67 s) and the gun is pushed out by 4000 (the Gun's barrels by 1.1 units, the Bazooka's by 1.1, the Laser's by 0.7); the barrel then waits, at 4000, until its recoil |
+| recoil | the Gun 7040, the Cannon and the Laser 6880, the Bazooka 5440, to 11200 | 0.9 (the Bazooka 1.2) | the gun moves back (the Gun's by 0.9 units in 0.23 s, the Cannon's by 0.4, the Bazooka's by 1.1, the Laser's by 0.6), forward past where it was by about a fifth of that and settles at 11200 where it waited |
+| waiting | 11200 to 12000 (the Gun 12800) | | |
+| shrinking | the Gun 12800, the others 12000, to 16800 | 1.0 (the Gun 0.83) | the gun draws back and the body shrinks to where it began (the Gun's two bodies tilt in to 45 degrees as they shrink, from 12800 to 14400, while their guns still stand until 14400; they begin tilted and swing upright as they grow, from 2400 to 3200) |
+
+**What shows when [I].** A weapon's barrel is shown while the weapon is the one a click fires (`weapon()`, 18.1): the one caught last that has shots. It starts to grow when it becomes that, waits, and recoils from the start of its recoil at each `ShotFired` (again from the start if it is already recoiling: the Machine Gun's quick shots make its guns kick every 0.2 s). When the weapon ends (its last shot or the bat is lost), or another weapon is caught, the barrel draws back and shrinks; the recoil of a last shot is played to its end first, so that it is seen: the session has already ended the weapon in the step of its last shot, so the clocks are told a frame's shots **before** that frame's update (`BarrelClocks`), and the weapon that is gone cannot take the shot's recoil away. A barrel that is still **growing** when its weapon goes (another is caught within 0.83 s, which the autopilot does) is played backwards from the pose it has (`Receding`) and grows on from there if its weapon is the one to fire again, so that it never jumps. A barrel that is wanted again while it **shrinks** starts to grow from the beginning (it jumps; two weapons held at once and swapped quickly is the only way to see it, and the shrinking pose is not the growing one played backwards: the guns draw back, they do not push out). A shot may leave while the barrel is still small: the rules do not wait for the picture (the footage has the Laser's first beam 1.4 s after the catch, but that is when the player clicked) and the shot starts at the data's spawn point (18.3) in any case. The barrels are drawn with the bat, at the bat's size (a wider bat has wider barrels), with the bat's texture, and are gone with it as it flies in and out. `BarrelClock` is the timing of one barrel and `BarrelClocks` the four with the order of a frame, with no model in them (tested without a GPU, and with a real session's frames); `BatBarrels` poses the frames from `Model::globalPoses` of `Common` at the clock's time.
+
+**Footage [M, weak].** The Laser caught at V1 61.6 has its barrel full size at 62.2 (`nocommentary-DpvwN-k35Eg-t61.0-63.8`): about the 0.67 s of the take; the Machine Gun's barrels and the Cannon's are in `special-V2-t96.55-97.39` and `james-oSjPIw8W0zE-t20-cannon-bat`, small beside the rest of the bat, as they are here. The recoil is not visible at the footage's size.
+
+**Assets.** The take is in `bat.glb` only when it was converted with the converter that writes animations; with an older `bat.glb` the barrels are not drawn and the game says so at the start of each level (re-run `tools/convert_assets.py`).
+
+### 18.12 What flies, the beam and the strikes
+
+What the weapons and the strikes look like (`WeaponScene`: the models; `WeaponEffects`: what is asked of the one particle system, 19). Each projectile is the model its object names (`Data/Objects/Bullets`, `Interactive/meteor.XML` [D]) with its game material, at the place of its body carried on by the lead, turning in its model's own `Anim-1` take (a turn about one axis, looped by its age [D]: the bullets about their own length, the left against the right, once in 2 s; the cannonball about x once in 2.33 s; the rocket about its length once in 1.33 s; the meteor about x once in 1.33 s).
+
+| what | picture | tag |
+|---|---|---|
+| bullets (Machine Gun) | `bat-bullets.x`, the frame of each barrel (`Left-Bullet`, `Right-Bullet`), `bat_bullet`: small dark capsules, no shadow (the footage shows none: `special-V2-t160.12-160.27`) | D, M |
+| cannonball | `kernel.x`, `bat_kernel`: the spiked black ball of `special-V2-t96.55-97.39`, with the blob of shadow the balls have, 2 units across | D, M, I |
+| rocket | `bat-rocket.x`, `bat_rocket`, with a shadow, and a trail: `Trail/TrailBlue` put out from its tail (0.8 behind the middle of its capsule) at 0.35 of its size, each particle living 0.06 s (`EffectOptions::fade`) instead of the file's 0.5 s, still 30 of them kept alive: a glow about 3 units behind the tail. The file's life at the rocket's 52.5 units/s was a dotted line 26 units long (a dot every 0.9 units, which shrink and fade into pearls), and the footage has a small red rocket and a short glow, no streak (`special-V2-t112.30-113.30`); the data names no trail for the rocket (`rocket.xml` has no `particles1`), so the trail is kept short and small | D, M, I |
+| the laser | the `Laser` particle as a beam from the barrel to the tip of `LaserBeam`: yellow at the barrel to red at the tip, with a round end each. Its front runs out to the tip in `laserGrow` = 0.1 s whatever the length (`EffectOptions::grow`; the file's own 150 units/s would take 0.2 s for 30 units and 0.4 s for the 60 of its range, and the footage has 35 percent of a beam at V2 62.78 and all of it by 62.88), and the colours run over the part that is out, so the tip is red from the first frame as in the footage. The tip's round red end is the red mark where it stopped. At full strength for 0.25 s and gone at 0.45 s, when the rules drop the beam (the footage: full at 0.26 s, dim at 0.4 s, gone by 0.54 s, V1 58.88 to 59.3; the file's own `fade_time_msec` is 1500, so the footage's fade is asked for with `EffectOptions::fade`, as the front's 0.1 s is with `grow`: 18.3) | D, M |
+| a bolt | the `Lightning` particle as a bolt from the top edge of the screen (`BoltStruck::end`) to where it struck: ten pieces thrown aside, taking a new shape 30 times a second. At full strength for 0.25 s and gone 0.05 s after, 0.3 s on show [M: in `special-V2-t408.00-408.70` the first bolt is there from the start of the sheet to 408.24 and gone by 408.27 (0.27 s at least), and the second shows from 408.27 to 408.63, bright in 0.31 s of it, a frame or two of the crackle missing in both, so the strikes overlap, as they do here with 0.2 s between them (18.5); the 0.1 s of the third study's first reading, 14.3, and of this picture's first version was too short]. The falling body (0.3 to 0.6 s, 18.5) is not drawn: the footage's bolt is there at once, from the top. A target above the top edge has none | D, M, I |
+| a meteor | `meteor.x` with its `meteor` material (the data's `Lopata.jpg`, grey-brown rock), tumbling, with a shadow, and `TrailMeteor` (size 5, pink to red, fading in 0.5 s) put out from its middle for as long as it flies [D: `particles1="trailmeteor"`] | D |
+| the meteor's landing | `explosemeteor`, the ring of `Particles/boom.png` lying on the water below where it came down, 10 across at 50 units/s: it swells for 0.2 s and fades over its life, 0.4 s [M: the rings of `special-V2-t858-865` last about 0.4 s]. The file's `fade_time_msec` alone, 0.2 s, ends it when it has swollen, so the life is asked for (`EffectOptions::seconds` of a Flash) | M, I |
+| the cannonball's burst | `exploseyadro` at its 0.4 of its 10 units: the white-orange star of `special-V2-t97.15-97.60`, about 4 units across with a core of 2 [M] | D, M |
+| the rocket's burst | the same at 0.45: "4 to 5 units across" [M, `special-V2-t112.58-112.91`] | D, M |
+| what the burst and the beam destroy | the usual flash of the brick's `exploseType` (19.5); none for what a bolt destroys (19.5) | M, I |
+| a bullet hitting | no picture of its own: the brick it destroys has its flash, and a wall shows nothing [?] | |
+| the muzzle | none: the footage shows no flare at the bat's barrels [?] | |
+
+All of it is asked for from the events (`LaserBeam`, `BoltStruck`, `MeteorImpact`, `ProjectileExploded`, 18.8) and from `session.projectiles()`; a trail follows its projectile, carried on by the frame's lead as the model is (`WeaponEffects::follow`; `mb_weapon_view_tests` checks the trail's front against the picture's rocket), and stops (what it left fades) when the projectile is gone. The same names are used by the real files: `mb_weapon_view_smoke` plays each weapon and strike in three worlds and checks that its effect was drawn.
+
+### 18.13 Sounds
+
+What each event sounds like (`PlaySounds`, `AUDIO.md`): the `period` sound of the projectile's material is the shot's and its `dead` sound the impact's [D, with the use inferred as in `OBJECTS.md` section 4].
+
+| event | sound | data |
+|---|---|---|
+| `ShotFired` | the weapon's: `bullet_shoot`, `kernel_shoot`, `rocket_shoot`, `lazer_shoot`, once for each shot, so once for the Machine Gun's pair (the data marks the right bullet's `shootSound`, and its sound is played once, at the bat's place, not at the barrel's) | files `bullet_shoot.ogg`, `kernel_shoot.ogg`, `rocket_shoot.ogg`, `lazer_shoot.ogg` |
+| `ProjectileHit` | `bullet_dead`, `kernel_dead`, `rocket_dead`, `lazer_dead`: **no file in `sounds.xml`, so silent**. A cannonball's, a rocket's and a bullet's impact are heard through the bricks they destroy, which make their own `dead` sounds | none |
+| `BoltStruck` | `thunderbolt_dead`, the thunder, at the strike | `thunderbolt_dead.ogg` |
+| `MeteorFalling` | `meteor`, the meteor's `period` sound, as it starts to fall | `meteor.ogg` |
+| `MeteorImpact` | `meteor_dead`, which is `dynamite_dead.ogg` (with a replay delay of 0.5 s, so that two meteors landing together are one sound) | `dynamite_dead.ogg` |
+| `ProjectileExploded`, `ProjectileGone`, `LaserBeam` | none | |
+
+**Known, left open [?].** At the autopilot's rate of fire (the click is held, so a shot every `shotInterval` = 0.2 s) the Bazooka's `rocket_shoot.ogg` (2.18 s long, a mean of -11.5 dB: among the loudest of the effects) stacks up to 7 voices (a catch has 7 shots) and the mixer's soft limit bends the sum: over 6,000 samples a second above 0.95 in the first two seconds of a Bazooka (the Machine Gun's 130 to 500, the Cannon's 70, the Laser's none; the same level with no weapon has none), the shots no longer individually audible. A player clicks two or three times a second and stacks three or four. The sounds are the data's at their own volume [D], and the 0.2 s of the other weapons is a guess [I] (the quickest seen were 0.55 s, the Cannon, and 0.5 s, the Laser, which is not a least interval), so neither a gain nor a cap on the voices of one sound nor a longer interval has evidence behind it; the Bazooka's is the one to try first.
+
+The Thunderbolt's `thunderbolt` `period` sound has no file either, so nothing is heard as a bolt falls; when the original played it, and when it played the meteor's, is [?] (there is no event for either but the strike and the start). Every sound is panned by where on the board it is, as the others.
+
+### 18.14 The numbers of the picture, and what is tested
+
+| constant | value | tag |
+|---|---|---|
+| ticks a second of `bat.x`'s takes | 4800 | D |
+| barrels: grown, recoil start (Gun, Cannon, Bazooka, Laser), recoil end, shrink start (Gun, others), shrink end | 4000; 7040, 6880, 5440, 6880; 11200; 12800, 12000; 16800 ticks | D (the cut: I) |
+| the laser's beam: front out in `laserGrow`, full strength, then fade | 0.1 s; 0.25 s; until `laserLife` (0.45 s) | M |
+| a bolt: full strength, fade | 0.25 s, 0.05 s | M, I |
+| the meteor's ring: life | 0.4 s | M |
+| burst scale: cannonball, rocket | 0.4, 0.45 of `exploseyadro`'s 10 units | M |
+| the rocket's trail: scale, life of a particle, distance behind its middle | 0.35, 0.06 s, 0.8 units | I, D |
+| the shadow under a cannonball, a rocket, a meteor | 2.0 units across | I |
+
+Tested: `mb_weapon_view_tests` (no GPU or data: the barrels' clock in every phase and interruption, the clips' order and their keys' ticks, the order of a frame's shots and update and the last shot of a cannon through a real session's frames, the laser's front reaching the tip at 0.1 s with the tip red; the particle effects each event asks for on made-up files with the real numbers (the beam's strength over time, the bolt, the ring's size and life, the bursts' size, a trail that follows its rocket, is about 3 units long and small, and stops with it, none for bullets, cannonballs and bolts, a bolt on show for about 0.3 s); the weapon sounds in `mb_sound_tests`; that the HUD's shot count falls in the step of the shot), `mb_weapon_view_smoke` (the real data on the GPU: the animations in the converted files, a tenth to full size, a recoil that settles, a shrinking, and that every frame of every weapon stands still from the grown pose to its recoil and from the recoil's end to where the clip cuts to the shrinking; the barrels following the weapons through a catch, a second catch, a shot and the weapon's end; every weapon and strike played in three levels of three worlds, with its projectiles drawn and its effects on show), and the converter's and the loader's tests for the animations (`tests/test_xfile.py`, `tests/test_assets.cpp`).
+
+## 19. Particles as built (step 5, fx)
+
+The particle files of `Data/Particles` as the game draws them: the explosions' flashes, the firework bursts and the rocket's trail, the smoke and sparks of the flickers, the leaves of a tree that is hit, and the beams and bolts the weapons need. What the files say is `OBJECTS.md` section 8 (**data**); what they mean is **inferred**, since the original's code is not at hand, and every reading below is tagged **[I]** where it is a choice, **[M]** where a frame of the footage (`reference/gameplay`) bears it out, **[D]** where it is the data's own number. The code is `game/ParticleDef.h` (the files), `game/ParticleSystem.h` (the simulation), `game/ParticleDraw.h` (the batches), `game/BrickEffects.h` (the table of 19.5) and, in the engine, `EffectBatch` (`Renderer.h`, `ARCHITECTURE.md` "Particles"). `PlayScene` owns the one system and steps and draws it; `ObjectEffects` and the weapons ask it for effects.
+
+### 19.1 The model
+
+| rule | in the game |
+|---|---|
+| definitions | `ParticleLibrary::load` reads every `*.json` of `Data/Particles` (20 files, 28 definitions); a definition is named `file/name` (`Fireworks/red`) or by its file alone (`explosebig`, the file's first), any case. It reports what it cannot read (`problems()`) and each attribute it does not know (`unknownAttributes()`): none, for the real files |
+| one effect, many particles | a particle's whole state is a function of its age, its start and a few fixed random numbers (no integration), so a run repeats from its seed (`EffectOptions::seed`, else the system's own sequence) and the tests can ask for any moment |
+| how long a particle lives | Flash, Trail, Laser, Lightning: `fade_time_msec`; Smoke, LeafFall, Tornado: `height` / `speed`; Firework: 2 x its reach / `speed`; WaterBubble: 1.5 s (no file gives a height) [I] |
+| emitters | Trail, Smoke, WaterBubble and Tornado keep `num` particles alive: `num` / life of them are put out each second. `attach()` runs until `stop()` (`moveTo()` says where it is, and the particles of a frame are spread along the way it moved, so that a rocket at 15.6 units/s leaves an even line however long the frame); `spawn()` with `seconds` runs that long, and with none puts all `num` out at once |
+| bursts | Flash (one sprite), Firework (`num` sparks) and LeafFall (`num` leaves) go off at once |
+| scale | `EffectOptions::scale` multiplies the sizes and the distances a definition gives, not the times (a Tornado at a tenth of its 160 units fits a board). `EffectOptions::fade` of a Trail is how long each of its particles lives (the file's `fade_time_msec` otherwise), and it still keeps `num` of them alive, so a shorter life is a shorter trail (the bat's rocket: 0.06 s, 18.12) |
+| what a caller can give | a name the library does not have is logged once, however often it is asked for (a rocket tries its trail every frame); a scale, `seconds`, `fade` or `grow` that is not a number is the default (1, 0, 0, 0); `update()` with a step that is NaN, infinite or negative does nothing, and an emitter puts out no more than its `num` in one step, however long |
+| beams | `beam()` makes a Laser or a Lightning between two points; it stays at full strength for `seconds` after it is made and after each `aim()` (so one aimed every frame never fades) and then fades over `fade_time_msec` |
+| the halos | the Oreol files are the prizes' halos, which `PrizeScene` draws (16.1): the system parses them and does not draw them (`spawn` gives no effect) |
+| drawing | every particle is a quad (a camera-facing sprite, a flat mark on the floor, or a strip) in world space; the quads go to the renderer in a handful of batches, one for each texture and way of blending, drawn after the meshes with no depth write (`ParticleBatches`). The night dims them like the other things with no light (0.49 at full night, 14.3). **No depth test [I]**, but for the flat marks: a particle is drawn over a nearer mesh (a flash or a trail behind a tower, a tree's leaves behind a house). A flash is a sprite round the centre of mass of what exploded, so against the depth buffer the bricks that stand round it would cut it in half; the beams come down from the top of the screen and the trails and sparks are small. Testing against the scene without writing depth is `EffectBatch::depthTest` for the other batches, if it is wanted and looked at. The textures of every definition are uploaded when the `PlayScene` is built (`ParticleBatches::preload()`), not by the first flash or trail of a game; the Tornado's missing texture is said when it is first drawn |
+
+### 19.2 The ten types
+
+| type | what the file gives | what is drawn [I unless marked] |
+|---|---|---|
+| Flash | `size`, `speed`, `fade_time_msec`, a `direction` on `explosemeteor` | one sprite turned at random about the line of sight that swells at `speed` (units a second) to `size` and fades in a straight line over `fade_time_msec`. 25 for the dynamite's radius 5 is 0.1 s of swelling at 250 [D]. With a `direction` it lies flat across it, 0.1 up, tested against the depth: `explosemeteor`'s ring on the floor spreads at 50 units/s and is gone in 0.2 s, as the white rings of `special-V2-t858-865` [M] |
+| Firework | 30 sparks, `radius` 10, `speed` 30, `size` 3.5, 500 ms, `direction` down, two colours | each spark flies out along a direction evenly over the sphere to a reach between half and all of `radius`, fast at first and at rest at its reach (it leaves at `speed`, so it lives 2 x reach / `speed`, 0.33 to 0.67 s: the footage's burst is gone by 0.6 s [M]), droops along `direction` at 5 units/s^2, shrinks to half and fades over the last 500 ms, and runs from `colour1` to `colour2` |
+| Trail | 30, 500 ms, `size` 2.5 or 5, `radius` 0 or 1, two colours | sprites left where the emitter was (scattered in a sphere of `radius`), standing still: they shrink to 0.4 of their size and fade in a straight line, running from `colour1` (hot) to `colour2` |
+| Laser | `speed` 150 or 0, `size` 1, 1.5 s or 1 s, two colours | a strip `size` wide between the points, the middle tile of `ParticleLaser1.png` with a round end at each end, the front running out from the first point at `speed` (0: all at once; `EffectOptions::grow`: in that many seconds, whatever the length), `colour1` at the first end to `colour2` at the front, whatever of it is out, fading over `fade_time_msec` (`EffectOptions::fade`: over that many seconds; the weapons' beam takes the footage's 0.2 s after 0.25 s at full strength, not the file's 1.5 s, 18.3) |
+| Lightning | 10 pieces, `shift_coeff` 0.5, `shake_coeff` 0.75, `size` 1, one colour | ten strips from point to point, the nine points between them thrown aside by up to half a piece; three quarters of the throw is drawn anew 30 times a second (the bolt crackles), a quarter is fixed; a round end at each point |
+| Smoke | 50, `angle` 10.5, `speed` 2, `height` 3, `width` 0.1, `size` 1.5, 500 ms | puffs from a source 0.1 wide rise in a cone of 10.5 degrees at 0.7 to 1 times `speed`, for `height` / `speed` = 1.5 s, swelling from 0.4 of their size to the whole, at 0.4 opacity, fading over the last 500 ms |
+| WaterBubble | 10, `speed` 1 or 2, `radius` 0.5, 2 or 8, `size` 1 or 1.5, `direction` up | sprites rise from a disc of `radius` at `speed` for 1.5 s, swaying 0.15 to either side; `fade_time_msec` (50 or 500 ms) is how long they fade in and out |
+| LeafFall | 15, `dimension` 3 x 2 x 3, `height` 6, `speed` 2, `radius` 5, `angle` 25, `size` 1.5 | the leaves start in the box; each falls at 0.7 to 1.3 times `speed` (3 s for the whole `height`), drifts up to `radius` aside, rocks by up to `angle` degrees about the line of sight, never goes below 0.15, and fades over the last 0.5 s |
+| Tornado | 1,500, `radius_small` 5, `radius_big` 50, `height` 160, `speed` 25, `speed_angular` 4.5, `size` 20, 1.5 s | particles rise up the column at `speed` (6.4 s) while they turn about it at `speed_angular`, on a radius that grows from `radius_small` to `radius_big`; they fade in and out over 1.5 s at 0.35 opacity. Its texture is missing (`Particles/PARTICLE.PNG`, a soft dot, stands in) and nothing names it |
+| Oreol | `speed_angular`, `radius`, `radius_offset`, `speed`, `shadow_plane` | the halo of a prize: `PrizeScene`'s (16.1) |
+
+### 19.3 Colours, blending and the textures
+
+- **Colour is the texture's alpha and the file's colour.** A definition with colours (Firework, Laser, Lightning, Trail) draws its colour in place of the texture's, whose alpha shapes the sprite (`EffectBatch::colourOnly`). The files that say so say `modulate_colour="no"`; Fireworks say nothing and are read the same way, because they use the orange dot of `ParticleTrail(orange).png` for all six colours, which a blue spark cannot be if the dot's orange is multiplied in, and the footage's burst is pink [I, M: `special-V1-t1014.20-1015.52`]. The alpha byte of a colour (`0x00...` on the trails and the bolt) is left out: it is not "invisible" [I].
+- **`colour1` is where it begins, `colour2` where it ends** (a trail ages from one to the other, a spark too, a beam runs from its first point to its far end): the yo-yo's string is green at the bat and blue at the ball in the footage [M, 16.3], and a flame cools from white to orange [I].
+- **Additive** for the sparks and the glows that are light on a dark ground: Firework, Trail, Laser, Lightning. **Alpha blended** for Flash, Smoke, LeafFall, WaterBubble and Tornado [I]. The flash is the one that matters: the dynamite's fog is solid orange over green grass in the footage (`special-V1-t8192.76-8192.97`, frames 3 to 6), which an additive flash cannot make (it saturates to white where five overlap), and the shark's small flash is an orange that stays orange on the blue water [M].
+- **The textures are drawn as they are.** Five (`ParticleTrail(orange)`, `Particlered`, `PARTICLE`, `ParticleBubble`, `Bubble2`) have their dot below and right of the middle, by up to a fifth of the sprite: it shows as a slight shift of the rocket's trail to the right, and nowhere else [I: the original's art and, we suppose, its look].
+
+### 19.4 Sizes the footage checks
+
+The dynamite's blast: five flashes of `explosebig` overlap into an orange fog with a bright core each, as in the six frames of `special-V1-t8192.76-8192.97` [M]. The shark's explosion (`exploseType` 3, `exploseball`: 10 across) is a small orange flash on the dark fish [M: `chillcalex-...-t54.1-54.5`]; a crate's (6) is the same size or a little more [M: `rules-V1-t3580.7-3581.4-L30`]. The firework's burst (`special-V1-t1014.20-1015.52`): pink sparks that spread over about 0.3 s and are gone by 0.6 s, mostly above the picture's top edge for a crate at the back [M]. The cauldron's smoke (`special-V1-t3011-3015.8`) is a thin grey wisp over the pot [M, weak].
+
+### 19.5 What breaks in what (the material's `exploseType`)
+
+The data links no explosion file to a type (`OBJECTS.md` 6 and 9); this is the game's table (`explosionEffects`, `game/BrickEffects.h`), a choice [I]:
+
+| `exploseType` | what it is | effect |
+|---|---|---|
+| 0 | the 10 materials of that type: the water, the board's planks and ground (`Water.png`, `Doska-3.jpg`, `Ground-1.jpg`), `Lazer.png`, `BallMaterial`, the three light materials, `Default`, and **`volan`**, the shuttlecocks of `village-tennis` (2 bricks of one energy, 54 points, that the ball destroys) | none [I]: the type has no file of its own, and no frame of the footage shows a shuttlecock break [?] |
+| 2 | the ball, the board, the bullets (`ball.jpg`, `Big-Water.jpg`, `BoardMaterial`, `bulletMaterial`) | none |
+| 3 | prizes, the bat's bullets, the ships' hulls and sails, the shark, the island, a few more | `exploseball`: the small flash, 10 across, **but for the island `Ostrov.jpg`** (75 objects in 8 pirate levels): none, below |
+| 5 | people, animals, trees, fruit, the interactive objects | none: they shrink away, and the footage has no flash on a pirate (section 12 and second study, "Settled", 8) [M] |
+| 6 | what has splinters: buildings, ground, crates, metal | `explosesmall`: 15 across, a little larger, for the heavier stuff |
+| 8 | dynamite | none of its own: the blast is the level's `explosebig` or `explosesmall` (17.2) |
+| 9 | the fire rocket, the meteor, the thunderbolt | `explosemeteor`, the ring on the floor: none of them is a brick the ball breaks, so only the weapons ask for it |
+
+A destroyed object has its flash where its centre of mass was (`BrickDestroyed`), **but for one that a bolt of lightning destroyed** (`BrickDestroyed::prize` is the Thunderbolt): in the footage a bolt ends on the wood blocks with white splinters and no flash (`special-V2-t408.00-408.70`, five bolts), and at V1 level 30 a bolt kills the last crate at 3581.77 to 3581.97 with brown splinters and no glow, where the ball-killed crate of the same material 0.4 s before has its flash [M]. The footage keys the flash on what killed the brick, not on the brick. What the Machine Gun, the Cannon, the Bazooka, the Laser and the Meteor destroy keeps its flash [I]: the cannonball's and the rocket's bursts have their own, and the laser-killed planks of V1 59.2 are too small and too far to tell [?]. The first version's flash for every brick (7 to 15 across over 0.4 s, and 12 sparks) is gone with its sparks: no file gives a brick sparks, and the shark's frames show none.
+
+**The island sinks and has no flash [M, I].** The island's sand (`Ostrov.jpg`, 75 objects in 8 pirate levels: `exploseType` 3, one energy, 66 points, `exploseDelay` 50 ms) would get `exploseball` by the table, but the footage shows a hit tile of it shrinking and sinking over about 0.6 s (V1 55.2 to 55.8) with small bubbles rising where it was and no flash in any of the nine frames (`chillcalex-5WbGEeviosI-t55.0-55.8-island-hit-and-sinking`). So it has none (`explosionEffects(const GameMaterial*)` leaves the island out, a name and not a type, since the shark is type 3 too and does flash): the tile is hidden when it is destroyed, as any brick is, and its score is paid as for any brick. The sinking and the bubbles are not built [?] (19.9).
+
+### 19.6 Where the game uses them
+
+| effect | what | from |
+|---|---|---|
+| a brick that breaks | the table above | `BrickDestroyed` (`PlayScene`) |
+| dynamite | the explosion its level names (`target`: `explosebig` 25 across for the radius 5, `explosesmall` 15 for 3), at the charge's centre; a level that names none gets the one its radius fits | `DynamiteBlast` (`ObjectEffects`) |
+| a cannonball bursts | `exploseyadro`, 10 across, 0.5 s [D] | `ShotHit` |
+| the muzzle | a short flare (the first version's, not in a file) and `Smoke` along the barrel for 0.15 s [I] | `CannonFired` |
+| a firework's rocket | `Trail/TrailOrange` from its tail while it flies (the variant with a scatter and a flame's colours; `TrailBlue` is for the bat's rocket [I]). The rocket's `particles1="trail"` names the file alone, which the library resolves, by its own rule, to the file's first definition, `TrailBlue`; the game overrides the rule here and takes the second [I: a firework's flame is orange, 19.9; `OBJECTS.md` 8]; the burst is one of the six of `Fireworks`, chosen by where and when it goes off | `objects().rockets()`, `RocketBurst` |
+| a flicker | the two files its level names (`sparkKoster` and `smoke` for the cauldron, `spark` and `smoke` for the torch) attached to the top of its box, so that the fire is at the top of the post and over the logs, and they go when it is destroyed | `objects().flickers()`, the level's `names` |
+| a tree that is hit | `LeafFall` from the crown, 3 above the trunk's centre of mass (the trunk is a capsule 10 tall, the foliage round its top [I]); every hit sheds 15 leaves, the last one too | `BrickHit` on a `Tree` |
+
+Not used, because nothing in the data places them: `WaterBubbles` (the sea levels are inferred, no object or level names it; its type is used by the sparks), `Tornado` (the Wind prize is inferred, and the footage shows no tornado: section 15.3), `Flash` (size 30, 0.2 s; for the Thunderbolt's strike, if the weapons want it); `mb_particle_smoke` runs every definition through the system all the same. The weapons use the other five (`Trail/TrailBlue` for the Bazooka's rocket, `TrailMeteor`, `Laser`, `Lightning` and `explosemeteor`: 18.12).
+
+**Left as it was**, because the data does not define it: the prizes' halos and the Yo-Yo's string (16, which already read `Oreol` and `rubber`), the Explosive Ball's blast, the missed prize's sparkle, the teleports' ring and glow, the flicker's wavering light, the muzzle's flare, the shadows.
+
+### 19.7 The numbers
+
+Constants of `ParticleSystem.cpp` and `ObjectEffects.cpp`; the files' numbers are not repeated.
+
+| constant | value | tag |
+|---|---|---|
+| default fade of a definition with none; shortest life of a particle | 0.5 s; 0.01 s | I |
+| flat flash lift | 0.1 | I (the prizes' marks) |
+| firework: slowest spark's share of `radius`, droop, shrink | 0.5, 5 units/s^2, 0.5 | I |
+| trail: shrink over its life | 0.6 | I |
+| smoke: slowest share of `speed`, smallest share of `size`, opacity | 0.7, 0.4, 0.4 | I |
+| water bubble: life, sway, sway rate | 1.5 s, 0.15, 0.8 turns/s | I |
+| leaf: fall speed range, floor, flutter rate | 0.7 to 1.3 x `speed`, 0.15, 1.5 turns/s | I |
+| tornado: opacity | 0.35 | I |
+| bolt: shakes a second | 30 | I |
+| muzzle smoke, flare | 0.15 s, 0.5 s | I |
+| tree crown above the trunk's centre | 3 | I |
+
+### 19.8 Tested, and looked at
+
+`mb_render_test` (the batches: blending, colour only, depth, order, whole triangles, thousands of quads), `mb_particle_tests` (the parser and what it reports; each type's behaviour, beams and bolts, the system's handles, the batches, the table of explosions, by type and by material (the island, the shuttlecock); made-up files with the real numbers), `mb_particle_smoke` (the 20 real files read with nothing unknown, what OBJECTS.md says of them, every texture but the Tornado's, the halos' numbers `PrizeScene` uses, every file the objects and levels name, every definition run to its end), `mb_effects_smoke` (a flicker's fire, blasts, each kind of brick including the island, leaves, the night, a rocket's trail and burst, on the GPU) and the cues of `--effect`. To look at a file without waiting for the game to need it: `MuggleBall3 --autoplay --level piratos-ostrovok --effect Fireworks/magenta@1,0,6,4 --screenshot out.png --simulate 1.25` (`name[@seconds[,x,y,z[,x2,y2,z2]]]`: the second point is a beam's other end).
+
+The cost, on the dynamite chain of `knight-fruktovie-derevia` 0.2 s after the first charge (`--catch-prize bigball@0.5 --simulate 52.7`, then 15 steps): before, 627 draw items for 5 blasts with their sparks, 0.18 ms to update and 1.16 ms to draw and read back a 1024x768 frame; now 314 items and a few batches (with the cauldron's fire as well), 0.17 ms and 1.0 ms. A windowed run with a Tornado of 1,500 particles, smoke, a trail and a burst at once holds the display's 120 frames a second with the Metal validation layer on and nothing reported.
+
+### 19.9 Still open
+
+- **[?]** The flashes' opacity curve (a straight fade) and whether they are alpha blended in the original: the frames say alpha for the dynamite's fog, but one frame is not the whole.
+- **[?]** The Laser's numbers: the file has a front at 150 units a second and a fade of 1.5 s; the footage has a beam full length in 0.1 s that is gone in 0.45 s (V2 62.78 to 63.26, V1 58.88 to 59.3). The game follows the footage (18.3, 18.12) and the file's numbers may mean something else to the original's code (the whole life of a strip of particles, say, of which the beam shows its first third) [?].
+- **[?]** The trail's colours: pale blue to orange as the particle ages, or the other way; the footage's rocket has an orange flame at its tail that the mesh may carry.
+- **[?]** Whether `exploseball` and `explosesmall` are what the original gives bricks of type 3 and 6; the footage shows a small orange flash for both.
+- **[?]** The island: the footage has a tile sink (it shrinks over about 0.6 s) with a few bubbles and no flash, and the game hides it at once and puts no flash on it (19.5). Whether the bubbles are the unused `WaterBubbles` file (10 sprites of `Bubble2.png` rising for 1.5 s, which the sea levels never name) and how the sinking is timed are not known.
+- **[?]** The shuttlecocks of `village-tennis` (`volan`, `exploseType` 0) break with no flash here; the footage does not show one (19.5).
+- **[?]** What `radius_offset` of the Oreol is, and the pulse (`speed`) of the halos; `PrizeScene`'s 4 units stand.
+- **[?]** `Tornado`: how the original draws 1,500 particles of a missing texture over a column 160 tall, and what uses it.
+
+
+## 20. Sails as built (step 5, fx)
+
+The 22 sails of 9 levels (the `cloth` objects: the pirate ships' sails, the boats', the rafts' and the serfs' craft's) as the game simulates, draws and scores them. What the level files say is `LEVEL_FORMAT.md` "Cloth" and `OBJECTS.md` section 7, and is tagged **[D]** here; what the footage shows is **[M]**; the rest is a choice, **[I]**. The code is the engine's `PhysicsWorld::addCloth` (`engine/PhysicsCloth.cpp`; `PHYSICS.md` "Cloth"), `game/ClothPlan.h` (what the level makes of a sail, and `ClothSettings`), `game/Cloth.h` (`ClothSet`: the sails of a `PhysicsScene`) and `game/ClothDraw.h` (the mesh). The rules are `GameSession`'s, as for every brick: the sail's lead actor is the object.
+
+### 20.1 What the original did, from the data
+
+- **A sail is a lattice of sphere actors [D].** The editor expands the `<Cloth>` element into one actor for each particle: a sphere of 0.5 (density 0.01, so 0.0052) in the grid `width` x `height` (3 x 3 seven times, 4 x 3 once, 4 x 4 six, 5 x 5 twice, 5 x 6 four, 7 x 8 twice; 453 particles in all, the 431 nested segments and the 22 cloth objects' own actors). Where they lie follows the trapezoid of `fWidth`, `fWidth2` and `fHeight` exactly (all 22 sails to 7 x 10^-6).
+- **No joint joins two particles; 84 joints hold the corners [D].** 75 ball joints and 9 fixed ones tie the corners to a mast, yard, boat or plot: 4 to each sail, 2 to each of the two half sails of `piratos-bul-bul`. Their breaking strength is 100 (ball) and 200 (fixed); the 4 on `Piratos-Zasada`'s and `piratos-bul-bul`'s rafts do not break. The saved poses of the lowest corners of the ships' sails are 0.15 sideways and 0.25 up from the lattice: the joints had pulled them to the mast.
+- **The wind is in the data [D].** A vector in world space of length 10.000 in all 22, square to the sail, `+-` its normal (the XML's `wind` (0, 0, +-10) turned by the object's pose).
+- **The material is a brick [D].** `Clothmat` (60 points, the skull sail), `Clothmat-white` (65, cream), `Clothmat-green` (62) and `Clothmat-half` (32, the two half sails): brick type 0, one energy, `exploseType` 3, `exploseDelay` 10 ms, the sounds `sea_cloth_hit` and `sea_cloth_dead`, friction 0.9, restitution 0.5. The second study's "+60 sail" is `Clothmat`; its "+20 small sail" is `fparus.jpg`, a brick of the mast (and "flag 40" is `Flag`, another); no sail scores 20.
+- **The data has no cloth solver parameters.** Nothing in it says how stiff, how damped or how thick the original's cloth was, or how it took the wind: only the lattice, the wind, the material and the corners.
+- **What the footage shows [M].** A sail bellied out a little and hung nearly upright (`original-level1-pirates.jpg`), whole while its ship stands, and, once the ship breaks, in the water among the planks (`chillcalex-...-t100-178-level1-overview`; "planks and sails fly after hits", section 5.7).
+
+**The decision [I].** The original's cloth was not rigid segments linked by joints (nothing links the particles; dynamic segment bodies with a spring joint between neighbours were weighed and rejected, for the cost of the world's 100 velocity iterations over about 1,800 joints a step and for a particle of 5 grams beside what it hangs from). It is a sheet of particles with springs of its own, which is what PhysX 2.x's `NxCloth` is and what Jolt's soft body is: the game uses the soft body, with the particles on the lattice, the corners pinned where the joints held them, the data's wind, and the spheres as the particles' collision shape. The springs, the damping and how the wind blows are ours (20.5); the rest is the data's.
+
+**Why pins and not joints [I].** The 84 joints do not tie the corners to a ship's hull (a body of 20,000 to 100,000) but to yards, masts, boats and plots: the 82 that are tied to a body that moves hold 1.07 to 67.99 in mass, and the other 2 a body that does not move (`mb_cloth_smoke` prints it and asserts it; `boat-1.jpg` shows the sails on their yards). Against a particle that is a ratio of 200 to 13,000, which is not why they are pins. The reason is Jolt's: its soft bodies take no constraint (its documentation says constraints cannot operate on soft bodies, and ties one to something else by a particle of no mass that the game moves), so a sail's corner cannot be jointed to its yard whatever the two weigh. Each pinned particle goes to its holder's pose at each fixed step, and lets go when the holder is destroyed or hit as hard as the joint would have broken (20.2).
+
+### 20.2 What the game does with a sail
+
+| rule | in the game |
+|---|---|
+| one body | each sail is one cloth body of the physics world (`ClothSet`, over `PhysicsWorld::addCloth`); the particles start where the level saved them, with the springs as the saved distances, 5 % longer (below); the segments have no bodies, and the lead actor's body is the cloth's, so that contacts, rays and the rules name the sail by its lead actor [I] |
+| the corners | the 84 joints are **pins**: each fixed step a pinned particle goes to the holder's pose times the place it is tied at, whatever the holder does (a ship tilting, a mast falling), and the springs carry the rest. A pin lets go when the holder is destroyed, and when a hit on the holder is as hard as the joint's `maxForce` (the rule that breaks the ship's own joints, `PHYSICS.md` "Breaking joints": the ball's hit on a yard frees every sail on it, the weight of the ball being what it is). A sail that has lost its pins falls [I] |
+| the wind | the data's wind times 0.4, as an acceleration along the sheet's normal: each face takes the part of the wind that is square to it (a sheet edge-on to the wind feels none) and gives it to its particles [I] |
+| the slack | the springs are 5 % longer than the distance between their particles where the level saved them, and grow to that length over 1.5 s: pinned at its corners where it stood, a sail cut with slack bellies out the way the wind goes, 1.2 to 1.7 units for the sails of `piratos-ostrovok` (10 to 14 wide), and a sail with none lies flat as a board whatever the wind. Growing it in is what keeps the first frames still: all at once, a 5 x 6 sail has more than half of its bow (1.05 of 1.9 units) in 0.1 s, grown in 0.04. The first frame is the saved pose; the sails fill out over the first second and a half and then hold [I] |
+| what a sail does not touch | the bodies joined to the ones that hold it (its ship), while a pin holds: the saved sails lie against yards and masts. A sail with no pin left touches everything: it falls on the deck, the water or the floor, and stays there, "afloat" (section 5.7) [I] |
+| what it touches | everything else, particle by particle, with the particle's radius 0.5: a ball (0.6) meets a particle when its centre is within 1.1 of it, which is 31 to 50 % of a 4 x 4 sail's area (`piratos-ostrovok`: 2.75 to 3.5 between particles), 79 % of a 5 x 6 sail's (`Piratos-Chyu-u-dishe`: 2.2) and 89 % of a 7 x 8 sail's (2.0: what is left is the middle of each cell, where the ball's centre is 0.3 to 0.5 from the cell's own; shares of the lattice's rectangle, 1.1 round every particle); between them it goes through, as it did the original's spheres [I]. A ray (the laser) hits the surface itself |
+| what it moves | nothing: a particle of 5 grams moves no brick, and wakes none. Whatever touches it pushes it. A touch is a hit as hard as it is heavy: for the rule that breaks the joints of a ship (`PHYSICS.md` "Breaking joints") the sail weighs what its particles do (a few grams), not the infinity of a kinematic actor, so a ship that closes on a free sail does not break its own joints as if it had met a wall. And a sail holds nothing up: the rays that look for what is under a sleeping body (`PhysicsScene::supported()`) go through its faces [I] |
+| sleep | a sail the wind and the pins have settled lies still after 2 to 7 s, and costs nothing; a pin that goes somewhere else, or a body that moves within a unit of it, wakes it |
+| the Wind and the Earthquake | the Wind prize pushes every sail along x as it accelerates the loose bodies, and the Earthquake gives each sail a kick of its own as it does them (15.3), through `PhysicsWorld::pushCloth` (a velocity added to every particle that is not pinned; it wakes a sail that lies asleep). The pins keep the corners where the holder has them, so a sail hung from two corners across x can only follow its yard; one that faces x, or hangs by one pin, or is free, moves [I] |
+| gone | a sail whose centre falls below `fallLimitY` (-5) has left the board: `ActorFell`, nothing scored, taken out like any piece (the sails of `piratos-birthday`, `piratos-po-volnam` and `Piratos-Kartejniki` fell off in 400 s of autoplay) |
+
+### 20.3 The rules
+
+| rule | in the game |
+|---|---|
+| what hurts a sail | the ball (a blow: a particle touched at 4.5 units/s or more, as for a brick), a blast (the dynamite's radius, and a burst's of a kernel, a rocket or a meteor, against the particles where they are now: `ClothSet::distanceTo`, not the box round them and not where the sail was saved, so a sail carried off by its ship is taken where it hangs), a cannonball and whatever a weapon does through `GameSession::hit()`: one energy each, and a sail has one [D]. A ray's hit names the sail by the lead actor (`PhysicsWorld::userData` of the cloth body), so the laser needs nothing of its own; a bullet, a kernel, a rocket, a bolt or a meteor is a body and touches the particles (it can pass between them), and is spent on the sail it touches (18.4). A bolt is never aimed at a sail (it is no target, below) but is spent on one that hangs over its target (18.5) [I] |
+| what happens | the hit is a `BrickHit` (the sound `sea_cloth_hit`); `exploseDelay` 10 ms later the sail is destroyed: `BrickDestroyed` at its centre, its material's score (60, 65, 62 or 32 [D]), `sea_cloth_dead`, the small flash `exploseball` of its `exploseType` 3 (19.5), and it is gone, whole: no tear, no pieces [I] (tearing was not seen [?]; one energy leaves nothing to tear) |
+| a target? | no: a sail is not required to end a level (second study, "Settled", 3: cloth was never seen at a natural end). `isTarget()` says no, and `targetsLeft()` and the look at what the ball can reach do not count it. For the same reason the Thunderbolt does not pick one, and `mb_prize_smoke` counts a sail once, by its lead actor, among the 13,231 destroyable objects (15.1) |
+| prizes | a destroyed sail is rolled for a prize like any destroyed object (15.1: 15.8 % below 80 points) |
+| its segments | are no objects: only the lead actor has energy (`hit()` on a segment is nothing) |
+
+### 20.4 Drawing
+
+The meshes are the `ClothDraw`'s own and go back to the renderer with it (`ModelCache::destroyMesh`), as the level is left: before that, every level with sails kept its 3 to 9 meshes on the GPU until the renderer ended.
+
+- **The surface is the lattice itself**: one quad a cell, two triangles each, `(width - 1) x (height - 1)` cells, so a sail is as big as its particle grid [I] (the original's may reach half a cell past the particles [?]). The texture (the material's first: `Parus`, `parus-1`, `parus-2`, `parus-2a`) goes over all of it once, its top on the highest row, its left on the first column [I].
+- **Lit like every model**: per pixel, with the material's colours (`Clothmat-white` and `-green` glow at half, as the data says); the normal at a particle is the mean of the faces round it. The mesh is two halves, the surface and its back with the normals turned round, drawn with culling, so that both sides are lit.
+- **Moving**: the mesh's vertices are written again each frame (`Renderer::updateMesh`, a new engine call: the same vertex count, a cycled buffer) from the particles' positions, and only when a sail has moved; a sail that sleeps costs the picture nothing. `PlayScene` takes the items of `ClothDraw`; so does the level viewer, which shows the saved pose at `--simulate 0` and the sails filling out after.
+- **At rest it is today's picture.** The level viewer's picture at t = 0 is the lattice as saved (nothing drew a sail before: the cloth's own mesh is `arbuz.x`, a watermelon, in all 22); `mb_cloth_view_smoke` checks that drawing the sails changes no pixel outside the box round their particles, and the two screenshots of `piratos-ostrovok` at t = 0 of `--autoplay`, before this step and after, differ in 19,127 pixels, all inside a box of 170 x 270 round the sails (the picture before had none).
+
+### 20.5 The numbers
+
+`ClothSettings` (`PhysicsOptions::cloth`) and the constants of `PhysicsCloth.cpp` and `Cloth.cpp`.
+
+| constant | value | tag |
+|---|---|---|
+| particles: radius, mass | 0.5, 0.0052 (the segment's sphere and body) | D |
+| the wind | the level's (length 10) | D |
+| friction, restitution of a particle | 0.9, 0.5 (`Clothmat`) | D |
+| wind taken (`windShare`) | 0.4: a sail held at its four corners bellies out by its slack, the same at 0.4 and at the whole wind (1.2 to 1.7 units on `piratos-ostrovok`); the wind decides how far a sail held by two corners swings from its yard (the half sails of `piratos-bul-bul`: 2.3 units at 0.4, 3.4 at the whole wind), and the footage's sails hang nearly upright | I |
+| slack, grown in over | 5 %, 1.5 s | I |
+| spring compliances (XPBD): along, across a cell, across a fold | 10^-4, 10^-3, 0.05 | I |
+| damping | 0.8 per second | I |
+| solver passes a step | 5 | I |
+| pin released by a hit | the joint's `maxForce` (100, 200, or never) | D, I |
+| what a sail does not touch | the bodies joined to its holders, at most 256 | I |
+| wakes a sleeping sail | a pin 1 mm off, a moving body within 1 unit of its box | I |
+| the solver's guard | a particle beyond 500 units puts the sail back where it was; the third time it is held | I |
+| the sail has left the board | its centre below -5 (`fallLimitY`) | I |
+
+### 20.6 Tested, and looked at
+
+- `mb_physics_cloth_test` (the engine alone: pinned corners hold; slack bows a sheet and the ramp does not snap it; wind blows a sheet and not across its plane; a push moves what is not pinned, along any direction, and wakes it; a ball pushes it, a touch is reported once and its normal and speed are right; pins carry it and let go; a violent pin does not blow it up; bodies it is told to go through; rays from both sides; sleep and waking; the guard; bad input), `mb_cloth_tests` (a sail in a made-up level: the plan, the pins in the holder's frame, the world's pin, a cloth that is not its grid; the scene: counts, bodies, bounds and centre; pins that hold and follow a turned holder; the wind; sleep; a holder taken out, a holder hit hard, a sail taken out; its own ship and a plank; a ball's touch; the rules: not a target, hurt by the ball, a weapon and a blast, 60 points, 10 ms, a fall off the board; a blast takes a sail carried 9 units away by its yard where it is and not where it was saved; a block over a sail is not held up by it and one over a slab is; a ship that touches a free sail breaks no joint; the Wind and the Earthquake move a sail that has gone to sleep; the mesh), `mb_weapon_tests` (each weapon against a sail, 18.4), `mb_cloth_smoke` (all 22 sails of the real levels: 453 particles and 84 pins on holders of 1.07 to 67.99 in mass (20.1), 10 s alone, finite, within 3 of where they were saved (2.3 measured), no spring more than 12 % off (8 % measured), every pin at its holder, a ball on each; of the first sail of each level, a holder taken out and the sail taken out), `mb_cloth_view_smoke` (the 22 draws, the picture of `piratos-ostrovok` with and without the sails, the sails after 4 s, a destroyed one gone, and the meshes given back with the `ClothDraw`, on the GPU), `mb_render_test` (`updateMesh`), `mb_tests` (the level loader reads the grid and the wind), and `mb_gameplay_smoke`, which now fails a level whose sail has a particle that is not finite or was put back.
+- Looked at: `piratos-ostrovok` at 0, 0.1, 0.2, 0.35, 0.5, 0.8, 1.2, 2, 4 and 8 s (the same picture at 0 and 0.1 s, the sails full by 2 s, still after); `Piratos-Chyu-u-dishe`, `piratos-bul-bul`, `piratos-po-volnam`, `Piratos-Zasada`, `Piratos-Kartejniki` and `piratos-bad-night` at 5 s; the autopilot's runs of `piratos-ostrovok` (sails fall with the broken mast at 26 to 36 s and are taken by the ball by 44) and `Piratos-Kartejniki` (the ship breaks at 45 to 60 s, the sail lies on the water at 60 to 90 s, gone by 120). Two 24 s windowed runs (`piratos-ostrovok`, `piratos-bul-bul`) with the Metal validation layer on held the display's 120 frames a second with nothing reported.
+- The wind, the slack and the damping were tuned by eye against `original-level1-pirates.jpg` on `Piratos-Chyu-u-dishe` (the whole wind, none, 0.15 and 0.4; slack 0, 3, 5 and 8 %): 0.4 and 5 % are the sails of the footage, the first a hanging flag, the second a bellied sail.
+
+### 20.7 Cost
+
+The fixed step of the nine levels with sails (`mb_physics_smoke --shots 4 <level>`, the mean over 40 s of play with a test ball and the slowest run, in milliseconds; before is the base commit, which kept the 453 segments as kinematic bodies, after is the mean of four runs):
+
+| level | sails | before | after |
+|---|---|---|---|
+| `Piratos-Chyu-u-dishe` | 3 (142 particles) | 0.151 / 0.281 | 0.172 / 0.324 |
+| `piratos-ostrovok` | 3 (48) | 0.104 / 0.191 | 0.097 / 0.263 |
+| `piratos-po-volnam` | 3 (27) | 0.136 / 0.208 | 0.146 / 0.202 |
+| `piratos-bad-night` | 3 (30) | 0.063 / 0.103 | 0.072 / 0.121 |
+| `Piratos-Zasada` | 1 (30) | 0.035 / 0.068 | 0.060 / 0.080 |
+| `Piratos-Kartejniki` | 3 (48) | 0.036 / 0.082 | 0.044 / 0.093 |
+| `piratos-birthday` | 1 (9) | 0.024 / 0.045 | 0.026 / 0.053 |
+| `piratos-bul-bul` | 4 (110) | 0.019 / 0.021 | 0.038 / 0.069 |
+| `Piratos-Logovo` | 1 (9) | 0.024 / 0.062 | 0.019 / 0.038 |
+
+Within 0.025 ms of what it was (0.15 % of a frame at 60 Hz): a sail costs 0.03 to 0.07 ms a step while it moves (the first seconds, and while a ship breaks) and next to nothing asleep, which the 453 kinematic bodies did not do. All 83 levels (`mb_gameplay_smoke`, 60 s of autopilot) took 0.079 and 0.103 ms a step on average in two runs, against 0.096 before: the machine's load differs from run to run by more than the sails' share, which is in the nine levels above. The windowed update of a ship level is 0.06 to 0.3 ms a frame.
+
+### 20.8 Still open
+
+- **[?]** How the original's cloth took the wind (its drag and lift, a PhysX 2.x cloth's own numbers) and how stiff it was: the data has none. The game's sails belly out by a slack, not by the wind's strength.
+- **[?]** Whether the ball goes through a sail's gaps in the original (spheres of 0.5 at 1.8 to 3.5 apart leave the wider sails gaps of 1.3 to 2.5 for a ball of 1.2) and whether a ball bounces off a sail it hits (a sphere of 5 grams in PhysX bounces nothing of 0.9).
+- **[?]** Whether a sail reaches half a cell past its particles, and how its texture is laid on it.
+- **[?]** Whether sails are blown by the Wind prize or shaken by the Earthquake in the original: they are here (20.2), as the loose bodies are; the footage shows neither.
+- **[?]** Sail flutter: the original's wind is constant, so a sail that has settled lies still; if the original's sails moved in the footage, a gust is a small addition (the engine's `setClothWind` can be called every frame).

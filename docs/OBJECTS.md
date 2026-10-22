@@ -196,7 +196,8 @@ position parameter exists in the data**.
 | `lazer-Korpus`, `Lazer-Stvol` | +-0.61 | -1.11 to 2.91 | the laser |
 
 The weapon frames map one to one onto the four weapon prizes and the four
-bullet definitions (section 4). The default bat of the game (`PlayScene`) is the frames `Korpus` (with its wings and little gear
+bullet definitions (section 4); their sizes in this table are at the rest pose of the file, where `Pushka` is tiny and the others small:
+the `Common` take grows them, which `GAMEPLAY.md` 18.11 describes. The default bat of the game (`PlayScene`) is the frames `Korpus` (with its wings and little gear
 below it), `Shesterenka-Left`, `Shesterenka-Right`, `Hand`, `Small-Hand` and `Bita`, which matches the footage's close-ups of
 the bat without a prize; its origin stands on the floor under the centre of the collision sphere, so that the arch's apex
 (z 3.0) meets the ball (radius 0.6) at its contact z. The texture is `Metall-Raketka-Red.jpg`; materials
@@ -243,7 +244,7 @@ almost nothing on the walls. Against a typical brick (0.5) the pair gives 0.75.
 
 ## 4. Bullets (`Bullets/*`, three in `Interactive/`)
 
-Shapes, offsets, velocities and flags are **data**; readings are marked.
+What the game does with them is in `GAMEPLAY.md` section 18 (step 5). Shapes, offsets, velocities and flags are **data**; readings are marked.
 Positions are in the owner's space (the bat's, for the first four). The machine-gun, cannon and rocket offsets are all at z >= 3.07, in front
 of the paddle (z 3.0); the laser's capsule is at the origin (0, 1, 0), the
 mesh-less template of a bolt that the game places at the laser barrel
@@ -272,6 +273,11 @@ suggests one sound per volley.
 
 `velocity` is in the owner's frame, so the cannon's `+x` is its own forward and
 the meteor's (-10, -30, 10) slants across the board while falling.
+
+The projectiles' models (`Bat-Bullets.x`, `Kernel.x`, `Bat-Rocket.x`, `Meteor.x`) each have one take, `Anim-1`, a turn about one axis
+(the bullets about their length, the left against the right, once in 2 s; the cannonball about x once in 2.33 s; the rocket about its
+length once in 1.33 s; the meteor about x once in 1.33 s), which the game loops while they fly. The rocket's file names no particles
+(only the meteor's names `trailmeteor`); how the weapons look is `GAMEPLAY.md` 18.12.
 
 ## 5. Prizes (`Prizes/*`)
 
@@ -346,8 +352,8 @@ damages or pushes whatever it touches.
   `explosebig` radius 5, `explosesmall` radius 3 (the flash `size` is 5 times the
   radius: 25 and 15, **data**). Three more explosion flashes are named by nothing:
   `exploseball` (size 10), `exploseyadro` (size 10, the cannonball) and
-  `explosemeteor` (size 10, texture `boom.png`): chosen by the executable
-  (**inferred**: ExplosiveBall, cannon ball, meteor).
+  `explosemeteor` (size 10, texture `boom.png`, `direction` up: a ring on the floor): chosen by the executable
+  (**inferred**: ExplosiveBall, cannon ball, meteor). The game gives them these jobs, and a brick's `exploseType` its flash (`GAMEPLAY.md` 19.5).
 - A material's `exploseType` is **not** linked to any explosion definition by the
   data; it is an enumeration the code reads (section 9 has the observed classes).
   Only `exploseType` 8 (dynamite) and 9 (fire rocket, meteor, thunderbolt) look
@@ -402,33 +408,72 @@ A `<cloth>` element: `cloth="1"`, `wind` (0 0 10 or 0 0 -10), `width` and `heigh
 (particles, 3 to 8), `fWidth`, `fWidth2` (top and bottom widths), `fHeight`,
 `translation`, and the names of the objects in the same file that pin its
 corners: `lu`, `ru`, `ld`, `rd` (left or right, up or down). **Inferred**. The
-level holds the sail as width x height - 1 nested actors.
+level holds the sail as width x height - 1 nested actors. **Data** (`LEVEL_FORMAT.md`, "Cloth"): the editor
+expands the element into the lattice of its particles (one sphere actor each, `fWidth`, `fWidth2`, `fHeight`
+and `translation` giving their places exactly), keeps `wind` turned by the object's pose as a world vector of length 10,
+and turns the named corners into the 84 joints; the material is the `Clothmat` family (60, 65, 62 and 32 points,
+one energy, `exploseType` 3, the sounds `sea_cloth_hit` and `sea_cloth_dead`). The 22 sails are in 9 levels, 9 on the pirate ships (`pirateship.x`), 3 on boats (`boat-water.x`), 3 on rafts (`plot.x`)
+and 7 on serfs' craft (`serf.x`), and the game simulates them (`GAMEPLAY.md` section 20).
+The footage's "sail +20" is not one of them: `fparus.jpg` (20) and `Flag` (40) are bricks of the masts.
 
 ## 8. Particle systems (`Particles/*`)
 
 Each file is `<particles>` with one or more `<particle name texture type ...>`
-(spaces around `=` are legal). Ten `type`s. 11 files are named by nothing in the
+(spaces around `=` are legal): 20 files, 28 definitions, ten `type`s. 11 files are named by nothing in the
 object XML, so the executable chooses them (**inferred** users in the last
 column). All textures exist except `Particles/ParticleRoket.png` (`Tornado`);
-names are case-insensitive references (`Particlered.png` is `PARTICLEred.png`).
+names are case-insensitive references (`Particlered.png` is `PARTICLEred.png`). Which file an object uses is `particles1` and
+`particles2` of its `<extra>` (a file stem, any case: `trail`, `sparkKoster`; the file alone is its first definition), baked into the level as
+`names` for a flicker and `target` for dynamite (section 2).
 
 | File | `type`, key parameters | Used by |
 |---|---|---|
-| `Oreolblue`, `Oreolred` | two `Oreol` sprites: a halo spinning at `speed_angular` 3.5, and `OreolShadow` (`shadow_plane` y 1, 0.1 above the floor) at -1.5; textures `Oreols/02`+`07` (blue), `11`+`09` (red) | the prize halos (`oreol`) |
-| `Trail` | `Trail`, 30 particles, fade 500 ms, size 2.5, colours `0x00e2e2ff` to `0x007070ff` (`TrailBlue`) or `0x00ff8040` (`TrailOrange`) | `fire-rocket` (`particles1="trail"`); which variant, and any other use, is by code |
+| `Oreolblue`, `Oreolred` | two `Oreol` sprites: a halo spinning at `speed_angular` 3.5, and `OreolShadow` (`shadow_plane` y 1, 0.1 above the floor) at -1.5; textures `Oreols/02`+`07` (blue), `11`+`09` (red) | the prize halos (`oreol`); `PrizeScene` draws them from these numbers |
+| `Trail` | `Trail`, 30 particles, fade 500 ms, size 2.5, colours `0x00e2e2ff` to `0x007070ff` (`TrailBlue`) or `0x00ff8040` (`TrailOrange`) | `fire-rocket` (`particles1="trail"`: the file alone, which the library resolves to its first definition, `TrailBlue`; the game overrides that rule and takes `TrailOrange`, a flame's colours, **inferred**: which variant is by code); the bat's rocket takes `TrailBlue` (`GAMEPLAY.md` 19.6) |
 | `TrailMeteor` | `Trail`, size 5, red | `meteor` |
 | `explosebig`, `explosesmall` | `Flash`, size 25 and 15, fade 500 ms, speed 250 | dynamite |
-| `exploseball`, `exploseyadro`, `explosemeteor` | `Flash`, size 10, speed 250, 150, 50 | by code: explosive ball, cannonball, meteor |
+| `exploseball`, `exploseyadro`, `explosemeteor` | `Flash`, size 10, speed 250, 150, 50 | by code: the game uses `exploseyadro` for a cannonball, `explosemeteor` (flat on the floor) for the meteor's class, `exploseball` for the lighter bricks (`GAMEPLAY.md` 19.5) |
 | `Flash` | `Flash`, size 30, fade 200 ms | by code |
 | `Fireworks` | `Firework`, 6 variants (`SimpleFirework`, `red`, `yellow`, `green`, `blue`, `magenta`), 30 particles, radius 10, speed 30, fade 500 ms | fire-rocket bursts, firework objects |
-| `Laser` | `Laser`, yellow to red, speed 150, fade 1500 ms | the laser bolt |
+| `Laser` | `Laser`, yellow to red, speed 150, fade 1500 ms | the laser bolt (the game takes the footage's numbers over these: the front out in 0.1 s, the beam gone in 0.45 s, `GAMEPLAY.md` 18.3) |
 | `Lightning` | `Lightning`, 10 segments, `shift_coeff` 0.5, `shake_coeff` 0.75, colour `0x00eeeeFF` | Thunderbolt |
 | `rubber` | `Laser`, green to blue, speed 0, fade 1000 ms | the YoYo string |
 | `LeafFall` | `LeafFall`, 15 leaves, `Leaf.png`, spread 3 x 2 x 3, height 6 | trees when hit |
-| `Smoke` | `Smoke`, 50 particles, height 3, `ParticleBubble.png` | flickers (`particles2`) |
+| `Smoke` | `Smoke`, 50 particles, height 3, `ParticleBubble.png` | flickers (`particles2`) and the cannon's muzzle |
 | `Spark`, `SparkKoster` | `WaterBubble`, 10 particles, radius 0.5 / 2, `Particlered.png` | torch, cauldron (`particles1`) |
-| `WaterBubbles` | `WaterBubble`, radius 8, `Bubble2.png` | sea levels (**inferred**) |
-| `Tornado` | `Tornado`, **1,500** particles, radii 5 to 50, height 160, size 20, `ParticleRoket.png` (missing) | Wind prize |
+| `WaterBubbles` | `WaterBubble`, radius 8, `Bubble2.png` | sea levels (**inferred**; no object or level names it) |
+| `Tornado` | `Tornado`, **1,500** particles, radii 5 to 50, height 160, size 20, `ParticleRoket.png` (missing) | Wind prize (**inferred**; nothing names it, and the footage shows no tornado) |
+
+**The attributes.** 26 names are used (**data**); a file gives only the ones its type reads. What each means is **inferred**: the
+original's code is not at hand, so each reading was chosen to fit the values, the file names and the footage, and `GAMEPLAY.md`
+section 19 says by which. `ParticleLibrary` (`game/ParticleDef.h`) reads them all, and reports an attribute it does not know
+(`unknownAttributes()`) and a definition it cannot read (`problems()`); `mb_particle_smoke` checks that the 20 files give neither.
+
+| Attribute | Given by | Reading |
+|---|---|---|
+| `name`, `texture`, `type` | all | the definition's name; the image below `Textures`; one of the ten types (any case) |
+| `num` | all but Flash and Laser | the particles alive at once: a Firework's burst, a Smoke's, Trail's, WaterBubble's and Tornado's pool (put out at `num` / life a second), a LeafFall's leaves, a Lightning's pieces. Oreol: 1 |
+| `size` | all but Oreol | the sprite across, in world units; the width of a beam or a bolt; a Flash's largest size |
+| `radius` | Firework, Trail, WaterBubble, LeafFall, Oreol | Firework: the farthest a spark flies; Trail: the sphere round the emitter that the sprites are put in; WaterBubble: the disc they rise from; LeafFall: how far a leaf drifts sideways. Oreol: not read |
+| `radius_small`, `radius_big` | Tornado | the funnel's radius at its foot and at its top |
+| `radius_offset` | Oreol | not read: what it offsets is not known |
+| `speed` | Flash, Firework, Laser, LeafFall, Oreol, Smoke, Tornado, WaterBubble | Flash: how fast it swells to its size (units a second); Firework: the speed a spark leaves at; Laser: how fast the front runs along the beam (0: all of it at once); Smoke, WaterBubble, LeafFall, Tornado: how fast they rise (a leaf: fall, a Tornado: up the funnel). Oreol: not read |
+| `speed_angular` | Oreol, Tornado | radians a second: the halo's spin (negative: the other way), the funnel's turn |
+| `inverse_rotation` | Oreol (`no` in both) | turns the other way; the system reads it for a Tornado too |
+| `angle` | Smoke, LeafFall | degrees: a puff's cone about `direction` (half-angle); how far a leaf rocks to either side |
+| `height`, `width` | Smoke, LeafFall, Tornado | `height` / `speed` is how long a puff, a leaf or a funnel particle lives; Smoke's `width` is the source's width |
+| `dimension` | LeafFall | the box the leaves start in (the crown), x y z |
+| `direction` | Flash (`explosemeteor`), Firework, Smoke, WaterBubble, Tornado | a vector: a Flash lies flat across it (none: it faces the camera); a Firework droops along it (`0 -1 0`: down); smoke and bubbles rise along it |
+| `fade_time_msec` | all but Oreol, LeafFall | milliseconds. Flash, Trail, Lightning, Laser: how long it lasts or fades; Firework, Smoke, LeafFall: the last part of a life that fades out; WaterBubble and Tornado: the fade in and out at each end of a life |
+| `colour1`, `colour2`, `colour` | Firework, Laser, Trail; Lightning | `0xAARRGGBB`: the colour at birth and at death (a beam's two ends); a bolt's one colour. The alpha byte (`0x00...` on the trails and the bolt) is not "invisible" and is ignored |
+| `modulate_colour` | Laser, Lightning, Trail | `no`: the colour replaces the texture's, whose alpha only shapes the sprite. No file says `yes`; a Firework, which says nothing, is read the same way |
+| `shift_coeff`, `shake_coeff` | Lightning | how far the bolt's points are thrown sideways (a share of a piece's length), and how much of that throw is drawn anew each time the bolt shakes |
+| `shadow_plane`, `shadow_position` | OreolShadow | the mark lies in the plane with this normal, 0.1 up from the floor |
+
+Two things about the pictures. `ParticleLaser1.png` is three tiles side by side (a round end, the body, a round end): a beam is the
+body stretched along its length with an end at each point. And five of the textures have their dot below and right of the middle
+(`ParticleTrail(orange)`, `Particlered`, `PARTICLE`, `ParticleBubble`, `Bubble2`; the centre of their opacity is at 0.5 to 0.7 across and
+0.63 to 0.75 down): they are drawn as they are.
 
 ## 9. Materials: what the columns do
 
@@ -441,7 +486,7 @@ case-insensitively, first definition wins (`meteor` is the only repeat).
 | `brickType` | **0** 213, **4** 17, **2** 6, **5** 1 (no 1 or 3) | 2: not a brick. The six are `BallMaterial`, `ball.jpg`, `bulletMaterial`, `BoardMaterial`, `Big-Water.jpg` and `Default`: ball, bullets, board, the fallback. 5: `Tree`, the trunk (energy 5, leaf particle). 4: ground tiles (`trava`, `trava-ground`, `Ground-2*`, `plitka`), rocks (`Skala`), crates (`Box.jpg`) and the 10 animals. 0: everything else, including characters, buildings, lava and water tiles. Level usage: 0 on 10,356 objects, 4 on 2,771, 5 on 128, 2 on 83 (the boards) |
 | `brickEnergy` | 1: 130, 2: 25, 3: 77, 4: 4, 5: 1 | hit points, **inferred**. Level bricks: 1 for 9,329, 3 for 2,173 (characters, animals, 3 ground types), 2 for 483, 4 for 342. How much damage a hit does is **unknown** |
 | `brickScore` | 4 to 777, median 60 over the 237 materials (42 over the scored level objects) | points when destroyed. Level totals (including `vibro` objects) run from 1,422 to 18,733 (median 7,191); `piratos-ostrovok` 4,231 over 65 objects, `cowboys-saloon` 3,986 over 88 |
-| `exploseType` | 5: 93, 6: 67, 3: 59, 0: 10, 2: 4, 9: 3, 8: 1 | the way the object breaks, an enumeration in code. **6**: shatters into splinters (66 of 67 have a `splinter` mesh): buildings, ground, crates, metal. **5**: no splinter (5 of 93 have one): characters, animals, trees, interactive objects (cannon, portals, generators, spring, volcano, fireworks). **3**: prizes, `bat_*` materials, ship hull and sails (11), plus a few. **8**: dynamite. **9**: fire rocket, meteor, thunderbolt. **0 / 2**: nothing (system, board, light, Default) |
+| `exploseType` | 5: 93, 6: 67, 3: 59, 0: 10, 2: 4, 9: 3, 8: 1 | the way the object breaks, an enumeration in code. **6**: shatters into splinters (66 of 67 have a `splinter` mesh): buildings, ground, crates, metal. **5**: no splinter (5 of 93 have one): characters, animals, trees, interactive objects (cannon, portals, generators, spring, volcano, fireworks). **3**: prizes, `bat_*` materials, ship hull and sails (11), plus a few (the shark, the island `Ostrov.jpg`: the game gives the island no flash, `GAMEPLAY.md` 19.5). **8**: dynamite. **9**: fire rocket, meteor, thunderbolt. **0 / 2**: nothing (system, board, light, Default; the ball and bullets; and `volan`, the shuttlecocks of `village-tennis`, a brick of type 0 that the ball destroys) |
 | `exploseDelay` | 0 to 500 ms; 500 for the prizes and `bat_*` materials, 0 to 250 for most bricks (500 on `Oblaka.jpg`, `MillKrisha` and `MillWindow`) | section 6 |
 | `explosePower` | 6.789 (72) or 1.0 (165) | section 6: unused |
 | `splinter` | 15 distinct meshes on 77 materials; `splinter-brown.x` 25, `splinter.x` 15 | the debris mesh that flies out; 160 materials have none. 4 more splinter meshes exist that no material names |

@@ -13,11 +13,17 @@
 #include <Jolt/Physics/Body/BodyActivationListener.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Collision/ContactListener.h>
+#include <Jolt/Physics/Collision/GroupFilter.h>
 #include <Jolt/Physics/Collision/PhysicsMaterial.h>
 #include <Jolt/Physics/Constraints/TwoBodyConstraint.h>
 #include <Jolt/Physics/PhysicsSystem.h>
+#include <Jolt/Physics/SoftBody/SoftBodyContactListener.h>
+#include <Jolt/Physics/SoftBody/SoftBodyManifold.h>
+#include <Jolt/Physics/SoftBody/SoftBodySharedSettings.h>
 
+#include <array>
 #include <cstdint>
+#include <map>
 #include <mutex>
 #include <set>
 #include <string>
@@ -26,6 +32,9 @@
 #include <vector>
 
 namespace mb {
+
+// Events nobody collected; a game that never calls takeContacts() must not eat the memory.
+constexpr std::size_t kMaxQueuedContacts = 1u << 16;
 
 // Allocator, type registry and factory are process-wide in Jolt; every world holds one of these
 // and the last one to go tears them down.
@@ -37,18 +46,23 @@ public:
     JoltRuntime& operator=(const JoltRuntime&) = delete;
 };
 
-// A body is either moving or not; static bodies live in the cheaper broad phase tree.
+// A body is either moving or not; static bodies live in the cheaper broad phase tree. A cloth is a layer of its own, in the moving tree:
+// it sees every body, and no body sees it (the filter below is deliberately not symmetric). Jolt lets a body that moves continuously
+// cast against the faces of a soft body, and a face with a particle that is held (a pinned one has no mass) takes the whole momentum of
+// what hits it into the others: the particles go to 10^7 in one step. So the cloth is the one that looks for bodies, particle by
+// particle, and nothing looks for it; a particle is what the original's sails collided with (spheres of 0.5 on a grid).
 namespace layers {
 constexpr JPH::ObjectLayer nonMoving = 0;
 constexpr JPH::ObjectLayer moving = 1;
-constexpr JPH::uint count = 2;
+constexpr JPH::ObjectLayer cloth = 2;
+constexpr JPH::uint broadPhaseCount = 2;  // the cloth is in the moving one
 }  // namespace layers
 
 class BroadPhaseLayers final : public JPH::BroadPhaseLayerInterface {
 public:
-    JPH::uint GetNumBroadPhaseLayers() const override { return layers::count; }
+    JPH::uint GetNumBroadPhaseLayers() const override { return layers::broadPhaseCount; }
     JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer layer) const override {
-        return JPH::BroadPhaseLayer(static_cast<JPH::uint8>(layer));
+        return JPH::BroadPhaseLayer(static_cast<JPH::uint8>(layer == layers::nonMoving ? layers::nonMoving : layers::moving));
     }
 #if defined(JPH_EXTERNAL_PROFILE) || defined(JPH_PROFILE_ENABLED)
     const char* GetBroadPhaseLayerName(JPH::BroadPhaseLayer layer) const override {
@@ -60,14 +74,25 @@ public:
 class ObjectVsBroadPhaseLayers final : public JPH::ObjectVsBroadPhaseLayerFilter {
 public:
     bool ShouldCollide(JPH::ObjectLayer object, JPH::BroadPhaseLayer broadPhase) const override {
-        return object == layers::moving || static_cast<JPH::BroadPhaseLayer::Type>(broadPhase) == layers::moving;
+        return object != layers::nonMoving || static_cast<JPH::BroadPhaseLayer::Type>(broadPhase) == layers::moving;
     }
 };
 
 class ObjectLayerPairs final : public JPH::ObjectLayerPairFilter {
 public:
     bool ShouldCollide(JPH::ObjectLayer a, JPH::ObjectLayer b) const override {
-        return a == layers::moving || b == layers::moving;
+        if (a == layers::cloth) {
+            return b != layers::cloth;
+        }
+        return b != layers::cloth && (a == layers::moving || b == layers::moving);
+    }
+};
+
+// BodyDesc::group and collidesWith: each body's group id is its kind and its sub group id the kinds it touches.
+class KindFilter final : public JPH::GroupFilter {
+public:
+    bool CanCollide(const JPH::CollisionGroup& a, const JPH::CollisionGroup& b) const override {
+        return (a.GetGroupID() & b.GetSubGroupID()) != 0 && (b.GetGroupID() & a.GetSubGroupID()) != 0;
     }
 };
 
@@ -115,13 +140,43 @@ struct KinematicTarget {
     JPH::Quat rotation;
 };
 
+// A cloth's own state beside its Jolt soft body (addCloth()).
+struct ClothRecord {
+    struct Pin {
+        Vec3 position;
+        Vec3 velocity;  // what took the particle to this place, for the moment it is let go
+    };
+    int width = 0, height = 0;
+    std::vector<std::array<std::uint32_t, 3>> faces;
+    std::vector<float> invMass;  // by particle, as the cloth was made: a pinned particle has none
+    // The springs' rest lengths: what they are to be when the slack is all there, and how far they have grown towards it.
+    JPH::Ref<JPH::SoftBodySharedSettings> shared;
+    std::vector<float> restLength;  // by spring of `shared`
+    float slack = 0, slackSeconds = 0, age = 0;
+    bool slackGrown = false;  // all of it is there
+    std::map<int, Pin> pins;     // by particle
+    Vec3 wind{};
+    std::unordered_set<BodyId> ignored;  // bodies it goes through
+    std::set<BodyId> touching;           // what it touched at the end of the last step
+    std::vector<JPH::Vec3> sound;        // the particles at the end of the last step that left them all within bounds
+    int resets = 0;                      // how many times the solver sent them off, see PhysicsWorld::Impl::guardCloths()
+    bool frozen = false;                 // and held where it is for good
+};
+
+// What a cloth's particles met in a step, as Jolt's worker threads saw it (see PhysicsWorld::Impl::OnSoftBodyContactAdded).
+struct ClothTouch {
+    BodyId cloth = 0, other = 0;
+    Vec3 point, normal;
+    float speed = 0;
+};
+
 // True when every translation and rotation axis is locked: such a body is created static.
 bool fullyLocked(const BodyDesc& desc);
 
 // Builds the Jolt description of a body (shape, mass, motion). On failure returns false and says why.
 bool makeBodySettings(const BodyDesc& desc, JPH::BodyCreationSettings& out, std::string& error);
 
-struct PhysicsWorld::Impl final : JPH::ContactListener, JPH::BodyActivationListener {
+struct PhysicsWorld::Impl final : JPH::ContactListener, JPH::BodyActivationListener, JPH::SoftBodyContactListener {
     Impl(Vec3 gravity, const PhysicsSettings& requested);
     ~Impl() override;
 
@@ -135,6 +190,7 @@ struct PhysicsWorld::Impl final : JPH::ContactListener, JPH::BodyActivationListe
     std::unique_ptr<JPH::JobSystem> jobSystem;
     JPH::PhysicsSystem system;
     JPH::BodyInterface& bodies;  // the unlocked interface: everything here runs on one thread, outside step()
+    JPH::Ref<KindFilter> kinds = new KindFilter;  // on every body, see BodyDesc::group
 
     std::unordered_map<BodyId, BodyRecord> records;
     std::unordered_map<JointId, JointRecord> joints;
@@ -160,6 +216,9 @@ struct PhysicsWorld::Impl final : JPH::ContactListener, JPH::BodyActivationListe
 
     std::vector<JointId> brokenJoints;
 
+    std::unordered_map<BodyId, ClothRecord> cloths;
+    std::vector<ClothTouch> clothTouches;  // filled by worker threads, under queueMutex
+
     mutable std::unordered_set<BodyId> warnedBodies;
     mutable std::unordered_set<JointId> warnedJoints;
     bool warnedUpdateError = false;
@@ -180,12 +239,21 @@ struct PhysicsWorld::Impl final : JPH::ContactListener, JPH::BodyActivationListe
     void addNoCollide(BodyId a, BodyId b);
     void removeNoCollide(BodyId a, BodyId b);
     void invalidateContacts(BodyId a, BodyId b);
+    bool movingBodyNear(const JPH::Body& cloth, const ClothRecord& record) const;
+    void guardCloths();          // after it: a cloth that has gone to pieces is put back
+    void driveCloths();          // before a fixed step: the pins and the wind
+    void reportClothTouches();   // after it: the touches that began become contact events
 
     // JPH::ContactListener, called from worker threads.
     JPH::ValidateResult OnContactValidate(const JPH::Body& a, const JPH::Body& b, JPH::RVec3Arg baseOffset,
                                           const JPH::CollideShapeResult& result) override;
     void OnContactAdded(const JPH::Body& a, const JPH::Body& b, const JPH::ContactManifold& manifold,
                         JPH::ContactSettings& settings) override;
+
+    // JPH::SoftBodyContactListener, called from worker threads.
+    JPH::SoftBodyValidateResult OnSoftBodyContactValidate(const JPH::Body& cloth, const JPH::Body& other,
+                                                          JPH::SoftBodyContactSettings& settings) override;
+    void OnSoftBodyContactAdded(const JPH::Body& cloth, const JPH::SoftBodyManifold& manifold) override;
 
     // JPH::BodyActivationListener
     void OnBodyActivated(const JPH::BodyID& id, JPH::uint64 userData) override;

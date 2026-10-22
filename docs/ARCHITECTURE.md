@@ -6,13 +6,13 @@ Goal: native on macOS first, then other platforms without rewriting the game.
 |---|---|---|
 | Language and build | C++20, CMake | CMake also generates Xcode projects. |
 | Window, input, audio device | SDL3 | Same API on macOS, Windows, Linux, iOS and consoles. |
-| Rendering | SDL3 GPU API | Metal on macOS, Vulkan elsewhere. Shaders are GLSL, compiled ahead of time to SPIR-V and MSL by `tools/build_shaders.py` (glslang + SPIRV-Cross); the generated headers are committed, so building needs neither tool. |
+| Rendering | SDL3 GPU API | Metal on macOS, Vulkan elsewhere. Shaders are GLSL, compiled ahead of time to SPIR-V and MSL by `tools/build_shaders.py` (glslang + SPIRV-Cross); the generated headers are committed, so building needs neither tool. Meshes are `DrawItem`s, the particles `EffectBatch`es of world-space triangles (one call for each texture and blend, whatever the number of particles), 2D `Sprite`s go over both. |
 | Physics | Jolt Physics | Replaces PhysX 2.x. Levels store PhysX boxes, spheres, capsules, convexes and joints, all of which map directly. `PhysicsWorld` is the PhysX model over Jolt, `PhysicsScene` runs a level in it; how, and why, is in `PHYSICS.md`. |
 | Audio | stb_vorbis, a software mixer, SDL3 audio | All sounds and music are Ogg Vorbis. See [`AUDIO.md`](AUDIO.md). |
 | XML | Converted offline | `materials.xml`, the sound and music lists, the menus and the string table, and the object and particle definitions are converted to JSON by `tools/materials.py`, `tools/sounds.py`, `tools/ui.py` and `tools/objects.py` (see `OBJECTS.md`). |
 | Text | The original's pre-rendered font atlases | Five `.crd` + `.dds` atlases of `Bookworm.ttf` and `brushType-SemiBold.TTF` ship with the game and are drawn as sprites (`BitmapFont`). SDL3_ttf stays an option for sizes they lack. |
 | 2D UI | Sprites on the renderer, forms in `game/` | See below. |
-| Meshes | Offline `.x` → binary glTF, loaded with cgltf | 272 meshes, all `xof 0303bin 0032`. See `ASSET_FORMATS.md`. |
+| Meshes | Offline `.x` → binary glTF, loaded with cgltf | 272 meshes, all `xof 0303bin 0032`; the 80 animation takes that move a frame (77 files) are glTF animations, which `Model::animations` has: `findAnimation(name)`, and `globalPoses(animation, seconds)` for every node's pose at a time (`localPoses` before its parents are applied; `trsMatrix` makes a node's matrix of its parts). See `ASSET_FORMATS.md`. |
 | Images | stb_image | JPEG and PNG; the 25 DDS files are converted to PNG offline. |
 | Saves | JSON in the per-user folder | Settings, progress and high scores in three small versioned files, written atomically (`SAVES.md`). `SaveData` is the only model of them: the menus work on it directly. |
 | macOS app | CMake bundle, `scripts/package_macos.sh` | Universal binary, icon, optional bundled assets, signing and notarization (`MACOS.md`). |
@@ -139,6 +139,51 @@ and the level's number counting from 1 when a game starts, `PlaySession` keeps t
 it, and it carries over to the next level. `MuggleBall3 --level <name> --hud [--hud-state 3,1529,1,Cannon:6]` shows
 placeholders on the level viewer or a screenshot.
 
+## Particles
+
+The effects of `Data/Particles` (docs/GAMEPLAY.md section 19, docs/OBJECTS.md section 8) are one system that anything can ask for an effect by name; it has no GPU and no window, and the renderer sees only batches of triangles.
+
+| Layer | What |
+|---|---|
+| `engine/` `EffectBatch` | A span of `EffectVertex` (a world position, a texture coordinate and a colour; three to a triangle), one texture, additive or alpha blending, depth tested or not, and whether the vertex colour replaces the texture's. `Renderer::renderToWindow` and `renderToImage` take a list of them as a last argument (`effects`, empty by default), stream them through one vertex buffer and draw each with one call, after the meshes and before the debug lines and the sprites, in order, with no culling and no depth write (`engine/shaders/effect.*`). |
+| `game/` `ParticleLibrary` | The definitions of the 20 files (`ParticleDef`: every attribute they use), by `file` or `file/name`. Reports what it cannot read and any attribute it does not know. |
+| `game/` `ParticleSystem` | The simulation: `spawn`, `attach`, `beam`, `moveTo`, `aim`, `stop`, `alive`, `update(dt)`, and `appendQuads(view, out)`, which says what quads everything alive is as a camera sees it. A particle's state is a function of its age and its seed, so it is deterministic and tested without a GPU. |
+| `game/` `ParticleBatches` | The quads as `EffectBatch`es, grouped by texture and blend (it resolves a definition's texture name once, through a function the caller gives, all of them at once with `preload()` when the `PlayScene` is built; a missing one is drawn as a soft dot and said when it is first drawn), dimmed for the night. Owns the vertices the batches point into. |
+| `game/` `explosionEffects` | The table from a material's `exploseType` to the effects of a brick that breaks (by material too: the island `Ostrov.jpg` has none, `GAMEPLAY.md` 19.5). |
+
+`PlayScene` owns the one `ParticleSystem` (`scene.particles()`), steps it near the end of `update()` and builds the batches last (`scene.effects()`, which `PlaySession` gives the renderer after the items). Spawn from there, before it is stepped: from an event handler of `PlayScene::update`, or from a class `update()` calls, as `ObjectEffects` does for the dynamite's flash, the rocket's trail and burst, the flickers' fire and the cannon's smoke.
+
+```cpp
+ParticleSystem& fx = scene.particles();
+fx.spawn("explosebig", at);                                           // a flash, a firework or a fall of leaves goes off and is gone
+fx.spawn("Fireworks/red", at, {.scale = 0.5f});                       // `scale` is of sizes and distances, not times
+fx.spawn("Smoke", muzzle, {.direction = barrel, .seconds = 0.15f});   // an emitter, for a moment
+const EffectId trail = fx.attach("Trail/TrailOrange", rocket);        // an emitter until stopped ...
+fx.moveTo(trail, rocket);                                             // ... told every frame where it is
+fx.stop(trail);                                                       // no more come out; what it left fades
+const EffectId bolt = fx.beam("Lightning", from, to, {.seconds = 0.25f});   // a beam (Laser) or a bolt, strong for `seconds`, then it fades
+fx.beam("Laser", from, to, {.seconds = 0.25f, .fade = 0.2f, .grow = 0.1f});   // `fade`: how long it takes to, where the definition's is not
+                                                                              // right; `grow`: how long a Laser's front takes to run out
+fx.spawn("explosemeteor", at, {.seconds = 0.4f});                     // a Flash lives `seconds` where its `fade_time_msec` is not right
+fx.aim(bolt, from, to);                                               // moves it, and keeps it strong for `seconds` more
+```
+
+A name is a file (`explosebig`, its first definition) or `file/name` (`Trail/TrailBlue`), any case. `spawn` is for the types that go off at once (Flash, Firework, LeafFall) and, with `seconds`, for emitters (Trail, Smoke, WaterBubble, Tornado); `attach` only for emitters; `beam` only for Laser and Lightning; the wrong call, or a name the library lacks (logged once, however often it is asked for), gives `kNoEffect` (0) and every call takes it harmlessly; a step that is not a time, or a scale, `seconds`, `fade` or `grow` that is not a number, is ignored or the default. `MuggleBall3 --autoplay --effect <name>[@seconds[,x,y,z[,x2,y2,z2]]] --screenshot out.png --simulate <seconds>` puts any of them on a level. Tests: `mb_particle_tests` (made-up files with the real numbers: the parser, each type, the batches), `mb_particle_smoke` (the 20 real files and what names them), `mb_effects_smoke` (the effects in the scene from the rules' events, on the GPU) and `mb_render_test` (the batches in the renderer).
+
+## Cloth
+
+The 22 sails of the levels (docs/GAMEPLAY.md section 20, docs/PHYSICS.md "Cloth") are a soft body of Jolt in the physics world, a mesh that follows it, and rules that are the bricks' own.
+
+| Layer | What |
+|---|---|
+| `engine/` `PhysicsWorld` | `addCloth(ClothDesc)` makes a grid of particles with springs along it, across its cells and across its folds (and slack, grown in over a time) as one body with an id like any other: `clothPositions`, `pinClothParticle` / `releaseClothParticle` (a pinned particle goes where it is told, by the end of each fixed step, and the springs follow), `setClothWind` (an acceleration along the sheet's normal), `pushCloth` (a velocity added to every particle that is not pinned, which wakes it: the Wind prize and the Earthquake), `clothIgnores` (what it goes through), `clothResets`. Rays hit its surface from both sides, a touch is a `ContactEvent` with the cloth as `a`, it sleeps when settled and wakes when something comes near, and a runaway is put back. Bodies do not see a cloth, it sees them (`engine/src/PhysicsImpl.h`, "layers"). |
+| `engine/` `Renderer::updateMesh` | Writes the vertices of a mesh again (the same count, a cycled buffer): for what changes shape every frame. `ModelCache::dynamicMesh` and `updateMesh` give it to the game. |
+| `game/` `planCloths` (`ClothPlan.h`) | A `Level` to `PhysicsPlan::cloths`: the lattice of each sail (its particles at the saved places), the wind, the particle's radius and mass, the material's friction, and the **pins** (the level's 84 joints, as the particle, the holder, the place in the holder's frame and the strength). The lead actor's body gets a sphere for each particle, so that whatever measures an actor measures the sail. `ClothSettings` is how a sail is simulated. |
+| `game/` `ClothSet` (`Cloth.h`) | What a `PhysicsScene` has of sails: the cloth bodies (the lead actor's body is the cloth's, the segments have none), the pins carried each fixed step (`PhysicsScene::beforeFixedStep`), let go when a holder is removed or hit hard, the sail removed when it is destroyed, and `positions`, `bounds` and `centre` for the rules (`PhysicsScene::bounds` and `centreOf` give a sail's as they give a rigid actor's). |
+| `game/` `ClothDraw` (`ClothDraw.h`) | The meshes (`clothVertices`, `clothIndices`: the lattice as a surface, two halves so that both sides are lit), kept up to the particles, one draw each in the material's texture, given back to the renderer with the `ClothDraw` (`ModelCache::destroyMesh`). `PlayScene` and the level viewer take its items. |
+
+The rules are `GameSession`'s: `canBeDamaged` says a sail can be hurt, its lead actor is the object (its segments are not), and what hurts a brick hurts it. Tests: `mb_physics_cloth_test` (the engine), `mb_cloth_tests` (the plan, the scene, the rules and the mesh on made-up levels), `mb_cloth_smoke` (the 22 sails), `mb_cloth_view_smoke` (on the GPU) and `mb_render_test` (`updateMesh`).
+
 ## Gameplay
 
 `GameSession` (`game/Gameplay.h`) is one level being played: the rules of `GAMEPLAY.md` on top of a `PhysicsScene`. It
@@ -157,7 +202,7 @@ for (const GameEvent& e : session.takeEvents()) { /* BrickHit, BrickDestroyed, B
 | What | Where |
 |---|---|
 | Every number the rules use, each with its source in `GAMEPLAY.md` and how well it is known | `GameplayRules` |
-| What happens, for the sound and the look | `GameEvent`: `BallLaunched`, `BatHit`, `BoardHit`, `BallsHit`, `BrickHit`, `BrickDestroyed`, `ActorFell`, the special objects' `DynamiteBlast`, `CannonFired`, `ShotHit`, `RocketLaunched`, `RocketBurst`, `BallEntered`, `BallEmerged`, then `BallLost`, `BallFreed`, the prizes' `PrizeDropped`, `PrizeCaught`, `PrizeMissed`, `EffectStarted`, `EffectEnded`, `StrikeGranted`, `BallStuck`, `Blast`, `BallRubbered`, then `LifeLost`, `BatLeft`, `BatEntered`, `LevelComplete`, `GameOver` |
+| What happens, for the sound and the look | `GameEvent`: `BallLaunched`, `BatHit`, `BoardHit`, `BallsHit`, `BrickHit`, `BrickDestroyed`, `ActorFell`, the special objects' `DynamiteBlast`, `CannonFired`, `ShotHit`, `RocketLaunched`, `RocketBurst`, `BallEntered`, `BallEmerged`, the weapons' `ShotFired`, `ProjectileHit`, `LaserBeam`, `BoltStruck` and the like (section 18), then `BallLost`, `BallFreed`, the prizes' `PrizeDropped`, `PrizeCaught`, `PrizeMissed`, `EffectStarted`, `EffectEnded`, `StrikeGranted`, `BallStuck`, `Blast`, `BallRubbered`, then `LifeLost`, `BatLeft`, `BatEntered`, `LevelComplete`, `GameOver` |
 | Which bricks are hurt, and which must go for the level to end | `canBeDamaged`, `isTarget`, `TargetRule` (the default `Bricks`, every brick and tree whatever its motion, is the rule of the footage, `GAMEPLAY.md` "Rules settled by the second study"; `BrickType`, H-type of `OBJECTS.md`, is refuted and kept for comparing and for tests; chosen in `SessionOptions::levelEnd`); targets out of the ball's reach do not count (below) |
 | The cursor as a bat position | `cursorOnPlane`, `batTargetX` |
 | A player that needs no hands | `Autopilot`, `autoplay()` (returns the events; `mb_gameplay_smoke --log <level>` prints them) |
@@ -181,6 +226,7 @@ the falling orbs with their halos, the flashes where a prize is caught or missed
 Explosive Ball, the Magnet's horseshoe, the Wall's rope and the Yo-Yo's string, and the dimmed light of the night. The HUD's caption and icons are
 `PrizeHud` (`powerUpsOf`, `PrizeCaption`), which `PlaySession` fills into the `GameHud`; `Billboard.h` has the flat things the scene draws
 with the quad (flashes, strips, marks on the floor). `--drop-prize` and `--catch-prize` give a level a prize at a time (see section 16.5).
+The weapons and the strikes on screen (`GAMEPLAY.md` sections 18.11 to 18.14) are three parts of `PlayScene`, each reading the session and the events and keeping no rules: `BatBarrels` (`game/BatBarrels.h`) draws the weapons' barrels, which are frames of `bat.x`, posed by the model's own `Common` animation through `LevelScene::appendActorPosed` (the draws of an actor placed at the node poses of a `Model::globalPoses`, not at the rest pose) with `BarrelClocks` (a `BarrelClock` for each weapon) timing each barrel's growing, recoil and shrinking with no model or GPU, a frame's shots told before its update; `WeaponScene` (`game/WeaponScene.h`) draws what flies, each projectile in its model's looped `Anim-1` take; and `WeaponEffects` (`game/WeaponEffects.h`, no GPU either) asks the one `ParticleSystem` for the laser's beam, the bolts of lightning, the trails, the bursts and the meteors' rings. `PlaySounds` plays their sounds. Tests: `mb_weapon_view_tests` and `mb_weapon_view_smoke`.
 
 The level's special objects (dynamite, interactive cannons, teleports, firework crates, springs, volcanoes, generators, metal, vibros and
 flickers) are the rules of `SpecialObjects` (`game/SpecialObjects.h`, `GAMEPLAY.md` sections 14 and 17), a member of `GameSession` that is its friend and
@@ -191,6 +237,16 @@ the rockets, the balls in teleports, the vibros). It reports through the session
 (`BallView::away`, `appear`). Its numbers are `SpecialObjectRules` in `GameplayRules::objects`. `canBeDamaged` says which objects something can
 hurt (not the teleports), `SpecialObjects` which of them the ball does not (`GAMEPLAY.md` 17.1). It has its own tests: `mb_special_object_tests` on
 made-up levels and `mb_special_object_smoke` on the real ones.
+
+The four weapons and the two strike prizes are the rules of `Weapons` (`game/Weapons.h`, `GAMEPLAY.md` section 18), another member of `GameSession` that
+is its friend: a click that launches no ball and frees none fires one shot of `weapon()` (`fire`), the catch of a Thunderbolt or a Meteorite Rain
+schedules its strikes (`startStrike`) and once a fixed step it settles what the projectiles touched (`update`). A projectile is a body of the
+session's `PhysicsScene` (`addProjectile`, kind `kKindProjectile`, which touches the level's actors only: `BodyDesc::group` and `collidesWith`
+in the engine) that is taken out at its first contact; the laser is a line, resolved at the shot with `PhysicsWorld::raycastAll`. What a hit does to an object goes
+through `SpecialObjects::weaponHit` and `burst`, so the rules of 17.1 are in one place. The picture reads `GameSession::projectiles()` and
+`laserBeams()` and the events `ShotFired`, `ProjectileHit`, `ProjectileExploded`, `ProjectileGone`, `LaserBeam`, `BoltStruck`, `MeteorFalling` and
+`MeteorImpact`. Its numbers are `WeaponRules` in `GameplayRules::weapons`. Tests: `mb_weapon_tests` on made-up levels, `mb_weapon_smoke` on the real ones; the
+`Autopilot` fires its weapon at what stands ahead of the bat.
 
 What falls off the board stops being a target and is taken out (`ActorFell`), with no points and no explosion
 (`GameplayRules::fallLimitY`, `fallScores`): loose pieces are destroyed by weapons and blasts, not by falling.
@@ -213,7 +269,7 @@ same pocket after `jamFreesInARow` frees is lost, so that no pocket holds the on
 
 Tests: `mb_gameplay_tests` on made-up levels (the bat's law, the life sequence, damage and explosions, the end of the
 level under each reading and the required set, the targets out of the ball's reach, bricks that wake what they held, the cursor); `mb_gameplay_smoke`
-plays all 83 levels with the autopilot against the real data and checks only that nothing breaks and that the ball keeps its speed
+plays all 83 levels with the autopilot against the real data (each level with prize seeds of its own, `--seed`) and checks only that nothing breaks and that the ball keeps its speed
 and its plane.
 
 ## Playing
@@ -224,13 +280,14 @@ the click each frame, and turns what they report into what is seen and heard.
 | Part | What it does |
 |---|---|
 | `GameSession` + `Autopilot` | The rules; with `--autoplay` the autopilot's input replaces the mouse's. `PlayerInput` (`app/`, the keys are SDL's) turns the mouse into the bat's target through `batTargetX` and the drawable size; a click (the button going down, not held) or Space launches. The click or key that ends the pause is not given to it: `GameFlow::Step::resumed` makes the front end call `LevelSession::resume()` instead of `update()` for that frame, which starts `PlayerInput` over. |
-| `PlayScene` (`game/`) | The picture of a session as a list of draws: `LevelScene` for the level (actors at their physics poses, what exploded or fell hidden, a hit brick retextured by its damage state, a person or an animal that was destroyed scaled down about its centre while it shrinks, `LevelScene::setScale`), the bat (the frames of `bat.x` that make the default bat, with the texture of `Settings::bat`), the balls (rolling by the distance over the radius, a soft shadow, shrinking away over 0.25 s when lost), and the flash and sparks at each `BrickDestroyed` (not for a person or an animal, who shrinks instead). Reads the session and its events; no window. |
+| `PlayScene` (`game/`) | The picture of a session as a list of draws: `LevelScene` for the level (actors at their physics poses, what exploded or fell hidden, a hit brick retextured by its damage state, a person or an animal that was destroyed scaled down about its centre while it shrinks, `LevelScene::setScale`), the bat (the frames of `bat.x` that make the default bat, with the texture of `Settings::bat`), the balls (rolling by the distance over the radius, a soft shadow, shrinking away over 0.25 s when lost), and, through the one `ParticleSystem` it owns (see "Particles"), the flash of each `BrickDestroyed` by its material's `exploseType` (none for a person or an animal, who shrinks instead, for the island that sinks, nor for what a Thunderbolt destroyed). Reads the session and its events; no window. |
 | `PrizeScene`, `PrizeHud`, `Billboard` (`game/`, `PrizeScene` is drawn by `PlayScene`) | What the prizes look like: the falling orbs with their halos, the flashes where one is caught or missed and where the Explosive Ball goes off, the models of the Power and Explosive Balls, the Magnet's horseshoe, the Wall's rope, the Yo-Yo's string and the night's dimmed light; the HUD's caption and icons (`PrizeHud`, which `PlaySession` fills into the `GameHud`). Reads the session and its events; no rules, no window. |
-| `ObjectEffects` (`game/`, drawn by `PlayScene`) | What the special objects look like: the flash and sparks of a blast, a cannonball (`Yadro.x`) with its shadow and the puff at the muzzle, a rocket (`Fire-rocket.x`) with its trail and its burst, the ring where a ball goes into a teleport and comes out, a spring that gives (`LevelScene::setScale`), the glow of a flicker. Billboards and two meshes from the session's events and `objects()`; no rules, no window. The full particle systems come later. |
+| `ObjectEffects` (`game/`, drawn by `PlayScene`) | What the special objects look like: a cannonball (`Yadro.x`) with its shadow and a flare at the muzzle, a rocket (`Fire-rocket.x`) with its shadow, the ring where a ball goes into a teleport and comes out, a spring that gives (`LevelScene::setScale`), the glow of a flicker; and what the particle files define, asked of the `ParticleSystem`: the blast's flash (the explosion the level names), the cannonball's burst, the muzzle's smoke, the rocket's trail and burst, the flickers' sparks and smoke, a tree's leaves. Billboards and two meshes from the session's events and `objects()`; no rules, no window. |
+| `BatBarrels`, `WeaponScene`, `WeaponEffects` (`game/`, drawn by `PlayScene`) | What the weapons and the strikes look like: the barrels on the bat in `bat.x`'s own animation (a clock for each weapon: grow, wait, recoil on `ShotFired`, shrink when the weapon ends), the bullets, the cannonball, the rocket and the meteors as their models turning in their own takes (a shadow on the water for the heavy ones), and, asked of the `ParticleSystem`, the laser's beam, the bolt's lightning, the rocket's and the meteor's trails, the bursts and the meteor's ring. |
 | `PlaySounds` (`game/`) | An event as its sound through the `SoundLibrary`, panned by x (the table is in `AUDIO.md`). |
 | the fades | A level comes up out of the dark in 0.6 s; when the last target is gone the picture holds for 0.1 s (0.45 s when the game is lost) and fades out in 0.8 s, under the HUD; then `update` reports the outcome. The level cannot be paused meanwhile (`LevelSession::ending()` to `GameFlow::setLevelEnding`): leaving from the pause would lose the outcome, the win never recorded or the game over never reaching the name entry. |
 
-The session steps by 1/60 s; the picture carries the balls, the bat, the falling prizes, the cannonballs and the rockets on by their velocities for the time the frame is ahead of the
+The session steps by 1/60 s; the picture carries the balls, the bat, the falling prizes, the cannonballs and the rockets, and the weapons' projectiles with their trails, on by their velocities for the time the frame is ahead of the
 last step, so a display at 120 Hz moves smoothly (a ball held on the bat goes on with the bat, `ballPosition`; `shotPosition`, `rocketPosition`). The level's own actors are drawn where the last step left them. `--autoplay` plays on
 nobody's behalf: its `SaveData` has no folder, so it reads and writes none of the player's files, and the front end leaves the system
 cursor alone (`FrontEndOptions::hideCursor`). Tests: `mb_play_smoke` plays real levels on the GPU without a window (a crate shows

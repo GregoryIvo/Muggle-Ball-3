@@ -119,6 +119,29 @@ struct Sprite {
     float rotation = 0;      // radians, clockwise on screen, about the quad's centre
 };
 
+// One corner of an effect triangle: a world position, a texture coordinate and a colour, straight alpha as the meshes.
+struct EffectVertex {
+    Vec3 position;
+    Vec2 uv;
+    Color color;
+};
+static_assert(sizeof(EffectVertex) == 36);
+
+// Triangles of one texture and one way of blending, drawn with a single call: the particles of the game's effects (sparks,
+// flashes, smoke, trails, beams), which a mesh draw each would be too many calls for. The vertices come three to a
+// triangle, already in world space, so a batch holds camera-facing quads, strips and marks lying on the floor alike. They
+// are drawn after the meshes and before the debug lines and the sprites, in the order the batches are given, with no
+// culling and no depth write.
+struct EffectBatch {
+    std::span<const EffectVertex> vertices;
+    TextureHandle texture = 0;  // 0 binds a 1x1 white texture
+    BlendMode blend = BlendMode::Additive;  // AlphaBlend or Additive; Opaque and Custom draw as AlphaBlend
+    bool depthTest = false;  // tested against what the meshes wrote (marks on the floor are hidden by what stands on them)
+    // The vertex colour replaces the texture's colour and the texture only shapes the sprite (rgb = vertex rgb,
+    // a = texture a * vertex a), where the default multiplies them (as the meshes' unlit materials do).
+    bool colourOnly = false;
+};
+
 // The SDL3 GPU API underneath picks Metal on macOS and Vulkan or Direct3D 12
 // elsewhere, so nothing above this layer is platform-specific. Shaders are
 // GLSL compiled ahead of time (tools/build_shaders.py) to SPIR-V and MSL.
@@ -137,6 +160,10 @@ public:
     // GPU resources live until the Renderer is destroyed (or destroy*() is called).
     MeshHandle createMesh(std::span<const Vertex> vertices, std::span<const std::uint32_t> indices);
     TextureHandle createTexture(const Image& image, bool mipmaps = true);
+    // Writes new vertices into a mesh that exists: as many as it was made with, the same indices. For a mesh that changes shape every
+    // frame (cloth); the frames already in flight keep drawing what they were given. Logs and changes nothing for a handle that is not
+    // one or a different number of vertices.
+    void updateMesh(MeshHandle mesh, std::span<const Vertex> vertices);
     void destroyMesh(MeshHandle mesh);
     void destroyTexture(TextureHandle texture);
 
@@ -144,15 +171,17 @@ public:
     void drawableSize(int& width, int& height) const;
 
     // Draws one frame into the window's swapchain and presents it. Opaque items
-    // draw first (by layer), then blended items back to front, then debug lines,
-    // then the sprites in submission order. With no items the frame is just the
+    // draw first (by layer), then blended items back to front, then the effect batches in the order
+    // given, then debug lines, then the sprites in submission order. With no items the frame is just the
     // clear colour and the sprites, which is how the menus draw.
     void renderToWindow(const FrameParams& frame, std::span<const DrawItem> items,
-                        std::span<const DebugLine> lines = {}, std::span<const Sprite> sprites = {});
+                        std::span<const DebugLine> lines = {}, std::span<const Sprite> sprites = {},
+                        std::span<const EffectBatch> effects = {});
 
     // Draws one frame into an offscreen target of the given size and reads it back.
     Image renderToImage(int width, int height, const FrameParams& frame, std::span<const DrawItem> items,
-                        std::span<const DebugLine> lines = {}, std::span<const Sprite> sprites = {});
+                        std::span<const DebugLine> lines = {}, std::span<const Sprite> sprites = {},
+                        std::span<const EffectBatch> effects = {});
 
     struct Impl;
 

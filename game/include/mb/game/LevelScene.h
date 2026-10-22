@@ -52,6 +52,10 @@ public:
     // Appends the draws of one actor as they stand, hidden or not, for a scene whose actors are props that the game places
     // itself (the bat's frames, the prizes' models): each draw's world is the model's own, to be placed by the caller.
     void appendActor(ActorIndex actor, std::vector<DrawItem>& out) const;
+    // The same with the model's frames moved: each draw is placed at `nodeWorlds[node]` of the model it is a part of, instead of at
+    // the node's rest pose (Model::globalPoses of an animation, which a prop that is an animated model is drawn with). Like
+    // appendActor, the draws are the model's own, to be placed by the caller.
+    void appendActorPosed(ActorIndex actor, std::span<const Mat4> nodeWorlds, std::vector<DrawItem>& out) const;
     // The draws of one ball at the origin (the game's ball.x), for a game that places its own balls.
     std::span<const DrawItem> ballItems() const { return ballItems_; }
     std::span<const DebugLine> shapeLines() const { return shapeLines_; }
@@ -86,6 +90,7 @@ private:
     // The level's draws by actor (a table of offsets into actorItems_), what a hidden actor does not show, and the
     // textures of the damage states of the draws that have some.
     std::vector<std::uint32_t> actorStart_, actorItems_;
+    std::vector<int> itemNode_;  // by item: the node of its model it hangs on
     std::vector<bool> hidden_;  // by item
     std::unordered_map<std::size_t, Mat4> scaled_;  // by item: what setScale() does to the draw after it is placed
     std::unordered_map<std::size_t, std::vector<TextureHandle>> damage_;  // by item
