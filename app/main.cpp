@@ -55,6 +55,7 @@
 #include "mb/engine/Renderer.h"
 #include "mb/engine/Window.h"
 #include "mb/game/Campaign.h"
+#include "mb/game/ClothDraw.h"
 #include "mb/game/GameCamera.h"
 #include "mb/game/Gameplay.h"
 #include "mb/game/LevelCatalog.h"
@@ -79,9 +80,11 @@
 #include <memory>
 #include <optional>
 #include <random>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -166,14 +169,15 @@ public:
             };
             const mb::PhysicsScene::Counts& counts = physics->counts();
             mb::logInfo("{}: {} draw items, {} shape lines; physics: {} dynamic ({} awake: machines), {} kinematic and "
-                        "{} static bodies ({} of them welded to the world; {} actors without one), {} joints ({} on "
-                        "cloth left out); load {:.0f} ms, physics build {:.0f} ms, scene {:.0f} ms",
+                        "{} static bodies ({} of them welded to the world; {} actors without one), {} joints, {} sails "
+                        "({} pins); load {:.0f} ms, physics build {:.0f} ms, scene {:.0f} ms",
                         entry.name, next->items().size(), next->shapeLines().size(), counts.dynamicBodies,
                         physics->world().awakeBodyCount(), counts.kinematicBodies, counts.staticBodies,
-                        physics->plan().pinnedBodies, counts.withoutBody, counts.joints, counts.clothJoints,
+                        physics->plan().pinnedBodies, counts.withoutBody, counts.joints, counts.cloths, counts.clothJoints,
                         ms(start, loaded), ms(loaded, simulated), ms(simulated, built));
             mb_app::logMissing(entry.name, next->report());
             logUnbuilt(entry.name, *physics);
+            sails_ = std::make_unique<mb::ClothDraw>(models_, assets_.materials, assets_.textures, level, *physics);
             scene_ = std::move(next);
             physics_ = std::move(physics);
             index_ = index;
@@ -223,6 +227,7 @@ public:
     // Puts the scene where the physics has everything.
     void follow(bool shapes) {
         scene_->follow(*physics_);
+        sails_->update(*physics_);
         if (shapes) {
             scene_->followShapes(*physics_);
         }
@@ -240,6 +245,12 @@ public:
     }
 
     const mb::LevelScene& scene() const { return *scene_; }
+    // What is drawn: the level's, and the sails'.
+    std::span<const mb::DrawItem> items() {
+        items_.assign(scene_->items().begin(), scene_->items().end());
+        sails_->appendDrawn(*physics_, items_);
+        return items_;
+    }
 
     mb::Camera camera;
 
@@ -260,6 +271,8 @@ private:
     mb::ModelCache models_;
     std::unique_ptr<mb::PhysicsScene> physics_;
     std::unique_ptr<mb::LevelScene> scene_;
+    std::unique_ptr<mb::ClothDraw> sails_;
+    std::vector<mb::DrawItem> items_;
     std::size_t index_ = 0;
     Clock::time_point shown_ = Clock::now();
 };
@@ -295,7 +308,7 @@ int runScreenshot(const Options& options) {
     viewer.follow(options.shapes);
     mb_app::HudOverlay hud(renderer, options.hud);
     const mb::FrameParams frame = viewer.frame(static_cast<float>(options.width) / static_cast<float>(options.height));
-    const mb::Image image = renderer.renderToImage(options.width, options.height, frame, viewer.scene().items(),
+    const mb::Image image = renderer.renderToImage(options.width, options.height, frame, viewer.items(),
                                                    options.shapes ? viewer.scene().shapeLines()
                                                                   : std::span<const mb::DebugLine>(),
                                                    hud.sprites(options.width, options.height, viewer.levelName()));
@@ -528,7 +541,7 @@ int runWindow(const Options& options) {
         int width = 0, height = 0;
         renderer.drawableSize(width, height);
         const float aspect = height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 4.0f / 3.0f;
-        renderer.renderToWindow(viewer.frame(aspect), viewer.scene().items(),
+        renderer.renderToWindow(viewer.frame(aspect), viewer.items(),
                                 shapes ? viewer.scene().shapeLines() : std::span<const mb::DebugLine>(),
                                 hud.sprites(width, height, viewer.levelName()));
         stats.frame();

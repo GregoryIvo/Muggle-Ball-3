@@ -167,6 +167,20 @@ fx.aim(bolt, from, to);                                               // moves i
 
 A name is a file (`explosebig`, its first definition) or `file/name` (`Trail/TrailBlue`), any case. `spawn` is for the types that go off at once (Flash, Firework, LeafFall) and, with `seconds`, for emitters (Trail, Smoke, WaterBubble, Tornado); `attach` only for emitters; `beam` only for Laser and Lightning; the wrong call, or a name the library lacks, gives `kNoEffect` (0) and every call takes it harmlessly. `MuggleBall3 --autoplay --effect <name>[@seconds[,x,y,z[,x2,y2,z2]]] --screenshot out.png --simulate <seconds>` puts any of them on a level. Tests: `mb_particle_tests` (made-up files with the real numbers: the parser, each type, the batches), `mb_particle_smoke` (the 20 real files and what names them), `mb_effects_smoke` (the effects in the scene from the rules' events, on the GPU) and `mb_render_test` (the batches in the renderer).
 
+## Cloth
+
+The 22 sails of the levels (docs/GAMEPLAY.md section 20, docs/PHYSICS.md "Cloth") are a soft body of Jolt in the physics world, a mesh that follows it, and rules that are the bricks' own.
+
+| Layer | What |
+|---|---|
+| `engine/` `PhysicsWorld` | `addCloth(ClothDesc)` makes a grid of particles with springs along it, across its cells and across its folds (and slack, grown in over a time) as one body with an id like any other: `clothPositions`, `pinClothParticle` / `releaseClothParticle` (a pinned particle goes where it is told, by the end of each fixed step, and the springs follow), `setClothWind` (an acceleration along the sheet's normal), `clothIgnores` (what it goes through), `clothResets`. Rays hit its surface from both sides, a touch is a `ContactEvent` with the cloth as `a`, it sleeps when settled and wakes when something comes near, and a runaway is put back. Bodies do not see a cloth, it sees them (`engine/src/PhysicsImpl.h`, "layers"). |
+| `engine/` `Renderer::updateMesh` | Writes the vertices of a mesh again (the same count, a cycled buffer): for what changes shape every frame. `ModelCache::dynamicMesh` and `updateMesh` give it to the game. |
+| `game/` `planCloths` (`ClothPlan.h`) | A `Level` to `PhysicsPlan::cloths`: the lattice of each sail (its particles at the saved places), the wind, the particle's radius and mass, the material's friction, and the **pins** (the level's 84 joints, as the particle, the holder, the place in the holder's frame and the strength). The lead actor's body gets a sphere for each particle, so that whatever measures an actor measures the sail. `ClothSettings` is how a sail is simulated. |
+| `game/` `ClothSet` (`Cloth.h`) | What a `PhysicsScene` has of sails: the cloth bodies (the lead actor's body is the cloth's, the segments have none), the pins carried each fixed step (`PhysicsScene::beforeFixedStep`), let go when a holder is removed or hit hard, the sail removed when it is destroyed, and `positions`, `bounds` and `centre` for the rules (`PhysicsScene::bounds` and `centreOf` give a sail's as they give a rigid actor's). |
+| `game/` `ClothDraw` (`ClothDraw.h`) | The meshes (`clothVertices`, `clothIndices`: the lattice as a surface, two halves so that both sides are lit), kept up to the particles, one draw each in the material's texture. `PlayScene` and the level viewer take its items. |
+
+The rules are `GameSession`'s: `canBeDamaged` says a sail can be hurt, its lead actor is the object (its segments are not), and what hurts a brick hurts it. Tests: `mb_physics_cloth_test` (the engine), `mb_cloth_tests` (the plan, the scene, the rules and the mesh on made-up levels), `mb_cloth_smoke` (the 22 sails), `mb_cloth_view_smoke` (on the GPU) and `mb_render_test` (`updateMesh`).
+
 ## Gameplay
 
 `GameSession` (`game/Gameplay.h`) is one level being played: the rules of `GAMEPLAY.md` on top of a `PhysicsScene`. It

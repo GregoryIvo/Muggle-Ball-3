@@ -112,6 +112,30 @@ add_executable(mb_physics_test physics_test.cpp)
 target_link_libraries(mb_physics_test PRIVATE mb_engine)
 add_test(NAME mb_physics_test COMMAND mb_physics_test)
 
+# Cloth over Jolt's soft bodies: pins, wind, what it meets. CPU only.
+add_executable(mb_physics_cloth_test physics_cloth_test.cpp)
+target_link_libraries(mb_physics_cloth_test PRIVATE mb_engine)
+add_test(NAME mb_physics_cloth_test COMMAND mb_physics_cloth_test)
+
+# Sails on made-up levels: the plan, the scene, the rules and the mesh. CPU only.
+add_executable(mb_cloth_tests test_cloth.cpp)
+target_link_libraries(mb_cloth_tests PRIVATE mb_game)
+add_test(NAME mb_cloth_tests COMMAND mb_cloth_tests)
+
+# The sails of all converted levels in the physics world when MB3_ASSETS points at the data; exits 77 (skipped) otherwise.
+add_executable(mb_cloth_smoke cloth_smoke.cpp)
+target_link_libraries(mb_cloth_smoke PRIVATE mb_game)
+add_test(NAME mb_cloth_smoke COMMAND mb_cloth_smoke)
+set_tests_properties(mb_cloth_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# The sails on screen, on the real data and the GPU without a window: a mesh each in its material's texture, drawn with the level they change
+# only the place of their particles, they follow the physics and go when the rules destroy them. Exits 77 (skipped) without MB3_ASSETS or a GPU.
+add_executable(mb_cloth_view_smoke cloth_view_smoke.cpp)
+target_include_directories(mb_cloth_view_smoke PRIVATE ${PROJECT_SOURCE_DIR}/app)
+target_link_libraries(mb_cloth_view_smoke PRIVATE mb_game)
+add_test(NAME mb_cloth_view_smoke COMMAND mb_cloth_view_smoke)
+set_tests_properties(mb_cloth_view_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
 # Paths: the curve through a path's points and the actors bound to it, on made-up paths. CPU only.
 add_executable(mb_path_tests test_paths.cpp)
 target_link_libraries(mb_path_tests PRIVATE mb_game)

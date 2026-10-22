@@ -329,6 +329,7 @@ PhysicsPlan planPhysics(const Level& level, const MaterialLibrary& materials, co
     }
     if (hasPhysicsData) {
         planJoints(level, actors, options, plan);
+        planCloths(actors, materials, plan);
         pinWeldedBodies(plan);
         if (options.start == StartState::Asleep) {
             startMachinesRunning(plan);

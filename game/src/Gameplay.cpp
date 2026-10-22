@@ -144,6 +144,7 @@ bool canBeDamaged(ObjectType type, const GameMaterial* material) {
         case ObjectType::Flicker:
         case ObjectType::Metall:
         case ObjectType::Dynamite:
+        case ObjectType::Cloth:
             return material != nullptr && material->brickType != 2 && material->brickEnergy > 0;
         default:
             return false;
@@ -735,8 +736,7 @@ void GameSession::runLifeSequence() {
 }
 
 Vec3 GameSession::centreOf(ActorIndex actor) const {
-    // The pose is the model's origin, which can be well away from the pieces (a ship's is on the water line).
-    return transformPoint(scene_.plan().actors[actor].body.massLocalPose.translationPart(), scene_.actorPose(actor));
+    return scene_.centreOf(actor);
 }
 
 void GameSession::explodeDue() {
@@ -784,16 +784,9 @@ void GameSession::removeShrunk() {
 }
 
 void GameSession::removeFallen() {
-    for (const ActorIndex actor : dynamicActors_) {
+    // A body that has left the board: out of play, no explosion, nothing scored (unless fallScores).
+    const auto fell = [&](ActorIndex actor) {
         Brick& brick = bricks_[actor];
-        const BodyId body = scene_.body(actor);
-        if (body == 0 || brick.shrinking) {  // (one that is shrinking is paid for and nearly gone)
-            continue;
-        }
-        const Vec3 at = scene_.world().pose(body).translationPart();
-        if (at.y >= rules_.fallLimitY && finite(at)) {
-            continue;
-        }
         if (brick.exploding) {
             std::erase(exploding_, actor);
             brick.exploding = false;
@@ -811,6 +804,25 @@ void GameSession::removeFallen() {
         }
         emit(event);
         removeBrick(actor);
+    };
+    for (const ActorIndex actor : dynamicActors_) {
+        const BodyId body = scene_.body(actor);
+        if (body == 0 || bricks_[actor].shrinking) {  // (one that is shrinking is paid for and nearly gone)
+            continue;
+        }
+        const Vec3 at = scene_.world().pose(body).translationPart();
+        if (at.y < rules_.fallLimitY || !finite(at)) {
+            fell(actor);
+        }
+    }
+    // A sail that has lost its holders and fallen off the board falls for ever.
+    const ClothSet& cloths = scene_.cloths();
+    for (std::size_t i = 0; i < cloths.size(); ++i) {
+        const ActorIndex lead = cloths.plan(i).lead;
+        const Vec3 at = cloths.centre(i);
+        if (cloths.alive(i) && !bricks_[lead].shrinking && (at.y < rules_.fallLimitY || !finite(at))) {
+            fell(lead);
+        }
     }
 }
 

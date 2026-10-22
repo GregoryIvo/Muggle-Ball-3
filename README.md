@@ -28,8 +28,10 @@ when it is lost, bricks that explode flash and leave (people and animals shrink 
 hit has its sound. The hearts and points carry from level to level, a finished level opens the
 next, a lost game goes to Game Over or the high scores, and `--autoplay` lets an autopilot play
 (see below). The 35 sharks and birds that follow a path swim and dance along it, as kinematic bodies that push the ball
-and the bricks they meet (see [`docs/LEVEL_FORMAT.md`](docs/LEVEL_FORMAT.md), "Path motion"). Not there yet: prizes and the
-bat's weapons, sails (cloth), cannons, reflections, particle systems, and model animation.
+and the bricks they meet (see [`docs/LEVEL_FORMAT.md`](docs/LEVEL_FORMAT.md), "Path motion"). The 22 sails hang from their
+ships' yards, fill out in the wind, fall when the ship breaks and score when they are hit (see
+[`docs/GAMEPLAY.md`](docs/GAMEPLAY.md), section 20). Not there yet: prizes and the bat's weapons, cannons, reflections, particle
+systems, and model animation.
 
 ## Layout
 

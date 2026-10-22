@@ -210,6 +210,8 @@ def read_object(rd, otype, hulls):
         obj["cloth"] = {"width": w, "height": h, "params": [rd.u32() for _ in range(3)]}
         obj["cloth"]["segments"] = [read_actor(rd, hulls) for _ in range(max(w * h - 1, 0))]
         if flags & FLAG_CLOTH_ANCHOR:
+            # A tag (10 in every level) and the sail's wind, a vector of length 10 in world space (docs/LEVEL_FORMAT.md, "Cloth");
+            # the names are from before that was known, and the JSON keeps them.
             obj["cloth"]["anchor"] = {"index": rd.u32(), "offset": rd.f32s(3)}
     return obj
 

@@ -200,8 +200,8 @@ void testPredicates() {
           "damage: a material of type 2, or none at all, never");
     check(!canBeDamaged(ObjectType::Board, &shark) && !canBeDamaged(ObjectType::Light, &shark) &&
               !canBeDamaged(ObjectType::Background, &shark) && !canBeDamaged(ObjectType::ShadowCaster, &shark) &&
-              !canBeDamaged(ObjectType::Cloth, materials().find("Sail")),
-          "damage: the board, the markers and a cloth never, whatever their material says");
+              canBeDamaged(ObjectType::Cloth, materials().find("Sail")) && !canBeDamaged(ObjectType::Cloth, nullptr),
+          "damage: the board and the markers never, whatever their material says; a sail like a brick (tests/test_cloth.cpp)");
 
     // Every brick and tree, moving or not, against bricks of material type 0.
     const GameMaterial& tile = *materials().find("Tile.jpg");

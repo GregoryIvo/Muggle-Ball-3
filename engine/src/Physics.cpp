@@ -49,9 +49,6 @@ constexpr float kMaxPenetrationRecovery = 0.05f;
 // again; a level loads hundreds of bodies at once, a spawned prize is one.
 constexpr std::size_t kOptimizeAfterAdds = 64;
 
-// Events nobody collected; a game that never calls takeContacts() must not eat the memory.
-constexpr std::size_t kMaxQueuedContacts = 1u << 16;
-
 constexpr std::size_t kTempBytes = 16u << 20;
 
 // Jolt's TempAllocatorImpl aborts the process when its block runs out; this one goes on from
@@ -142,10 +139,19 @@ const PhysicsMaterial& materialOf(const JPH::Body& body, const JPH::SubShapeID& 
     return material != nullptr ? material->values : fallback;
 }
 
+// A cloth's particles ask for their contacts' materials with no sub shape, which a compound body cannot answer. So a pair with a
+// cloth in it gets the cloth's own friction and restitution (ClothDesc::friction; none bounces), whatever the other body is.
+const JPH::Body* clothOf(const JPH::Body& a, const JPH::Body& b) {
+    return a.IsSoftBody() ? &a : (b.IsSoftBody() ? &b : nullptr);
+}
+
 // Jolt has a single friction coefficient per contact, so the dynamic one is used and the static
 // one is ignored: resting bodies are held by the same coefficient that slows sliding ones.
 float combinedFriction(const JPH::Body& a, const JPH::SubShapeID& subA, const JPH::Body& b,
                        const JPH::SubShapeID& subB) {
+    if (const JPH::Body* cloth = clothOf(a, b)) {
+        return cloth->GetFriction();
+    }
     const PhysicsMaterial& x = materialOf(a, subA);
     const PhysicsMaterial& y = materialOf(b, subB);
     return std::max(0.0f, combine(x.frictionCombine, y.frictionCombine, x.dynamicFriction, y.dynamicFriction));
@@ -153,6 +159,9 @@ float combinedFriction(const JPH::Body& a, const JPH::SubShapeID& subA, const JP
 
 float combinedRestitution(const JPH::Body& a, const JPH::SubShapeID& subA, const JPH::Body& b,
                           const JPH::SubShapeID& subB) {
+    if (const JPH::Body* cloth = clothOf(a, b)) {
+        return cloth->GetRestitution();
+    }
     const PhysicsMaterial& x = materialOf(a, subA);
     const PhysicsMaterial& y = materialOf(b, subB);
     return std::max(0.0f, combine(x.restitutionCombine, y.restitutionCombine, x.restitution, y.restitution));
@@ -262,6 +271,7 @@ PhysicsWorld::Impl::Impl(Vec3 gravity, const PhysicsSettings& requested)
     system.SetPhysicsSettings(joltSettings);
     system.SetGravity(toJolt(gravity));
     system.SetContactListener(this);
+    system.SetSoftBodyContactListener(this);
     system.SetBodyActivationListener(this);
     system.SetCombineFriction(combinedFriction);
     system.SetCombineRestitution(combinedRestitution);
@@ -379,6 +389,7 @@ void PhysicsWorld::Impl::fixedStep() {
     }
     flushActivations();
     applyKinematicTargets();
+    driveCloths();
 
     const std::size_t firstNew = contacts.size();
     const JPH::EPhysicsUpdateError error =
@@ -388,6 +399,8 @@ void PhysicsWorld::Impl::fixedStep() {
         logWarn("PhysicsWorld: Jolt ran out of room (error flags {}); raise maxBodyPairs / maxContactConstraints",
                 static_cast<int>(error));
     }
+    guardCloths();
+    reportClothTouches();
     // Worker threads report in any order; sort what this step produced so runs compare equal.
     std::stable_sort(contacts.begin() + static_cast<std::ptrdiff_t>(firstNew), contacts.end(),
                      [](const ContactEvent& x, const ContactEvent& y) {
@@ -502,6 +515,7 @@ void PhysicsWorld::removeBody(BodyId body) {
         w.destroyJoint(record->joints.back());
     }
     w.kinematicTargets.erase(body);
+    w.cloths.erase(body);
     if (record->sleepThreshold > 0) {
         w.sleepThresholds.erase(w.sleepThresholds.find(record->sleepThreshold));
         w.updateSleepThreshold();

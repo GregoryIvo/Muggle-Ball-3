@@ -175,8 +175,15 @@ Outcome play(const Level& level, const MaterialLibrary& materials, double second
             out.farthest = std::max(out.farthest, ball.position.z);
         }
         if (frame % 6 == 0) {  // a tenth of a second is fine-grained enough to catch a body that flies away
+            const ClothSet& cloths = scene.cloths();
+            for (std::size_t i = 0; i < cloths.size(); ++i) {  // the sails: every particle finite, and the solver has not had to put one back
+                if (cloths.alive(i) && (scene.world().clothResets(cloths.body(i)) > 0 ||
+                                        !std::ranges::all_of(cloths.positions(i), [](Vec3 p) { return std::isfinite(p.x + p.y + p.z); }))) {
+                    problem(std::format("sail {} has particles that are not finite or were sent off by the solver", i));
+                }
+            }
             for (ActorIndex i = 0; i < scene.plan().actors.size(); ++i) {
-                if (scene.body(i) == 0 || scene.plan().actors[i].motion == MotionType::Static) {
+                if (scene.body(i) == 0 || scene.plan().actors[i].motion == MotionType::Static || cloths.clothOf(i) >= 0) {
                     continue;
                 }
                 if (!finite(scene.actorPose(i))) {

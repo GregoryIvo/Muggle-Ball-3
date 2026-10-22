@@ -42,7 +42,7 @@ constexpr const char* kLevel = R"({
                 {"type": "capsule", "localPose": {"rotation": [1,0,0,0,1,0,0,0,1], "position": [0,0,0]},
                  "radiusHeight": [0.9, 9.8]}],
      "object": {"type": "cloth", "id": 7, "flags": 0,
-                "cloth": {"width": 2, "height": 1, "params": [0,0,0], "segments": [
+                "cloth": {"width": 2, "height": 1, "params": [0,0,0], "anchor": {"index": 10, "offset": [6, 0, -8]}, "segments": [
                   {"pose": {"rotation": [1,0,0,0,1,0,0,0,1], "position": [1,0,0]}, "shapes": [],
                    "object": {"type": "brick", "id": 8, "flags": 0}}]}}},
     {"pose": {"rotation": [1,0,0,0,1,0,0,0,1], "position": [0,0,0]}, "shapes": []}
@@ -450,6 +450,11 @@ int main() {
     check(!level.actors[2].object, "actor without object");
     check(level.countObjects(mb::ObjectType::Brick) == 1, "brick nested in cloth is counted");
     check(level.countObjects(mb::ObjectType::Cloth) == 1, "cloth counted");
+    // The extra after a cloth's grid is its wind (the converter calls it an anchor).
+    check(level.actors[1].object && level.actors[1].object->cloth.width == 2 && level.actors[1].object->cloth.height == 1 &&
+              level.actors[1].object->cloth.wind.x == 6 && level.actors[1].object->cloth.wind.z == -8,
+          "cloth: the grid and the wind are loaded");
+    check(level.actors[0].object->cloth.width == 0, "cloth: other objects have none");
     check(level.paths.size() == 1 && level.paths[0].points[0].up[1] == 1.0f, "path point");
     check(mb::objectTypeFromName("teleportdest") == mb::ObjectType::TeleportDest, "type lookup");
 

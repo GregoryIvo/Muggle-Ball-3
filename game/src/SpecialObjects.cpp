@@ -197,7 +197,7 @@ void SpecialObjects::blast(GameSession& session, ActorIndex source, Vec3 centre,
         if (length(pose.translationPart() - centre) > radius + reach_[actor]) {
             continue;
         }
-        const Bounds box = moves ? boundsOf(plan.body, pose) : staticBounds_[actor];
+        const Bounds box = moves ? scene.bounds(actor) : staticBounds_[actor];
         const float distance = distanceTo(box, centre);
         if (distance > radius) {
             continue;
