@@ -23,7 +23,9 @@ constexpr float kKernelBurstScale = 0.4f;
 constexpr float kRocketBurstScale = 0.45f;
 constexpr std::string_view kMeteorRing = "explosemeteor";   // the white ring on the water [D]
 
-// The beam is at full strength for this long after the shot and then fades out by the time the rules drop it (WeaponRules::laserLife,
+// The beam's front runs out to the tip in WeaponRules::laserGrow (0.1 s): the Laser file's own 150 units a second would take 0.2 s for
+// 30 units and 0.4 s for the 60 of its range, and the footage has about 35 percent of a beam at 62.78 and all of it by 62.88 [M, V2].
+// It is at full strength for this long after the shot and then fades out by the time the rules drop it (WeaponRules::laserLife,
 // 0.45 s): in the footage it is full at 0.26 s, dim at 0.4 s and gone by 0.54 [M, V1 58.88 to 59.3, the shot at about 58.76].
 constexpr float kBeamHold = 0.25f;
 // A bolt of lightning is shown about 0.1 s [M: each of the five of V2 408.0 to 408.7], at full strength, and drops out in a few frames.
@@ -50,7 +52,9 @@ void WeaponEffects::update(std::span<const GameEvent> events, std::span<const Pr
         switch (event.type) {
             case EventType::LaserBeam:
                 particles_.beam(kBeam, event.position, event.end,
-                                {.seconds = kBeamHold, .fade = std::max(static_cast<float>(rules_.laserLife) - kBeamHold, 0.0f)});
+                                {.seconds = kBeamHold,
+                                 .fade = std::max(static_cast<float>(rules_.laserLife) - kBeamHold, 0.0f),
+                                 .grow = static_cast<float>(rules_.laserGrow)});
                 break;
             case EventType::BoltStruck:
                 // A target above the top edge of the screen has no lightning to see.

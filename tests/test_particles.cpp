@@ -461,6 +461,25 @@ void testTornado() {
 
 // ---- Beams and bolts ---------------------------------------------------------------------------------------------------------
 
+// `grow`: the front reaches the far end in that time, whatever the length and the definition's speed.
+void testLaserGrow() {
+    ParticleSystem system(library());
+    system.beam("Laser", {0, 1, 0}, {0, 1, 100}, {.seconds = 1, .grow = 0.1f});
+    system.update(0.05);
+    std::vector<ParticleQuad> quads = quadsOf(system);
+    check(quads.size() == 3 && near(length(quads[0].halfRight) * 2, 50, 0.01f) && near(quads[2].centre, {0, 1, 50}, 0.01f),
+          "laser grow: half of a beam of 100 units is out after half of 0.1 s, where the speed alone would have 7.5");
+    check(near(quads[0].colourEnd.g, 0, 0.01f) && near(quads[2].colourBegin.g, 0, 0.01f), "laser grow: and its tip is colour2 (red) already");
+    system.update(0.06);
+    quads = quadsOf(system);
+    check(near(length(quads[0].halfRight) * 2, 100, 0.01f) && near(quads[2].centre, {0, 1, 100}, 0.01f), "laser grow: all of it is out at 0.1 s");
+    // A short beam is not quicker for being short.
+    ParticleSystem brief(library());
+    brief.beam("Laser", {0, 1, 0}, {0, 1, 10}, {.seconds = 1, .grow = 0.1f});
+    brief.update(0.05);
+    check(near(length(quadsOf(brief)[0].halfRight) * 2, 5, 0.01f), "laser grow: and a beam of 10 units has 5 out at 0.05 s");
+}
+
 void testLaser() {
     ParticleSystem system(library());
     check(system.beam("Flash", {}, {1, 0, 0}) == kNoEffect && system.spawn("Laser", {}) == kNoEffect && system.attach("Laser", {}) == kNoEffect,
@@ -475,8 +494,8 @@ void testLaser() {
           "laser: `size` wide, across as the camera sees it");
     check(near(quads[0].uv0.x, 1.0f / 3) && near(quads[0].uv1.x, 2.0f / 3) && near(quads[1].uv0.x, 0) && near(quads[1].uv1.x, 1.0f / 3) && near(quads[2].uv0.x, 2.0f / 3) && near(quads[2].uv1.x, 1),
           "laser: the body is the middle tile of the texture and the ends the left and the right ones");
-    check(near(quads[0].colourBegin.r, 1) && near(quads[0].colourBegin.g, 1) && near(quads[0].colourBegin.b, 0) && quads[0].colourEnd.r > 0.99f && quads[0].colourEnd.g < 1.0f,
-          "laser: from colour1 (yellow) at the first end towards colour2 (red)");
+    check(near(quads[0].colourBegin.r, 1) && near(quads[0].colourBegin.g, 1) && near(quads[0].colourBegin.b, 0) && quads[0].colourEnd.r > 0.99f && near(quads[0].colourEnd.g, 0, 0.01f),
+          "laser: from colour1 (yellow) at the first end to colour2 (red) at the front, whatever of it is out");
     run(system, 0.6);
     quads = quadsOf(system);
     check(quads.size() == 3 && near(length(quads[0].halfRight) * 2, 100, 0.01f) && near(quads[0].colourEnd.g, 0, 0.01f) && near(quads[0].colourEnd.r, 1, 0.01f), "laser: it reaches the far end, which is colour2 (red)");
@@ -734,6 +753,7 @@ int main() {
     testLeaves();
     testTornado();
     testLaser();
+    testLaserGrow();
     testLightning();
     testDegenerate();
     testSystem();

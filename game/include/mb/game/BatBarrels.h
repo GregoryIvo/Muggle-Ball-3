@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -22,11 +23,12 @@ enum class BarrelPhase : std::uint8_t {
     Ready,      // it stands
     Recoiling,  // a shot
     Shrinking,  // the weapon ended, or another one was caught: it draws back and shrinks away
+    Receding,   // the weapon went while the barrel was still growing: the growth played backwards, so that nothing jumps
 };
 
-// One barrel's place in the "Common" animation of bat.x, a single take of about 3.5 seconds that the original's artist keyed for all the
+// One barrel's place in the "Common" animation of bat.x, a single take of 4 seconds that the original's artist keyed for all the
 // weapons at once: each grows from a tenth of its size and pushes out its gun, waits, recoils once and settles, waits, and draws
-// back and shrinks away. The times are the data's (in the keys of the file); cutting the take into a pose that waits, a recoil that
+// back and shrinks away (the keys of all but the Cannon's end at 3.5 s). The times are the data's (in the keys of the file); cutting the take into a pose that waits, a recoil that
 // can be played again and a shrinking that ends the weapon is a choice (docs/GAMEPLAY.md 18.11).
 struct BarrelClip {
     double grown;       // the end of the growing: the barrel stands in the pose it waits in
@@ -48,11 +50,13 @@ public:
     explicit BarrelClock(WeaponType type) : clip_(barrelClip(type)) {}
 
     // Brings it on by `seconds`. A weapon that is wanted grows, and waits; one that is not draws back (a recoil in progress is
-    // played to its end first, so that the last shot of a weapon is seen), and a barrel that is drawing back and is wanted again
-    // starts to grow from the beginning.
+    // played to its end first, so that the last shot of a weapon is seen). A barrel that is still growing when its weapon goes
+    // grows backwards from where it is, and grows on from there if the weapon comes back; one that is drawing back and is wanted
+    // again starts to grow from the beginning.
     void update(bool wanted, double seconds);
     // A shot: the barrel recoils from the start of its recoil (from where it is, if it is already recoiling). A barrel that is
-    // growing, drawing back or not shown has no recoil.
+    // growing, drawing back or not shown has no recoil. A shot is told before the update of its frame, whose `wanted` may
+    // already be false because it was the last: see BarrelClocks.
     void fired();
 
     BarrelPhase phase() const { return phase_; }
@@ -63,6 +67,22 @@ private:
     BarrelClip clip_;
     BarrelPhase phase_ = BarrelPhase::Hidden;
     double time_ = 0;
+};
+
+// The four clocks as the session drives them, with no model in it (tested without a GPU): in a frame the shots of the events come
+// first and the update after, so that the last shot of a weapon, whose weapon is gone from the session by the time its event is
+// seen, still makes its barrel recoil before it draws back.
+class BarrelClocks {
+public:
+    BarrelClocks() : clocks_{BarrelClock(WeaponType::Gun), BarrelClock(WeaponType::Cannon), BarrelClock(WeaponType::Bazooka), BarrelClock(WeaponType::Laser)} {}
+
+    // `armed`: the weapon a click fires now (GameSession::weapon()), if any.
+    void update(std::optional<WeaponType> armed, std::span<const GameEvent> events, double seconds);
+
+    const BarrelClock& operator[](WeaponType type) const { return clocks_[static_cast<std::size_t>(type)]; }
+
+private:
+    std::array<BarrelClock, kWeaponTypeCount> clocks_;
 };
 
 // The weapons' barrels on the bat: frames of bat.x (Pulemet-Left and -Right with their Stvol, Pushka, Bazuka-Korpus with its Stvol,
@@ -82,8 +102,8 @@ public:
     // the rest of the bat. Nothing when the model has no "Common" animation (assets converted before the converter wrote them).
     void append(const Mat4& place, std::vector<DrawItem>& out) const;
 
-    BarrelPhase phase(WeaponType type) const { return clocks_[static_cast<std::size_t>(type)].phase(); }
-    double time(WeaponType type) const { return clocks_[static_cast<std::size_t>(type)].time(); }
+    BarrelPhase phase(WeaponType type) const { return clocks_[type].phase(); }
+    double time(WeaponType type) const { return clocks_[type].time(); }
     // Whether the model has the animation to show the barrels with.
     bool animated() const { return animation_ != nullptr; }
 
@@ -91,8 +111,7 @@ private:
     LevelScene frames_;  // one actor for each frame the weapons use, at the model's rest pose
     const Model* model_ = nullptr;
     const ModelAnimation* animation_ = nullptr;
-    std::array<BarrelClock, kWeaponTypeCount> clocks_{BarrelClock(WeaponType::Gun), BarrelClock(WeaponType::Cannon),
-                                                       BarrelClock(WeaponType::Bazooka), BarrelClock(WeaponType::Laser)};
+    BarrelClocks clocks_;
 };
 
 }  // namespace mb

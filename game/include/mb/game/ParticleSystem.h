@@ -43,6 +43,9 @@ struct EffectOptions {
     // beam(): how long it takes to fade out, for one that must be gone sooner (or later) than the definition's `fade_time_msec`
     // says; 0: the definition's.
     float fade = 0;
+    // beam() of a Laser: how long its front takes to run from `from` to `to`, whatever the length; 0: it runs at the definition's
+    // `speed`. The colours then run over the part that is out, so the tip is the far colour from the first moment.
+    float grow = 0;
     std::uint32_t seed = 0;  // 0: the next of the system's own sequence
 };
 
@@ -83,7 +86,7 @@ public:
     EffectId attach(std::string_view effect, Vec3 at);
     EffectId attach(std::string_view effect, Vec3 at, const EffectOptions& options);
     // A beam (Laser) or a bolt (Lightning) between two points, at full strength for `options.seconds` and then fading over the
-    // definition's `fade_time_msec`. A Laser's front runs on from `from` at its `speed`; a Lightning's shape shakes.
+    // definition's `fade_time_msec`. A Laser's front runs on from `from` at its `speed` (or in `options.grow`); a Lightning's shape shakes.
     EffectId beam(std::string_view effect, Vec3 from, Vec3 to);
     EffectId beam(std::string_view effect, Vec3 from, Vec3 to, const EffectOptions& options);
 
@@ -128,6 +131,7 @@ private:
         float age = 0;
         float holdSeconds = 0;     // a beam's
         float fadeSeconds = 0;     // and how long it takes to fade out, 0: its definition's
+        float growSeconds = 0;     // and how long a Laser's front takes to run out, 0: at its definition's speed
         float holdLeft = 0;
         float fading = 0;          // how long a beam has been fading
         bool held = true;          // aimed since the last update

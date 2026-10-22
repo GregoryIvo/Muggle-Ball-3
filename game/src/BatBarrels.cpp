@@ -24,9 +24,11 @@ constexpr double kGrown = ticks(4000);
 constexpr double kRecoilTo = ticks(11200);
 constexpr double kShrinkTo = ticks(16800);
 
-// The first key at which any frame of the barrel moves after it has stood, and the last at which it still stands before it shrinks.
+// The first key at which any frame of the barrel moves after it has stood (its recoil), and the last at which none of its frames has
+// moved yet before it shrinks.
 constexpr BarrelClip kClips[kWeaponTypeCount] = {
-    {kGrown, ticks(7040), kRecoilTo, ticks(14400), kShrinkTo},  // Gun
+    // The Gun's bodies tilt in from tick 12800 (to 45 degrees by 14400) while their guns still stand: the first move of any frame
+    {kGrown, ticks(7040), kRecoilTo, ticks(12800), kShrinkTo},  // Gun
     {kGrown, ticks(6880), kRecoilTo, ticks(12000), kShrinkTo},  // Cannon
     // The bazooka's barrel starts to ease back at 5440 (its next key is at 7360, with the others' recoil in full swing)
     {kGrown, ticks(5440), kRecoilTo, ticks(12000), kShrinkTo},  // Bazooka
@@ -35,7 +37,8 @@ constexpr BarrelClip kClips[kWeaponTypeCount] = {
 
 // The frames of bat.x the weapons use, one actor each, and which of them each weapon has.
 constexpr const char* kFrames[] = {"Pulemet-Left", "Pulemet-Right", "Pushka", "Bazuka-Korpus", "lazer-Korpus"};
-constexpr std::size_t kFirstFrame[kWeaponTypeCount + 1] = {0, 2, 3, 4, 5};  // by WeaponType: its frames are [first, next first)
+constexpr std::size_t kWeaponCount = kWeaponTypeCount;
+constexpr std::size_t kFirstFrame[kWeaponCount + 1] = {0, 2, 3, 4, 5};  // by WeaponType: its frames are [first, next first)
 
 Level framesLevel(std::string_view batMaterial) {
     Level level;
@@ -68,8 +71,7 @@ void BarrelClock::update(bool wanted, double seconds) {
             break;
         case BarrelPhase::Growing:
             if (!wanted) {
-                phase_ = BarrelPhase::Shrinking;
-                time_ = clip_.shrinkFrom;
+                phase_ = BarrelPhase::Receding;
                 break;
             }
             time_ += seconds;
@@ -89,6 +91,17 @@ void BarrelClock::update(bool wanted, double seconds) {
             if (time_ >= clip_.recoilTo) {
                 phase_ = BarrelPhase::Ready;
                 time_ = clip_.grown;
+            }
+            break;
+        case BarrelPhase::Receding:
+            if (wanted) {
+                phase_ = BarrelPhase::Growing;
+                break;
+            }
+            time_ -= seconds;
+            if (time_ <= 0) {
+                phase_ = BarrelPhase::Hidden;
+                time_ = 0;
             }
             break;
         case BarrelPhase::Shrinking:
@@ -126,11 +139,7 @@ BatBarrels::BatBarrels(ModelCache& cache, const MaterialLibrary& materials, cons
     }
 }
 
-void BatBarrels::update(const GameSession& session, std::span<const GameEvent> events, double seconds) {
-    const std::optional<WeaponState> armed = session.weapon();
-    for (std::size_t type = 0; type < clocks_.size(); ++type) {
-        clocks_[type].update(armed && static_cast<std::size_t>(armed->type) == type, seconds);
-    }
+void BarrelClocks::update(std::optional<WeaponType> armed, std::span<const GameEvent> events, double seconds) {
     for (const GameEvent& event : events) {
         if (event.type == EventType::ShotFired && event.prize) {
             if (const std::optional<WeaponType> type = weaponOf(*event.prize)) {
@@ -138,17 +147,26 @@ void BatBarrels::update(const GameSession& session, std::span<const GameEvent> e
             }
         }
     }
+    for (std::size_t type = 0; type < clocks_.size(); ++type) {
+        clocks_[type].update(armed && static_cast<std::size_t>(*armed) == type, seconds);
+    }
+}
+
+void BatBarrels::update(const GameSession& session, std::span<const GameEvent> events, double seconds) {
+    const std::optional<WeaponState> armed = session.weapon();
+    clocks_.update(armed ? std::optional<WeaponType>(armed->type) : std::nullopt, events, seconds);
 }
 
 void BatBarrels::append(const Mat4& place, std::vector<DrawItem>& out) const {
     if (animation_ == nullptr) {
         return;
     }
-    for (std::size_t type = 0; type < clocks_.size(); ++type) {
-        if (clocks_[type].phase() == BarrelPhase::Hidden) {
+    for (std::size_t type = 0; type < kWeaponCount; ++type) {
+        const BarrelClock& clock = clocks_[static_cast<WeaponType>(type)];
+        if (clock.phase() == BarrelPhase::Hidden) {
             continue;
         }
-        const std::vector<Mat4> poses = model_->globalPoses(*animation_, static_cast<float>(clocks_[type].time()));
+        const std::vector<Mat4> poses = model_->globalPoses(*animation_, static_cast<float>(clock.time()));
         const std::size_t first = out.size();
         for (std::size_t frame = kFirstFrame[type]; frame < kFirstFrame[type + 1]; ++frame) {
             frames_.appendActorPosed(static_cast<ActorIndex>(frame), poses, out);

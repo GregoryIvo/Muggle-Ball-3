@@ -235,6 +235,7 @@ EffectId ParticleSystem::make(const ParticleDef* def, Vec3 at, const EffectOptio
     effect.scale = std::max(options.scale, 0.0f);
     effect.holdSeconds = std::max(options.seconds, 0.0f);
     effect.fadeSeconds = std::max(options.fade, 0.0f);
+    effect.growSeconds = std::max(options.grow, 0.0f);
     effect.direction = normalize(length(options.direction) > 0 ? options.direction : def->direction.value_or(Vec3{}));
     seed_ = seed_ * 1664525u + 1013904223u;
     effect.seed = options.seed != 0 ? options.seed : seed_ ^ (effect.id * 0x9E3779B9u);
@@ -619,12 +620,18 @@ void ParticleSystem::quadsOf(const Effect& effect, const ParticleView& view, std
 
     const Vec3 along = span / length_;
     if (def.type == ParticleType::Laser) {
-        // The front runs out from `from` at `speed`; none (the yo-yo's string) is whole at once.
-        const float shown = def.speed > 0 ? std::min(length_, def.speed * effect.scale * effect.age) : length_;
+        // The front runs out from `from` in `grow` seconds, else at `speed`; none (the yo-yo's string) is whole at once. The
+        // colours run over the part that is out: the tip is the far colour all the way, as it is in the footage.
+        float shown = length_;
+        if (effect.growSeconds > 0) {
+            shown = std::min(length_, length_ * effect.age / effect.growSeconds);
+        } else if (def.speed > 0) {
+            shown = std::min(length_, def.speed * effect.scale * effect.age);
+        }
         const Vec3 front = effect.from + along * shown;
-        strip(effect.from, front, shade(0), shade(shown / length_));
+        strip(effect.from, front, shade(0), shade(1));
         cap(effect.from, along, false, shade(0));
-        cap(front, along, true, shade(shown / length_));
+        cap(front, along, true, shade(1));
         return;
     }
 

@@ -12,6 +12,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -58,8 +60,9 @@ void testClips() {
     }
     check(near(static_cast<float>(barrelClip(WeaponType::Gun).recoilFrom), 7040.0f / 4800, 1e-4f) &&
               near(static_cast<float>(barrelClip(WeaponType::Bazooka).recoilFrom), 5440.0f / 4800, 1e-4f) &&
-              near(static_cast<float>(barrelClip(WeaponType::Gun).shrinkFrom), 14400.0f / 4800, 1e-4f),
-          "clips: each weapon's recoil starts where its barrel starts to move (the Gun's 7040, the Bazooka's 5440), the Gun's shrinking at 14400");
+              near(static_cast<float>(barrelClip(WeaponType::Gun).shrinkFrom), 12800.0f / 4800, 1e-4f) &&
+              near(static_cast<float>(barrelClip(WeaponType::Cannon).shrinkFrom), 12000.0f / 4800, 1e-4f),
+          "clips: each weapon's recoil starts where its barrel starts to move (the Gun's 7040, the Bazooka's 5440), the Gun's shrinking where its bodies start to tilt, at 12800");
 }
 
 void testClockLife() {
@@ -117,15 +120,84 @@ void testClockInterruptions() {
     last.update(false, kStep);
     check(last.phase() == BarrelPhase::Shrinking, "interruptions: and shrinks");
 
-    // Another weapon was caught while this one grew: it draws back at once.
+    // Another weapon was caught while this one grew: it grows backwards from where it is, so that nothing jumps.
     BarrelClock grow(WeaponType::Gun);
     run(grow, true, 0.3);
+    const double reached = grow.time();
     grow.update(false, kStep);
-    check(grow.phase() == BarrelPhase::Shrinking && grow.time() == clip.shrinkFrom, "interruptions: a barrel that is growing and not wanted starts to shrink");
-    // and the weapon came back while it shrank: it grows from the beginning
-    run(grow, false, 0.2);
+    check(grow.phase() == BarrelPhase::Receding && grow.time() == reached, "interruptions: a barrel that is growing and not wanted starts to recede, from the pose it has");
+    run(grow, false, 0.1);
+    check(grow.phase() == BarrelPhase::Receding && near(static_cast<float>(reached - grow.time()), 0.1f, 0.02f), "interruptions: at the take's rate");
+    grow.fired();
+    check(grow.phase() == BarrelPhase::Receding, "interruptions: a barrel that recedes does not recoil");
+    // and if the weapon is back, it grows on from there
+    const double back = grow.time();
     grow.update(true, kStep);
-    check(grow.phase() == BarrelPhase::Growing && near(static_cast<float>(grow.time()), 0, 1e-6f), "interruptions: a barrel that is shrinking and wanted again grows from the start");
+    check(grow.phase() == BarrelPhase::Growing && grow.time() == back, "interruptions: a barrel that recedes and is wanted again grows on from where it is");
+    run(grow, true, 0.1);
+    check(grow.time() > back + 0.08, "interruptions: at the take's rate");
+    // or it is gone when it is all the way back
+    grow.update(false, kStep);
+    run(grow, false, 0.6);
+    check(grow.phase() == BarrelPhase::Hidden && grow.time() == 0, "interruptions: and when it is all the way back it is hidden");
+
+    // The weapon came back while a barrel that had grown shrank: it grows from the beginning (a jump).
+    BarrelClock shrink(WeaponType::Gun);
+    run(shrink, true, clip.grown + 0.1);
+    shrink.update(false, kStep);
+    run(shrink, false, 0.2);
+    shrink.update(true, kStep);
+    check(shrink.phase() == BarrelPhase::Growing && near(static_cast<float>(shrink.time()), 0, 1e-6f), "interruptions: a barrel that is shrinking and wanted again grows from the start");
+}
+
+// The frame's order (BarrelClocks): the shots of its events first, then the update with the weapon the session has now. The last shot
+// of a weapon is in an event of the very frame in which the session has dropped the weapon, so the other order would see the weapon
+// gone, send the barrel to its shrinking, and then have no barrel to recoil.
+void testClocksOrder() {
+    const auto shot = [](PrizeKind prize) {
+        GameEvent e;
+        e.type = EventType::ShotFired;
+        e.prize = prize;
+        return std::vector<GameEvent>{e};
+    };
+    const auto ready = [](BarrelClocks& clocks, WeaponType type) {
+        for (int i = 0; i < 90; ++i) {
+            clocks.update(type, {}, kStep);
+        }
+    };
+
+    BarrelClocks last;
+    ready(last, WeaponType::Cannon);
+    check(last[WeaponType::Cannon].phase() == BarrelPhase::Ready, "order: the cannon's barrel stands");
+    last.update(std::nullopt, shot(PrizeKind::Cannon), kStep);
+    check(last[WeaponType::Cannon].phase() == BarrelPhase::Recoiling, "order: its last shot, in the frame the weapon is gone, makes it recoil");
+    for (int i = 0; i < 20; ++i) {
+        last.update(std::nullopt, {}, kStep);
+    }
+    check(last[WeaponType::Cannon].phase() == BarrelPhase::Recoiling && last[WeaponType::Cannon].time() > barrelClip(WeaponType::Cannon).recoilFrom + 0.3,
+          "order: and the recoil is played on while no weapon is wanted");
+    for (int i = 0; i < 60; ++i) {
+        last.update(std::nullopt, {}, kStep);
+    }
+    check(last[WeaponType::Cannon].phase() == BarrelPhase::Shrinking, "order: then the barrel draws back");
+
+    // The Machine Gun's pair of bullets is one event, and a shot of one weapon moves no other barrel.
+    BarrelClocks gun;
+    ready(gun, WeaponType::Gun);
+    gun.update(WeaponType::Gun, shot(PrizeKind::Gun), kStep);
+    check(gun[WeaponType::Gun].phase() == BarrelPhase::Recoiling && gun[WeaponType::Cannon].phase() == BarrelPhase::Hidden, "order: a shot of the gun makes the gun recoil and nothing else");
+
+    // The weapon caught in the same frame as the last shot of the old one: the old recoils while the new one grows.
+    BarrelClocks swap;
+    ready(swap, WeaponType::Cannon);
+    swap.update(WeaponType::Bazooka, shot(PrizeKind::Cannon), kStep);
+    check(swap[WeaponType::Cannon].phase() == BarrelPhase::Recoiling && swap[WeaponType::Bazooka].phase() == BarrelPhase::Growing,
+          "order: the old weapon's last shot recoils as the new one's barrel grows");
+
+    // A shot in the frame a weapon is first the one to fire (the click came in the frame it was caught) has no barrel to kick yet.
+    BarrelClocks fresh;
+    fresh.update(WeaponType::Laser, shot(PrizeKind::Laser), kStep);
+    check(fresh[WeaponType::Laser].phase() == BarrelPhase::Growing, "order: a shot before the barrel has grown does not kick it");
 }
 
 // ---- What the events call for -------------------------------------------------------------------------------------------------
@@ -207,6 +279,25 @@ void testBeamsAndBolts() {
     laser.run(0.16);
     check(quadsOfFile(laser.particles, "Laser") == 0, "laser: gone by 0.55 s, not at the particle file's 1.5 s fade");
     check(quadsOf(laser.particles).empty(), "laser: and nothing else is left");
+
+    // The front runs out to the tip in WeaponRules::laserGrow, 0.1 s: the file's own 150 units a second would take 0.2 s for 30 units.
+    Show grow;
+    grow.step({event(EventType::LaserBeam, PrizeKind::Laser, {0, 1, 2.9f}, {0, 1, 32.9f})});
+    const auto out = [&] { return length(quadsOf(grow.particles)[0].halfRight) * 2; };
+    check(near(out(), 5, 0.05f), "laser: a sixth of the way out after one frame at 60 a second (" + std::to_string(out()) + ")");
+    for (int i = 0; i < 2; ++i) {
+        grow.step();
+    }
+    check(near(out(), 15, 0.05f), "laser: half of the way at 0.05 s (" + std::to_string(out()) + ")");
+    for (int i = 0; i < 3; ++i) {
+        grow.step();
+    }
+    check(near(out(), 30, 0.05f), "laser: all of it at 0.1 s (" + std::to_string(out()) + ")");
+    check(quadsOf(grow.particles)[0].colourEnd.g < 0.05f, "laser: and the tip is red");
+    Show young;
+    young.step({event(EventType::LaserBeam, PrizeKind::Laser, {0, 1, 2.9f}, {0, 1, 32.9f})});
+    check(quadsOf(young.particles)[0].colourEnd.g < 0.05f && quadsOf(young.particles)[0].colourBegin.g > 0.95f,
+          "laser: yellow at the barrel and red at the front from the first frame, as in the footage");
 
     // Where the beam starts and ends is the event's.
     Show where;
@@ -314,53 +405,67 @@ void testTrails() {
     check(two.particles.effectCount() == 1, "trails: the one whose rocket is gone stops and fades");
 }
 
-// ---- The HUD's count --------------------------------------------------------------------------------------------------------
+// ---- The HUD's count and the last shot --------------------------------------------------------------------------------------
 
-void testHudCount() {
-    const MaterialLibrary materials = MaterialLibrary::parse(R"({"version": 1, "materials": [
+// A bat on a bare board with its walls (the side walls' inner faces at +-20.4 and the far wall's at 22.6, as the levels have them, and
+// one behind the bat's line, which the levels leave open for the ball to be lost through), a ball in play and no bricks, no drops and no level end: a weapon can be given and clicked, and the ball stays in play.
+struct Arena {
+    MaterialLibrary materials = MaterialLibrary::parse(R"({"version": 1, "materials": [
       {"name": "BallMaterial", "density": 1, "physics": {"restitution": 0.999}, "brick": {"type": 2, "energy": 3, "score": 4}},
       {"name": "BoardMaterial", "physics": {"restitution": 1.0}, "brick": {"type": 2, "energy": 3, "score": 4}},
       {"name": "One.jpg", "density": 5, "physics": {"restitution": 0.5}, "brick": {"type": 0, "energy": 1, "score": 10, "exploseType": 3, "exploseDelay": 100}},
       {"name": "bat_bullet", "group": "Bats", "brick": {"type": 0, "energy": 3, "score": 4}, "sounds": {"period": "bullet_shoot", "dead": "bullet_dead"}}]})");
-    Shape floor;
-    floor.type = ShapeType::Box;
-    floor.halfExtents = {30, 0.5f, 30};
-    floor.localPose.position = {0, -0.5f, 0};
-    floor.group = 4;
-    floor.shapeFlags = 8;
-    Actor board;
-    Body fixed;
-    fixed.mass = 1000;
-    fixed.massSpaceInertia = {100, 100, 100};
-    fixed.flags = 0xFF;
-    board.body = fixed;
-    board.shapes = {floor};
-    GameObject boardObject;
-    boardObject.type = ObjectType::Board;
-    boardObject.id = 1;
-    boardObject.material = "BoardMaterial";
-    board.object = boardObject;
     Level level;
-    level.gravity = {0, -9.8f, 0};
-    level.actors = {board};
-    SessionOptions options;
-    options.levelEnd = TargetRule::Never;
-    options.ignoreUnreachable = false;
-    options.physicsSettings.threads = 0;
-    options.rules.prizes.drops = false;
-    GameSession session(level, materials, options);
+    std::unique_ptr<GameSession> session;
 
-    const auto step = [&](bool launch) {
+    Arena() {
+        const auto box = [](Vec3 half, Vec3 at) {
+            Shape shape;
+            shape.type = ShapeType::Box;
+            shape.halfExtents = half;
+            shape.localPose.position = at;
+            shape.group = 4;
+            shape.shapeFlags = 8;
+            return shape;
+        };
+        Actor board;
+        Body fixed;
+        fixed.mass = 1000;
+        fixed.massSpaceInertia = {100, 100, 100};
+        fixed.flags = 0xFF;
+        board.body = fixed;
+        board.shapes = {box({30, 0.5f, 30}, {0, -0.5f, 0}), box({1, 2, 30}, {-21.4f, 2, 0}), box({1, 2, 30}, {21.4f, 2, 0}), box({30, 2, 1}, {0, 2, 23.6f}), box({30, 2, 1}, {0, 2, -21.8f})};
+        GameObject boardObject;
+        boardObject.type = ObjectType::Board;
+        boardObject.id = 1;
+        boardObject.material = "BoardMaterial";
+        board.object = boardObject;
+        level.gravity = {0, -9.8f, 0};
+        level.actors = {board};
+        SessionOptions options;
+        options.levelEnd = TargetRule::Never;
+        options.ignoreUnreachable = false;
+        options.physicsSettings.threads = 0;
+        options.rules.prizes.drops = false;
+        session = std::make_unique<GameSession>(level, materials, options);
+        for (int i = 0; i < 300 && session->phase() != SessionPhase::Ready; ++i) {
+            step(false);
+        }
+        step(true);
+    }
+
+    std::vector<GameEvent> step(bool launch) {
         GameInput input;
         input.batTargetX = 0;
         input.launch = launch;
-        session.update(1.0 / 60, input);
-        return session.takeEvents();
-    };
-    for (int i = 0; i < 300 && session.phase() != SessionPhase::Ready; ++i) {
-        step(false);
+        session->update(kStep, input);
+        return session->takeEvents();
     }
-    step(true);
+};
+
+void testHudCount() {
+    Arena arena;
+    GameSession& session = *arena.session;
     session.givePrize(PrizeKind::Gun);
     session.takeEvents();
     const auto shown = [&] {
@@ -369,18 +474,65 @@ void testHudCount() {
     };
     check(shown() == 12, "hud: the Machine Gun's icon counts its 12 shots");
     for (int i = 0; i < 20; ++i) {
-        step(false);
+        arena.step(false);
     }
     check(shown() == 12, "hud: and keeps the count while it is not fired");
-    const std::vector<GameEvent> shot = step(true);
+    const std::vector<GameEvent> shot = arena.step(true);
     const auto fired = std::ranges::find(shot, EventType::ShotFired, &GameEvent::type);
     check(fired != shot.end() && fired->count == 11, "hud: the shot reports the shots left");
     check(shown() == 11, "hud: and the count the HUD shows has fallen in the step of the shot itself");
     for (int i = 0; i < 20; ++i) {
-        step(false);
+        arena.step(false);
     }
-    step(true);
+    arena.step(true);
     check(shown() == 10, "hud: and again with the next");
+}
+
+// The real session's frames through the clocks, as PlayScene drives them: every shot of the Cannon, the last one included (the session
+// has ended the weapon in that very step), makes its barrel recoil, which is then played to its end.
+void testLastShot() {
+    Arena arena;
+    GameSession& session = *arena.session;
+    session.givePrize(PrizeKind::Cannon);
+    session.takeEvents();
+    BarrelClocks clocks;
+    const auto frame = [&](bool click) {
+        const std::vector<GameEvent> events = arena.step(click);
+        const std::optional<WeaponState> armed = session.weapon();
+        clocks.update(armed ? std::optional<WeaponType>(armed->type) : std::nullopt, events, kStep);
+        return events;
+    };
+    for (int i = 0; i < 90; ++i) {
+        frame(false);
+    }
+    check(clocks[WeaponType::Cannon].phase() == BarrelPhase::Ready, "last shot: the cannon's barrel has grown");
+    int left = -1;
+    for (int shots = 1; shots <= 6; ++shots) {
+        const std::vector<GameEvent> events = frame(true);
+        const auto fired = std::ranges::find(events, EventType::ShotFired, &GameEvent::type);
+        check(fired != events.end() && fired->count == 6 - shots, "last shot: shot " + std::to_string(shots) + " leaves " + std::to_string(6 - shots));
+        left = fired != events.end() ? fired->count : -1;
+        check(clocks[WeaponType::Cannon].phase() == BarrelPhase::Recoiling, "last shot: shot " + std::to_string(shots) + " makes the barrel recoil");
+        if (shots < 6) {
+            for (int i = 0; i < 80; ++i) {
+                frame(false);
+            }
+            check(clocks[WeaponType::Cannon].phase() == BarrelPhase::Ready, "last shot: and the barrel stands again before the next");
+        }
+    }
+    check(left == 0 && !session.weapon(), "last shot: the sixth ended the weapon in the step of the shot");
+    for (int i = 0; i < 20; ++i) {
+        frame(false);
+    }
+    check(clocks[WeaponType::Cannon].phase() == BarrelPhase::Recoiling, "last shot: its recoil goes on after the weapon is gone");
+    for (int i = 0; i < 40; ++i) {
+        frame(false);
+    }
+    check(clocks[WeaponType::Cannon].phase() == BarrelPhase::Shrinking, "last shot: and then the barrel draws back");
+    for (int i = 0; i < 90; ++i) {
+        frame(false);
+    }
+    check(clocks[WeaponType::Cannon].phase() == BarrelPhase::Hidden, "last shot: and is gone");
 }
 
 }  // namespace
@@ -389,10 +541,12 @@ int main() {
     testClips();
     testClockLife();
     testClockInterruptions();
+    testClocksOrder();
     testBeamsAndBolts();
     testBurstsAndRings();
     testTrails();
     testHudCount();
+    testLastShot();
     if (failures > 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failures);
         return 1;

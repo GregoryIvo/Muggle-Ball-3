@@ -116,6 +116,30 @@ Vec3 placeOf(const Model& bat, const ModelAnimation& take, const char* node, dou
     return bat.globalPoses(take, static_cast<float>(time))[static_cast<std::size_t>(bat.findNode(node))].translationPart();
 }
 
+// How far apart a node of the bat is at two times of the take: the largest difference of an element of its global pose (a matrix of
+// the size of the node: 10 for the cannon, 1 for the rest).
+float poseDifference(const Model& bat, const ModelAnimation& take, const char* node, double a, double b) {
+    const std::size_t index = static_cast<std::size_t>(bat.findNode(node));
+    const Mat4 first = bat.globalPoses(take, static_cast<float>(a))[index];
+    const Mat4 second = bat.globalPoses(take, static_cast<float>(b))[index];
+    float most = 0;
+    for (int row = 0; row < 4; ++row) {
+        for (int column = 0; column < 4; ++column) {
+            most = std::max(most, std::fabs(first.m[row][column] - second.m[row][column]));
+        }
+    }
+    return most;
+}
+
+// The most a node moves from its pose at `reference` over [from, to] of the take, sampled every 1/100 s.
+float movesBetween(const Model& bat, const ModelAnimation& take, const char* node, double reference, double from, double to) {
+    float most = 0;
+    for (double t = from; t <= to; t += 0.01) {
+        most = std::max(most, poseDifference(bat, take, node, reference, t));
+    }
+    return std::max(most, poseDifference(bat, take, node, reference, to));
+}
+
 // ---- The models carry the animations the pictures need ------------------------------------------------------------------------
 
 void testAnimations(ModelCache& cache) {
@@ -145,6 +169,14 @@ void testAnimations(ModelCache& cache) {
             check(full / small > 6.5f && full / small < 12, std::string("animations: ") + w.body + " grows from a tenth (a seventh, the bazooka's) of its size to full: " + std::to_string(small) + " to " + std::to_string(full));
             check(std::fabs(full - sizeOf(bat->model, take, w.body, clip.recoilFrom)) < 0.02f * full,
                   std::string("animations: ") + w.body + " stands as it is until its recoil");
+            // The clip is cut where nothing moves: the pose it waits in is the pose at the start of its recoil, the one the recoil
+            // settles in and the one it shrinks from (a cut where a frame had begun to move would jump).
+            for (const char* node : {w.body, w.barrel}) {
+                const float untilRecoil = movesBetween(bat->model, take, node, clip.grown, clip.grown, clip.recoilFrom);
+                check(untilRecoil < 0.01f, std::string("animations: ") + node + " stands from the grown pose to its recoil (it moves " + std::to_string(untilRecoil) + ")");
+                const float untilShrink = movesBetween(bat->model, take, node, clip.grown, clip.recoilTo, clip.shrinkFrom);
+                check(untilShrink < 0.02f, std::string("animations: ") + node + " stands from its recoil's end to the shrinking, in the grown pose (it moves " + std::to_string(untilShrink) + ")");
+            }
             const Vec3 ready = placeOf(bat->model, take, w.barrel, clip.grown);
             float back = 0;
             for (double t = clip.recoilFrom; t <= clip.recoilTo; t += 0.02) {
@@ -203,26 +235,56 @@ void testBarrels(Renderer& renderer, mb_app::Assets& assets) {
     stage.run(1.5);
     check(barrels.phase(WeaponType::Cannon) == BarrelPhase::Hidden && barrels.phase(WeaponType::Gun) == BarrelPhase::Ready, "barrels: then the cannon is gone and the gun stands");
 
-    // A shot makes it recoil, and the shots that are all gone end the weapon in a shrinking.
+    // A shot makes it recoil.
     std::vector<GameEvent> shot(1);
     shot[0].type = EventType::ShotFired;
     shot[0].prize = PrizeKind::Gun;
     stage.barrels->update(*stage.session, shot, 0);
     check(barrels.phase(WeaponType::Gun) == BarrelPhase::Recoiling, "barrels: a shot makes the gun recoil");
-    // The Machine Gun's shots, at the interval the rules give, until none is left.
-    stage.session->useShot();
-    int shots = 0;
-    while (stage.session->weapon() && shots < 40) {
-        stage.session->useShot();
-        ++shots;
+
+    // A weapon caught while another's barrel is still growing: that one grows backwards from where it is, without a jump.
+    {
+        Stage swap(renderer, assets, "piratos-ostrovok");
+        swap.session->givePrize(PrizeKind::Cannon);
+        swap.run(0.3);
+        const double reached = swap.barrels->time(WeaponType::Cannon);
+        swap.session->givePrize(PrizeKind::Gun);
+        swap.frame();
+        check(swap.barrels->phase(WeaponType::Cannon) == BarrelPhase::Receding && swap.barrels->phase(WeaponType::Gun) == BarrelPhase::Growing &&
+                  std::fabs(swap.barrels->time(WeaponType::Cannon) - reached) < 0.02,
+              "barrels: a weapon caught while another's barrel grows makes it recede from the pose it has");
+        swap.run(0.5);
+        check(swap.barrels->phase(WeaponType::Cannon) == BarrelPhase::Hidden && swap.barrels->phase(WeaponType::Gun) == BarrelPhase::Growing,
+              "barrels: and it is gone in the time it had grown");
     }
-    stage.run(0.1);
-    check(barrels.phase(WeaponType::Gun) == BarrelPhase::Recoiling || barrels.phase(WeaponType::Gun) == BarrelPhase::Shrinking, "barrels: the weapon has ended; the barrel is on its way out");
-    stage.run(2.5);
-    check(barrels.phase(WeaponType::Gun) == BarrelPhase::Hidden, "barrels: and gone about two seconds after");
-    items.clear();
-    barrels.append({}, items);
-    check(items.empty(), "barrels: nothing is drawn");
+
+    // A real run to the last shot of a weapon whose barrel stands (the Laser's five, a second and a half apart): each shot, the last
+    // included, makes the barrel recoil. The session has ended the weapon in the step of the last, before the barrels see its event,
+    // and the recoil is played out before the barrel draws back.
+    {
+        Stage last(renderer, assets, "piratos-ostrovok");
+        last.session->givePrize(PrizeKind::Laser);
+        last.run(1.5);
+        check(last.barrels->phase(WeaponType::Laser) == BarrelPhase::Ready, "barrels: the laser's barrel stands");
+        for (int shots = 1; shots <= 5; ++shots) {
+            last.frame(true);
+            check(last.barrels->phase(WeaponType::Laser) == BarrelPhase::Recoiling, "barrels: shot " + std::to_string(shots) + " of the laser's five makes its barrel recoil");
+            if (shots < 5) {
+                last.run(1.5);
+                check(last.barrels->phase(WeaponType::Laser) == BarrelPhase::Ready, "barrels: and it stands again");
+            }
+        }
+        check(!last.session->weapon(), "barrels: the fifth shot has ended the weapon");
+        last.run(0.3);
+        check(last.barrels->phase(WeaponType::Laser) == BarrelPhase::Recoiling, "barrels: its recoil goes on after the weapon is gone");
+        last.run(1.0);
+        check(last.barrels->phase(WeaponType::Laser) == BarrelPhase::Shrinking, "barrels: and then it draws back");
+        last.run(1.4);
+        check(last.barrels->phase(WeaponType::Laser) == BarrelPhase::Hidden, "barrels: and is gone");
+        items.clear();
+        last.barrels->append({}, items);
+        check(items.empty(), "barrels: nothing is drawn");
+    }
 
     // The scene draws them with the bat, and a wider bat has wider barrels.
     Stage scene(renderer, assets, "piratos-ostrovok");
