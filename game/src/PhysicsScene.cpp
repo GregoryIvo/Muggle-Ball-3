@@ -17,12 +17,67 @@ constexpr float kBallMass = 500.0f;
 constexpr float kBallMaxAngularVelocity = 60.0f;
 constexpr float kBallFloor = -30.0f;  // below this it has left the world
 constexpr double kBallMaxAge = 20.0;
+constexpr float kBallVolume = 4.0f * kPi / 3.0f * kBallRadius * kBallRadius * kBallRadius;
 
 constexpr float kLowBand = 0.3f;  // lowestPoints() gives the points this close to the lowest one
 // How often a body that fell asleep with nothing under it is woken again before it is let sleep anyway, and how many
 // steps pass between two looks at the sleeping bodies that rest on something.
 constexpr std::uint8_t kMaxRewakes = 3;
 constexpr std::uint64_t kLookEvery = 6;
+// A body within this of a removed one's box may have rested on it, and is woken: the check of wakeUnsupported() does
+// not reach one that a joint holds, and a joined assembly rests on the piece through whichever part touches it. That
+// is the saved gap under a body (kSupportGap) and 15 cm more for pieces that lean.
+constexpr float kWakeMargin = kSupportGap + 0.15f;
+
+// The points that make up a shape in its own frame: the corners of a box, the points of a hull, the centre of a sphere,
+// the ends of a capsule's axis (the last two are to be grown by the radius, see roundness()).
+std::vector<Vec3> shapePoints(const PhysicsShape& shape) {
+    switch (shape.type) {
+        case PhysicsShapeType::Box: {
+            std::vector<Vec3> corners;
+            for (int i = 0; i < 8; ++i) {
+                corners.push_back({(i & 1) ? shape.halfExtents.x : -shape.halfExtents.x,
+                                   (i & 2) ? shape.halfExtents.y : -shape.halfExtents.y,
+                                   (i & 4) ? shape.halfExtents.z : -shape.halfExtents.z});
+            }
+            return corners;
+        }
+        case PhysicsShapeType::Sphere: return {{0, 0, 0}};
+        case PhysicsShapeType::Capsule: return {{0, shape.halfHeight, 0}, {0, -shape.halfHeight, 0}};
+        case PhysicsShapeType::ConvexHull: return shape.points;
+    }
+    return {};
+}
+
+float roundness(const PhysicsShape& shape) {
+    return shape.type == PhysicsShapeType::Sphere || shape.type == PhysicsShapeType::Capsule ? shape.radius : 0.0f;
+}
+
+// The box round a body's shapes with its frame at `pose`, in world space.
+struct Bounds {
+    Vec3 low{1e30f, 1e30f, 1e30f};
+    Vec3 high{-1e30f, -1e30f, -1e30f};
+
+    void add(Vec3 p, float grow) {
+        low = {std::min(low.x, p.x - grow), std::min(low.y, p.y - grow), std::min(low.z, p.z - grow)};
+        high = {std::max(high.x, p.x + grow), std::max(high.y, p.y + grow), std::max(high.z, p.z + grow)};
+    }
+    bool near(const Bounds& other, float margin) const {
+        return low.x < other.high.x + margin && high.x > other.low.x - margin && low.y < other.high.y + margin &&
+               high.y > other.low.y - margin && low.z < other.high.z + margin && high.z > other.low.z - margin;
+    }
+};
+
+Bounds boundsOf(const BodyDesc& body, const Mat4& pose) {
+    Bounds bounds;
+    for (const PhysicsShape& shape : body.shapes) {
+        const Mat4 world = shape.localPose * pose;
+        for (const Vec3 p : shapePoints(shape)) {
+            bounds.add(transformPoint(p, world), roundness(shape));
+        }
+    }
+    return bounds;
+}
 
 }  // namespace
 
@@ -30,29 +85,9 @@ std::vector<Vec3> lowestPoints(const BodyDesc& body, const Mat4& pose) {
     std::vector<Vec3> points;
     for (const PhysicsShape& shape : body.shapes) {
         const Mat4 world = shape.localPose * pose;
-        std::vector<Vec3> local;
-        switch (shape.type) {
-            case PhysicsShapeType::Box:
-                for (int i = 0; i < 8; ++i) {
-                    local.push_back({(i & 1) ? shape.halfExtents.x : -shape.halfExtents.x,
-                                     (i & 2) ? shape.halfExtents.y : -shape.halfExtents.y,
-                                     (i & 4) ? shape.halfExtents.z : -shape.halfExtents.z});
-                }
-                break;
-            case PhysicsShapeType::Sphere:
-                local.push_back({0, 0, 0});
-                break;
-            case PhysicsShapeType::Capsule:
-                local = {{0, shape.halfHeight, 0}, {0, -shape.halfHeight, 0}};
-                break;
-            case PhysicsShapeType::ConvexHull:
-                local = shape.points;
-                break;
-        }
-        const bool round = shape.type == PhysicsShapeType::Sphere || shape.type == PhysicsShapeType::Capsule;
-        for (const Vec3 p : local) {
+        for (const Vec3 p : shapePoints(shape)) {
             Vec3 w = transformPoint(p, world);
-            w.y -= round ? shape.radius : 0.0f;
+            w.y -= roundness(shape);
             points.push_back(w);
         }
     }
@@ -78,6 +113,7 @@ PhysicsScene::PhysicsScene(const Level& level, const MaterialLibrary& materials,
       impactSpeed_(world_.settings().bounceThreshold) {
     if (const GameMaterial* ball = materials.find("ballMaterial")) {
         ballMaterial_ = physicsMaterial(*ball);
+        ballDensity_ = ball->density > 0 ? ball->density : 1.0f;
     } else {
         logWarn("the game material ballMaterial is missing; the test ball uses the default one");
     }
@@ -178,7 +214,8 @@ bool PhysicsScene::held(ActorIndex actor) const {
 }
 
 void PhysicsScene::wakeUnsupported() {
-    const bool look = ++steps_ % kLookEvery == 0;
+    const bool look = ++steps_ % kLookEvery == 0 || lookNow_;
+    lookNow_ = false;
     for (const ActorIndex actor : fallingActors_) {
         if (!world_.isAwake(bodies_[actor])) {
             if (wasAwake_[actor]) {  // it has fallen asleep since the last step
@@ -198,6 +235,12 @@ void PhysicsScene::wakeUnsupported() {
 
 float PhysicsScene::massOf(std::uint64_t userData) const {
     constexpr float kImmovable = std::numeric_limits<float>::infinity();
+    if (userData == kBatData) {
+        return kImmovable;
+    }
+    if (userData == kGameBallData) {
+        return kBallVolume * ballDensity_;
+    }
     if (!isActor(userData)) {
         return kBallMass;
     }
@@ -211,8 +254,12 @@ void PhysicsScene::breakJoint(std::size_t planJoint) {
 }
 
 void PhysicsScene::jointBroke(std::size_t planJoint) {
-    jointIds_[planJoint] = 0;
+    releaseJoint(planJoint);
     broken_.push_back(planJoint);
+}
+
+void PhysicsScene::releaseJoint(std::size_t planJoint) {
+    jointIds_[planJoint] = 0;
     // Nothing else wakes the pieces it held: a sleeping one would hang where the joint left it.
     const JointPlan& joint = plan_.joints[planJoint];
     for (const ActorIndex actor : {joint.actorA, joint.actorB}) {
@@ -249,11 +296,11 @@ void PhysicsScene::step(float dt) {
     world_.step(dt);
     wakeUnsupported();
 
-    for (const ContactEvent& contact : world_.takeContacts()) {
-        // Only the ball has no actor: every body of the level carries its ActorIndex.
-        if (contact.userDataA == kNoActor && contact.userDataB != kNoActor) {
+    contacts_ = world_.takeContacts();
+    for (const ContactEvent& contact : contacts_) {
+        if (contact.userDataA == kTestBallData && isActor(contact.userDataB)) {
             touched_.insert(static_cast<ActorIndex>(contact.userDataB));
-        } else if (contact.userDataB == kNoActor && contact.userDataA != kNoActor) {
+        } else if (contact.userDataB == kTestBallData && isActor(contact.userDataA)) {
             touched_.insert(static_cast<ActorIndex>(contact.userDataA));
         }
         if (breaking_ == JointBreaking::Impact) {
@@ -274,6 +321,31 @@ void PhysicsScene::step(float dt) {
         }
         return gone;
     });
+}
+
+void PhysicsScene::removeActor(ActorIndex actor) {
+    if (bodies_[actor] == 0) {
+        return;
+    }
+    const Bounds gone = boundsOf(plan_.actors[actor].body, actorPose(actor));
+    world_.removeBody(bodies_[actor]);  // its joints go with it
+    bodies_[actor] = 0;
+    std::erase(fallingActors_, actor);
+    for (const std::size_t joint : jointsOfActor_[actor]) {
+        if (jointIds_[joint] != 0) {
+            releaseJoint(joint);
+        }
+    }
+    // What rested on it falls. The look of wakeUnsupported() skips a body that a joint holds (to its neighbours, which
+    // rest on the removed piece as well), so every sleeper next to it is woken, and a woken body takes the pieces
+    // joined to it along.
+    for (const ActorIndex other : fallingActors_) {
+        if (!world_.isAwake(bodies_[other]) &&
+            boundsOf(plan_.actors[other].body, actorPose(other)).near(gone, kWakeMargin)) {
+            world_.wake(bodies_[other]);
+        }
+    }
+    lookNow_ = true;
 }
 
 Vec3 PhysicsScene::centreOfMovables() const {
@@ -307,6 +379,46 @@ BodyId PhysicsScene::launchBall(Vec3 position, Vec3 velocity) {
         balls_.push_back({body, 0});
     }
     return body;
+}
+
+BodyId PhysicsScene::addGameBall(Vec3 position, Vec3 velocity) {
+    PhysicsShape sphere;
+    sphere.type = PhysicsShapeType::Sphere;
+    sphere.radius = kBallRadius;
+    sphere.material = ballMaterial_;
+
+    BodyDesc desc;
+    desc.pose = Mat4::translation(position);
+    desc.shapes = {sphere};
+    desc.density = ballDensity_;
+    desc.linearVelocity = velocity;
+    desc.gravity = false;
+    // In its plane it can only turn about the vertical: friction at a wall spins it, and the spin turns the next
+    // bounce.
+    desc.lockTranslation[1] = true;
+    desc.lockRotation[0] = desc.lockRotation[2] = true;
+    desc.sleepLinearVelocity = 0;  // never falls asleep
+    desc.continuousCollision = true;
+    desc.userData = kGameBallData;
+    return world_.addBody(desc);
+}
+
+BodyId PhysicsScene::addBat(Vec3 position, float radius) {
+    PhysicsShape sphere;
+    sphere.type = PhysicsShapeType::Sphere;
+    sphere.radius = radius;
+    // No friction: the bat puts no spin on the ball (docs/GAMEPLAY.md section 3), and a ball that friction holds
+    // between the bat at its limit and the side wall does not come free (a human frees it by moving the bat).
+    sphere.material.staticFriction = sphere.material.dynamicFriction = 0;
+    sphere.material.frictionCombine = CombineMode::Min;
+
+    BodyDesc desc;
+    desc.pose = Mat4::translation(position);
+    desc.motion = MotionType::Kinematic;
+    desc.shapes = {sphere};
+    desc.density = 1;
+    desc.userData = kBatData;
+    return world_.addBody(desc);
 }
 
 }  // namespace mb

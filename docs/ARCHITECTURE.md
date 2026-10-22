@@ -131,6 +131,33 @@ The bonus icons' place is a guess: no screenshot shows one. `drawPause` draws th
 level starts, until the game updates it. `MuggleBall3 --level <name> --hud [--hud-state 3,1529,1,Cannon]` shows it on the
 level viewer or a screenshot.
 
+## Gameplay
+
+`GameSession` (`game/Gameplay.h`) is one level being played: the rules of `GAMEPLAY.md` on top of a `PhysicsScene`. It
+has no GPU, no window and no audio. The program gives it the time, the cursor and the click each frame, and reads back
+what to draw and play:
+
+```cpp
+GameSession session(level, materials, {.levelEnd = TargetRule::BrickType, .hearts = 2, .score = 0});
+...
+session.update(dt, {.batTargetX = *batTargetX(mouseX, mouseY, w, h, camera), .launch = clicked});
+for (const GameEvent& e : session.takeEvents()) { /* BrickHit, BrickDestroyed, BatHit, BallLost, LifeLost... */ }
+// draw: session.scene().actorPose(i) for each actor not session.actor(i).removed; session.bat(); session.balls();
+// the HUD: session.hearts(), session.score(); session.phase() says when the level is Complete or the game GameOver
+```
+
+| What | Where |
+|---|---|
+| Every number the rules use, each with its source in `GAMEPLAY.md` and how well it is known | `GameplayRules` |
+| What happens, for the sound and the look | `GameEvent`: `BallLaunched`, `BatHit`, `BoardHit`, `BallsHit`, `BrickHit`, `BrickDestroyed`, `ActorFell`, `BallLost`, `LifeLost`, `BatLeft`, `BatEntered`, `LevelComplete`, `GameOver` |
+| Which bricks are hurt, and which must go for the level to end | `canBeDamaged`, `isTarget`, `TargetRule` (H-dyn and H-type of `OBJECTS.md`; one is chosen in `SessionOptions::levelEnd`, the smoke test counts both) |
+| The cursor as a bat position | `cursorOnPlane`, `batTargetX` |
+| A player that needs no hands | `Autopilot`, `autoplay()` (returns the events; `mb_gameplay_smoke --log <level>` prints them) |
+
+Tests: `mb_gameplay_tests` on made-up levels (the bat's law, the life sequence, damage and explosions, the end of the
+level under each reading, bricks that wake what they held, the cursor); `mb_gameplay_smoke` plays all 83 levels with the
+autopilot against the real data and checks only that nothing breaks and that the ball keeps its speed and its plane.
+
 ## Rules
 
 - `engine/` and `game/` never include platform headers. Anything OS-specific

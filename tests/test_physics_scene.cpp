@@ -575,9 +575,9 @@ void testJointFrames() {
           "joint frames: and its axis and normal point the same way in the world");
 
     // A joint to the world: the world frame is in world space.
-    Joint toWorld = fixedJoint(0, 3, {2.0f, 0.5f, 0.5f}, {0, 0, 0});
+    Joint toWorld = breakable(fixedJoint(0, 3, {2.0f, 0.5f, 0.5f}, {0, 0, 0}));  // (an unbreakable one would weld b and go)
     const PhysicsPlan world = planPhysics(levelOf({board(), a, b}, {toWorld}), materials());
-    check(near(transformPoint(world.joints[0].desc.localAnchor[1], poseB), {2.0f, 0.5f, 0.5f}, 1e-4f),
+    check(world.joints.size() == 1 && near(transformPoint(world.joints[0].desc.localAnchor[1], poseB), {2.0f, 0.5f, 0.5f}, 1e-4f),
           "joint frames: for the world as the first end too");
 
     // Nothing is pulled together when the world starts: both bodies stay where they are.
@@ -886,6 +886,55 @@ void testOldLevelsAreNotSimulated() {
     check(near(scene.actorPose(1).translationPart(), {0, 0.5f, 10}), "version: and its actors stay where they were saved");
 }
 
+void testRemoveActor() {
+    // A pillar (actor 1) with a crate asleep on it (2), and a crate (3) hung in the air from a block (4) by a joint.
+    Actor pillar = brick(1, {0, 0.5f, 10}, 0x180);
+    Actor stacked = brick(2, {0, 1.5f, 10}, 0x100, 10, {box({0.5f, 0.5f, 0.5f})});
+    Actor hanging = brick(12, {5, 3, 10}, 0x100, 10, {box({0.5f, 0.5f, 0.5f})});
+    Actor holder = brick(11, {5, 1, 10}, 0x180);
+    const Level level = levelOf({board(), pillar, stacked, hanging, holder}, {fixedJoint(11, 12, {0, 2, 0}, {0, 0, 0})});
+    PhysicsScene scene(level, materials(), options(), singleThreaded());
+    run(scene, 0.5f);
+    const std::size_t bodies = scene.world().bodyCount();
+    check(!scene.world().isAwake(scene.body(2)) && scene.held(3), "remove: the crate on the pillar sleeps, the hanging one is held");
+
+    scene.removeActor(1);
+    check(scene.body(1) == 0 && scene.world().bodyCount() == bodies - 1, "remove: the actor's body is out of the world");
+    scene.removeActor(1);
+    check(scene.world().bodyCount() == bodies - 1, "remove: and removing it again does nothing");
+    scene.step(1.0f / 60);
+    check(scene.world().isAwake(scene.body(2)), "remove: what rested on it is woken by the very next step");
+    // (Wood bounces on the board with a restitution of 1, so it is the lowest point that shows it fell.)
+    const auto lowest = [&](ActorIndex actor, float seconds) {
+        float low = 1e9f;
+        for (int i = 0, steps = static_cast<int>(seconds * 60); i < steps; ++i) {
+            scene.step(1.0f / 60);
+            low = std::min(low, scene.actorPose(actor).translationPart().y);
+        }
+        return low;
+    };
+    check(lowest(2, 1.5f) < 0.6f, "remove: and falls to the floor");
+
+    scene.removeActor(4);  // what holds the hanging crate
+    check(!scene.held(3) && scene.world().isAwake(scene.body(3)) && scene.brokenJoints().empty(),
+          "remove: a piece joined to the removed one is let go and woken, and the joint is not counted as broken");
+    check(lowest(3, 1.5f) < 0.6f, "remove: and that one falls to the floor");
+
+    // The contacts of a step are there to read.
+    PhysicsScene shooting(levelOf({board(), brick(2, {0, 0.5f, 6})}), materials(), options(), singleThreaded());
+    shooting.addGameBall({0, 0.6f, 0}, {0, 0, 15});
+    bool contactWithBrick = false;
+    for (int i = 0; i < 60 && !contactWithBrick; ++i) {
+        shooting.step(1.0f / 60);
+        for (const ContactEvent& contact : shooting.contacts()) {
+            contactWithBrick = contactWithBrick || ((contact.userDataA == kGameBallData && contact.userDataB == 1) ||
+                                                    (contact.userDataB == kGameBallData && contact.userDataA == 1));
+        }
+    }
+    check(contactWithBrick && shooting.balls().empty() && shooting.touchedByBalls().empty(),
+          "contacts: the game ball's contact with the brick is in contacts(), and it is no test ball");
+}
+
 void testBallAndBodies() {
     const Level level = levelOf({board(), brick(2, {0, 0.5f, 10})});
     PhysicsScene scene(level, materials(), options(), singleThreaded());
@@ -926,6 +975,48 @@ void testBallAndBodies() {
     check(falling.balls().empty(), "ball: and is removed once it is below y = -30");
 }
 
+void testGameBallAndBat() {
+    // The ball of the game stays on its plane and turns only about the vertical, whatever it hits: a wedge turned 35 degrees
+    // about x pushes it up and back, and it leaves the plane neither in position nor in spin.
+    Actor wedge = actor(ObjectType::Wall, 5, {0, 1, 10}, 0x17F, 100, {box({3, 1.5f, 1})}, "Wood.jpg");
+    const float c = std::cos(radians(35.0f)), sn = std::sin(radians(35.0f));
+    wedge.pose.rotation = {1, 0, 0, 0, c, -sn, 0, sn, c};
+    PhysicsScene scene(levelOf({board(), wedge}), materials(), options(), singleThreaded());
+    const BodyId ball = scene.addGameBall({0.5f, 0.6f, 0}, {0, 0, 15});
+    bool pushedUp = false, flat = true;
+    for (int i = 0; i < 90; ++i) {
+        scene.step(1.0f / 60);
+        for (const ContactEvent& contact : scene.contacts()) {
+            pushedUp = pushedUp || ((contact.userDataA == 1 || contact.userDataB == 1) && std::fabs(contact.normal.y) > 0.3f);
+        }
+        const Vec3 spin = scene.world().angularVelocity(ball);
+        flat = flat && near(scene.world().pose(ball).translationPart().y, 0.6f, 1e-4f) && near(spin.x, 0, 1e-4f) &&
+               near(spin.z, 0, 1e-4f);
+    }
+    check(pushedUp && flat, "game ball: a face that leans does not lift it or tip it over");
+    check(scene.world().linearVelocity(ball).z < 0, "game ball: it bounced back off the wedge");
+
+    // Swept collision: at 150 units/s it moves 2.5 units in a step, and does not go through a wall 2 cm thick.
+    Actor thin = actor(ObjectType::Wall, 5, {0, 2, 10}, 0x17F, 100, {box({5, 2, 0.01f})}, "Wood.jpg");
+    PhysicsScene fast(levelOf({board(), thin}), materials(), options(), singleThreaded());
+    const BodyId shot = fast.addGameBall({0, 0.6f, 0}, {0, 0, 150});
+    run(fast, 0.5f);
+    check(fast.world().pose(shot).translationPart().z < 10, "game ball: a fast one is stopped by a thin wall");
+
+    // The bat puts no spin on the ball, however it grazes it, and a bat that is held still does not hold the ball: friction
+    // would turn it (and keep it).
+    PhysicsScene bat(levelOf({board()}), materials(), options(), singleThreaded());
+    const BodyId batBody = bat.addBat({0, 0.6f, -21}, 3);
+    const BodyId grazed = bat.addGameBall({3.2f, 0.6f, -10}, {0, 0, -15});
+    float spin = 0;
+    for (int i = 0; i < 90; ++i) {
+        bat.step(1.0f / 60);
+        spin = std::max(spin, std::fabs(bat.world().angularVelocity(grazed).y));
+    }
+    check(batBody != 0 && bat.world().linearVelocity(grazed).x > 1 && near(spin, 0, 1e-3f),
+          "bat: a ball that grazes it is turned aside and gets no spin, " + std::to_string(spin));
+}
+
 }  // namespace
 
 int main() {
@@ -951,7 +1042,9 @@ int main() {
     testBreakingWakesPartners();
     testKinematicBodiesAreImmovable();
     testOldLevelsAreNotSimulated();
+    testRemoveActor();
     testBallAndBodies();
+    testGameBallAndBat();
     if (failures == 0) {
         std::puts("all physics scene tests passed");
     }

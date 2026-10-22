@@ -114,6 +114,12 @@ std::vector<Vec3> lowestPoints(const BodyDesc& body, const Mat4& pose);
 
 inline constexpr float kBallRadius = 0.6f;
 
+// BodyDesc::userData of the bodies that belong to no actor (an actor's body carries its ActorIndex): the test balls
+// of launchBall(), and the game's own balls and bat, see addGameBall().
+inline constexpr std::uint64_t kTestBallData = kNoActor;
+inline constexpr std::uint64_t kGameBallData = std::uint64_t{kNoActor} - 1;
+inline constexpr std::uint64_t kBatData = std::uint64_t{kNoActor} - 2;
+
 // How far under its lowest points a body may have the surface it rests on and still count as supported by it: the
 // levels were saved with bricks above what holds them (320 dynamic bodies, by 8 mm to 15 cm, 175 of them by more than
 // 2 cm), which no contact reaches.
@@ -141,6 +147,13 @@ public:
     // Whether a joint that has not broken still holds the actor.
     bool held(ActorIndex actor) const;
 
+    // Takes an actor out of the world, body and joints: a brick that was destroyed, a piece that fell off the board.
+    // Whatever rested on it falls: the sleeping bodies within 0.3 units of it wake at once (and with them whatever is
+    // joined to them, which the look for hanging bodies skips), and the next step looks for others with nothing under
+    // them. The pieces it was joined to wake, too. The actor has no body afterwards, like a marker; actorPose() gives
+    // where it was saved, so a caller that draws it must stop. Does nothing for an actor with no body.
+    void removeActor(ActorIndex actor);
+
     struct Counts {
         std::size_t dynamicBodies = 0, kinematicBodies = 0, staticBodies = 0;
         std::size_t withoutBody = 0;  // actors that take no part in the simulation
@@ -166,6 +179,10 @@ public:
     //  - removes test balls that are older than 20 s or have fallen below y = -30.
     void step(float dt);
 
+    // The contacts that began in the last step() (all fixed steps of it), for the game rules; the scene itself only
+    // uses them to break joints and to note what the test balls touched.
+    std::span<const ContactEvent> contacts() const { return contacts_; }
+
     // The average position of the dynamic bodies as the level saved them: where to aim a test ball to hit something.
     // (0, 0, 0) for a level with none.
     Vec3 centreOfMovables() const;
@@ -180,6 +197,19 @@ public:
     };
     std::span<const Ball> balls() const { return balls_; }
 
+    // The ball of the game: a sphere of kBallRadius with the game material "ballMaterial" and continuous collision
+    // detection, kept on the horizontal plane through `position` (no gravity, no vertical motion, and it turns only
+    // about the vertical, up to PhysX's default cap of 7 rad/s). Its friction is the material's, 0.5: the original's
+    // walls turn the ball by 11 to 18 degrees on most bounces, in both directions, which spin and friction explain
+    // (docs/GAMEPLAY.md, "Corrections"). Its mass is its volume times the material's density, as PhysX gave it; the
+    // rules keep its speed. Not one of balls(): nothing ages or removes it, and it carries kGameBallData. Returns its
+    // body (0 if the world refused).
+    BodyId addGameBall(Vec3 position, Vec3 velocity);
+    // A kinematic sphere that moves only where setKinematicTarget() puts it, and pushes what it meets: the bat. It
+    // has no friction, so that it turns no ball (the combined friction is the lesser). It carries kBatData. Returns
+    // its body (0 if the world refused).
+    BodyId addBat(Vec3 position, float radius);
+
     // Actors a test ball has touched, counting from the start.
     const std::set<ActorIndex>& touchedByBalls() const { return touched_; }
 
@@ -192,7 +222,9 @@ private:
     std::vector<BodyId> bodies_;  // by ActorIndex
     Counts counts_;
     PhysicsMaterial ballMaterial_;
+    float ballDensity_ = 1;
     std::vector<Ball> balls_;
+    std::vector<ContactEvent> contacts_;
     std::set<ActorIndex> touched_;
 
     std::vector<ActorIndex> fallingActors_;  // dynamic, with gravity and free to move down: see wakeUnsupported()
@@ -200,6 +232,7 @@ private:
     std::vector<std::uint8_t> rewoken_;      // by ActorIndex: times wakeUnsupported() woke it in the air
     std::vector<std::uint8_t> restsOn_;      // by ActorIndex: it stood on something when last looked at
     std::uint64_t steps_ = 0;
+    bool lookNow_ = false;  // an actor was taken out: the next step looks at the sleepers that rested on something
 
     JointBreaking breaking_;
     float fixedStep_;
@@ -209,10 +242,11 @@ private:
     std::vector<std::size_t> planJointOfId_;               // by JointId, for Load breaking
     std::vector<std::size_t> broken_;
 
-    bool isActor(std::uint64_t userData) const { return userData < plan_.actors.size(); }  // else it is a ball
+    bool isActor(std::uint64_t userData) const { return userData < plan_.actors.size(); }  // else a ball or the bat
     float massOf(std::uint64_t userData) const;  // infinity for what a hit cannot move
     void breakByHit(const ContactEvent& contact);
     void breakJoint(std::size_t planJoint);
+    void releaseJoint(std::size_t planJoint);  // the joint is gone: its bodies wake, or one asleep would hang
     void jointBroke(std::size_t planJoint);
     void wakeUnsupported();
 };

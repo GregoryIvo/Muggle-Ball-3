@@ -166,13 +166,30 @@ spar of a ship off at 50 units per second, more than the 0.54 thick floor per st
 bodies keeps most of them from going through (16 bodies in 9 shots of 1,992 without it, 4 in 3 with it, all thin
 light pieces of wrecked ships); the rest are a documented allowance of the smoke test (1% of the shots).
 
+## The ball and the bat of the game
+
+`GameSession` (`game/Gameplay.h`, ARCHITECTURE.md) plays a level in a `PhysicsScene` with its own ball and bat:
+
+- **The ball** (`addGameBall`) is a sphere of 0.6 with `ballMaterial` (friction 0.5, restitution 0.999), continuous
+  collision and no gravity, locked to the plane it starts on (y = 0.6) and free to turn only about the vertical, at up
+  to PhysX's default 7 rad/s. Its mass is the material's density times its volume, 0.9 against the median brick's 51:
+  a ball that light loses speed in every collision with a brick, which `GAMEPLAY.md` takes as the reason the original
+  sets the speed back to 15 after each bounce (the rules do it after every fixed step). Friction at a wall turns the
+  ball by 11 to 18 degrees on most bounces in the footage, both ways: it takes sideways speed off the ball and puts
+  spin on it, and the spin turns the next bounce. (A ball with friction in a locked plane has one defect: it loses
+  its sideways speed between two parallel walls until it goes straight up and down; the rules turn such a path out,
+  `GameplayRules::minVerticalAngleDegrees`.)
+- **The bat** (`addBat`) is a kinematic sphere of 3 that `setKinematicTarget` moves each step. The rules, not the
+  physics, decide where a ball leaves it.
+- **`removeActor`** takes a destroyed brick out of the world, joints and all. Jolt wakes nothing when a body goes, so
+  the scene does what it does for a broken joint: the pieces that were joined to it wake, and the next step looks for
+  sleepers with nothing under them (the look below, run at once instead of within a tenth of a second).
+- **`contacts()`** are the contacts that began in the last step, the same list that breaks joints, for the rules.
+
 ## Not done yet
 
-Step 4: the real ball and bat, bricks that die (the original's islands and ships are smashed by that, not by
-physics: a ball cannot move a 34,000-unit island piece; `PhysicsWorld::removeBody` does not wake what rested on
-the body, `PhysicsScene`'s look under sleeping bodies does), the ball-lost and bat zones, prizes; bodies that fall
-off the board are not removed (they fall for ever, 98 units per second after 10 s); there is no render interpolation
-(a 120 Hz display shows each 60 Hz physics state twice). Step 5: cloth and its 84 joints,
+The bat's lane (`PhysicsPlan::zones`) is not used: the rules take the bat's line as a number. There are no prizes
+yet, and no render interpolation (a 120 Hz display shows each 60 Hz physics state twice). Step 5: cloth and its 84 joints,
 moving sharks and trains on paths, cannons, teleports, springs, volcanoes. Several dynamic bodies are saved with
 nothing under them and fall when woken (the pirate of `piratos-po-volnam` at x = 30, outside the board, falls 490
 units; some boulders of `cowboys-samba` and others 11): they need step 5's paths or a settle. Not decoded: how the
