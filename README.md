@@ -24,7 +24,7 @@ Options (volumes, check boxes, window size), the bat and the window itself (see
 bat, the ball, bricks that die and score, hearts, the end of a level; see
 [`docs/GAMEPLAY.md`](docs/GAMEPLAY.md)), and a level is played with them: the mouse moves the
 bat and a click launches the ball; the bat swoops in and out, the ball rolls and shrinks away
-when it is lost, bricks that explode flash and leave, damaged ones show their cracks, and every
+when it is lost, bricks that explode flash and leave (people and animals shrink away), damaged ones show their cracks, and every
 hit has its sound. The hearts and points carry from level to level, a finished level opens the
 next, a lost game goes to Game Over or the high scores, and `--autoplay` lets an autopilot play
 (see below). Not there yet: prizes and the bat's weapons, sails (cloth), moving sharks and trains,
