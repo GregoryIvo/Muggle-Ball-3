@@ -11,7 +11,8 @@ namespace {
 // Where on the bat, from its centre, the successive balls are met: it sends them out at about +-37, 18, 8, ... degrees.
 constexpr std::array<float, 8> kMeetAt = {2.2f, -1.1f, 0.5f, -2.6f, 1.6f, -0.4f, 2.9f, -1.9f};
 
-// The side walls' inner faces are at +-20.4: a ball's centre bounces between +-19.8.
+// The side walls' inner faces are at +-20.4 in the footage and +-20.0 at the ball's height on the converted boards: the
+// autopilot aims as if a ball's centre bounced between +-19.8, near enough to both.
 constexpr float kWall = 19.8f;
 
 // x after travelling freely, bouncing off the walls at +-kWall.

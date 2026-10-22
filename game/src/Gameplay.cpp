@@ -17,8 +17,11 @@ constexpr std::uint32_t kAllFrozen = Body::kFrozenPosX | Body::kFrozenPosY | Bod
 // Bodies are looked at for having left the board this often (in steps): a body falls for a while before it is a
 // concern, and the look costs one pose per dynamic body.
 constexpr std::uint64_t kFallCheckEvery = 6;
-// A ball farther than this beyond the bat's reach is no longer on it: the next touch is a new hit.
+// A ball farther than this beyond the bat's reach is no longer on it: the next touch is a new hit. A bat on the run
+// pushes the ball ahead of it, so what the bat covers in a step is added.
 constexpr float kBatLeaveSlack = 0.3f;
+// The x part of the path a freed ball gets, on a path of z part 1: away from the wall it was pinned on, slightly.
+constexpr float kFreedSlant = 0.3f;
 
 constexpr int kRuleCount = 2;  // the TargetRules that name targets
 
@@ -35,6 +38,7 @@ std::string_view eventName(EventType type) {
         case EventType::BrickDestroyed: return "BrickDestroyed";
         case EventType::ActorFell: return "ActorFell";
         case EventType::BallLost: return "BallLost";
+        case EventType::BallFreed: return "BallFreed";
         case EventType::LifeLost: return "LifeLost";
         case EventType::BatLeft: return "BatLeft";
         case EventType::BatEntered: return "BatEntered";
@@ -217,8 +221,8 @@ GameSession::GameSession(const Level& level, const MaterialLibrary& materials, c
 }
 
 void GameSession::update(double seconds, const GameInput& input) {
-    if (std::isfinite(input.batTargetX)) {
-        targetX_ = std::clamp(input.batTargetX, -rules_.batLimitX, rules_.batLimitX);
+    if (input.batTargetX && std::isfinite(*input.batTargetX)) {
+        targetX_ = std::clamp(*input.batTargetX, -rules_.batLimitX, rules_.batLimitX);
     }
     launchPending_ = launchPending_ || input.launch;
     if (!(seconds > 0) || !std::isfinite(seconds)) {
@@ -274,6 +278,9 @@ int GameSession::addBall(Vec3 position, Vec3 direction) {
     position.y = rules_.ballPlaneY;
     const Vec3 heading = normalize({direction.x, 0, direction.z});
     const int id = newBall(position, heading.x == 0 && heading.z == 0 ? Vec3{0, 0, 1} : heading, false);
+    if (id < 0) {
+        return id;
+    }
     GameEvent event;
     event.type = EventType::BallLaunched;
     event.ball = id;
@@ -353,7 +360,7 @@ void GameSession::enterBat() {
     snapBat_ = true;  // the new bat appears under the cursor
     bat_.position = {targetX_, rules_.ballPlaneY, rules_.batZ};
     bat_.velocityX = 0;
-    setBatPhase(BatPhase::Entering);
+    setBatPhase(BatPhase::Entering, readyAt_ - time_);
     phase_ = SessionPhase::Entering;
     newBall({}, {0, 0, 1}, true);
 
@@ -363,19 +370,25 @@ void GameSession::enterBat() {
     emit(event);
 }
 
-void GameSession::setBatPhase(BatPhase phase) {
+void GameSession::setBatPhase(BatPhase phase, double duration) {
     bat_.phase = phase;
+    bat_.phaseDuration = duration;
     batPhaseStart_ = time_;
 }
 
 int GameSession::newBall(Vec3 position, Vec3 heading, bool held) {
     Ball ball;
-    ball.id = nextBall_++;
     ball.held = held;
     ball.heading = heading;
+    ball.anchor = position;
+    ball.anchoredAt = time_;
     if (!held) {
         ball.body = scene_.addGameBall(position, heading * rules_.ballSpeed);
+        if (ball.body == 0) {
+            return -1;
+        }
     }
+    ball.id = nextBall_++;
     balls_.push_back(ball);
     return ball.id;
 }
@@ -386,9 +399,16 @@ void GameSession::launchHeldBall() {
         return;
     }
     const Vec3 position{bat_.position.x + rules_.heldOffsetX, rules_.ballPlaneY, bat_.position.z + rules_.heldOffsetZ};
-    held->heading = headingAt(-radians(rules_.launchAngleDegrees));
-    held->body = scene_.addGameBall(position, held->heading * rules_.ballSpeed);
+    const Vec3 heading = headingAt(-radians(rules_.launchAngleDegrees));
+    const BodyId body = scene_.addGameBall(position, heading * rules_.ballSpeed);
+    if (body == 0) {  // the click is lost; the ball waits for the next one
+        return;
+    }
+    held->heading = heading;
+    held->body = body;
     held->held = false;
+    held->anchor = position;
+    held->anchoredAt = time_;
     phase_ = SessionPhase::Playing;
     ++stats_.ballsLaunched;
 
@@ -505,7 +525,8 @@ bool GameSession::hitBrick(ActorIndex actor, Vec3 at, float speed, int ball) {
 void GameSession::keepBalls() {
     const float sinFlat = std::sin(radians(rules_.minPlanarAngleDegrees));
     const float sinSteep = std::sin(radians(rules_.minVerticalAngleDegrees));
-    const float reach = rules_.batRadius + kBallRadius + kBatLeaveSlack;
+    const float reach = rules_.batRadius + kBallRadius + kBatLeaveSlack +
+                        std::fabs(batVelocity_) * static_cast<float>(fixedStep_);
     for (std::size_t i = 0; i < balls_.size();) {
         Ball& ball = balls_[i];
         if (ball.held) {
@@ -514,7 +535,14 @@ void GameSession::keepBalls() {
         }
         const Vec3 at = scene_.world().pose(ball.body).translationPart();
         if (!finite(at) || std::fabs(at.x) > rules_.escapeX || at.z > rules_.escapeZ || at.z < rules_.ballLostZ) {
-            loseBall(i);
+            loseBall(i, at, scene_.world().linearVelocity(ball.body));
+            continue;
+        }
+        if (std::hypot(at.x - ball.anchor.x, at.z - ball.anchor.z) > rules_.jamDistance) {
+            ball.anchor = at;
+            ball.anchoredAt = time_;
+        } else if (time_ - ball.anchoredAt >= rules_.jamTime && !freeBall(ball, at)) {
+            loseBall(i, at, {});
             continue;
         }
         const Vec3 velocity = scene_.world().linearVelocity(ball.body);
@@ -536,15 +564,38 @@ void GameSession::keepBalls() {
     }
 }
 
-void GameSession::loseBall(std::size_t index) {
+bool GameSession::freeBall(Ball& ball, Vec3 at) {
+    // Towards the middle of the board: away from the wall it was against, and from the end it was pinned at.
+    ball.heading = normalize({at.x > 0 ? -kFreedSlant : kFreedSlant, 0, at.z > 0 ? -1.0f : 1.0f});
+    scene_.world().removeBody(ball.body);
+    ball.body = scene_.addGameBall(at, ball.heading * rules_.ballSpeed);
+    ball.bounced = false;
+    ball.anchor = at;
+    ball.anchoredAt = time_;
+    if (ball.body == 0) {
+        return false;
+    }
+    ++stats_.ballsFreed;
+    GameEvent event;
+    event.type = EventType::BallFreed;
+    event.ball = ball.id;
+    event.position = at;
+    emit(event);
+    return true;
+}
+
+// The ball's body is gone already when `ball.body` is 0 (freeBall() could not make a new one).
+void GameSession::loseBall(std::size_t index, Vec3 position, Vec3 velocity) {
     const Ball ball = balls_[index];
     GameEvent event;
     event.type = EventType::BallLost;
     event.ball = ball.id;
-    event.position = scene_.world().pose(ball.body).translationPart();
-    event.velocity = scene_.world().linearVelocity(ball.body);
+    event.position = position;
+    event.velocity = velocity;
     emit(event);
-    scene_.world().removeBody(ball.body);
+    if (ball.body != 0) {
+        scene_.world().removeBody(ball.body);
+    }
     balls_.erase(balls_.begin() + static_cast<std::ptrdiff_t>(index));
     ++stats_.ballsLost;
 
@@ -569,7 +620,7 @@ void GameSession::runLifeSequence() {
         scene_.world().removeBody(batBody_);
         batBody_ = 0;
         bat_.velocityX = 0;
-        setBatPhase(BatPhase::Leaving);
+        setBatPhase(BatPhase::Leaving, rules_.batLeaveTime);
         event.type = EventType::BatLeft;
         event.position = bat_.position;
         emit(event);
@@ -679,7 +730,13 @@ void GameSession::checkComplete() {
 
 void GameSession::complete() {
     phase_ = SessionPhase::Complete;
-    life_ = Life::None;
+    life_ = Life::None;  // a heart is not spent after the level is won
+    // The bat's swoop is over: no new bat comes if it was leaving, and the one coming is there.
+    if (bat_.phase == BatPhase::Entering) {
+        setBatPhase(BatPhase::Present);
+    } else if (bat_.phase == BatPhase::Leaving) {
+        setBatPhase(BatPhase::Absent);
+    }
     GameEvent event;
     event.type = EventType::LevelComplete;
     emit(event);

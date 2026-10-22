@@ -5,11 +5,14 @@
 //        each level is played for S seconds of game time (default 60) by the autopilot (the bat follows the ball that
 //        comes down first), with hearts to spare so that it plays on after a lost ball, and the level ending set to
 //        "never" so that both readings of "destroy every target" (TargetRule) can be followed in one run. The table
-//        has, per level: the targets under each reading at the start; bricks destroyed, points, balls lost, bat hits
-//        and brick hits; the targets left under each reading, and when each reading's last target fell (a dash:
-//        not within S). Sanity is asserted, not the result: no pose may be not finite, no body may fly faster than
-//        a sane simulation, a ball's speed must be the rules' speed and its y the plane's after every frame, and a
-//        ball may only leave past the bat. With a level name, --log prints its event log.
+//        has, per level: the targets under each reading at the start; bricks destroyed, points, balls lost, bat hits,
+//        brick hits and balls freed from a pin; the targets left under each reading, and when each reading's last
+//        target fell (a dash: not within S). Sanity is asserted, not the result: no pose may be not finite, no body
+//        may fly faster than a sane simulation, a ball's speed must be the rules' speed and its y the plane's after
+//        every frame, a ball may only leave past the bat, a ball in flight must move at least 0.3 units in 2 s (the
+//        speed the session reports is the one it sets, so a ball frozen by the solver shows only here), and none may
+//        be pinned against the bat (the session frees a ball that is pinned elsewhere, in a pocket of the board, and
+//        the table counts those). With a level name, --log prints its event log.
 
 #include "mb/game/Autopilot.h"
 #include "mb/game/Gameplay.h"
@@ -26,6 +29,7 @@
 #include <exception>
 #include <filesystem>
 #include <format>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -39,6 +43,8 @@ constexpr float kMaxSpeed = 200.0f;  // no body of a sane simulation is faster t
 constexpr float kSpeedTolerance = 0.01f;
 constexpr float kPlaneTolerance = 1e-3f;
 constexpr float kHigh = 2.5f, kReachBeyond = 1.5f;  // see play(): where a ball cannot reach
+constexpr float kMoves = 0.3f;                       // a ball in flight is at least this far from where it was ...
+constexpr std::uint64_t kMovesWithin = 120;          // ... two seconds (frames) ago
 
 bool finite(const Mat4& m) {
     for (const auto& row : m.m) {
@@ -68,6 +74,12 @@ struct Outcome {
     int standingHigh = 0, standingOutside = 0, standingOnField = 0;  // where, see play()
 };
 
+// Where a ball was when it last moved, and when (the frame).
+struct Anchor {
+    Vec3 at;
+    std::uint64_t frame = 0;
+};
+
 const TargetRule kRules[2] = {TargetRule::DynamicBricks, TargetRule::BrickType};
 
 const char* motionName(MotionType motion) {
@@ -87,6 +99,8 @@ Outcome play(const Level& level, const MaterialLibrary& materials, double second
     const GameplayRules& rules = session.rules();
     const PhysicsScene& scene = session.scene();
     std::uint64_t frame = 0;
+    std::map<int, Anchor> anchors;  // by ball id
+    int freed = 0;
     const auto problem = [&](const std::string& what) {
         if (out.problems.size() < 5) {
             out.problems.push_back(std::format("{} at {:.2f} s", what, session.time()));
@@ -101,9 +115,30 @@ Outcome play(const Level& level, const MaterialLibrary& materials, double second
                 out.finishedAt[i] = s.time();
             }
         }
+        if (s.stats().ballsFreed > freed) {
+            freed = s.stats().ballsFreed;
+            for (const BallView& ball : s.balls()) {
+                const Vec3 bat = s.bat().position;
+                if (!ball.held && std::hypot(ball.position.x - bat.x, ball.position.z - bat.z) <
+                                      rules.batRadius + kBallRadius + kReachBeyond) {
+                    problem(std::format("ball {} was pinned against the bat at ({:.2f}, {:.2f})", ball.id,
+                                        static_cast<double>(ball.position.x), static_cast<double>(ball.position.z)));
+                }
+            }
+        }
         for (const BallView& ball : s.balls()) {
             if (ball.held) {
+                anchors.erase(ball.id);
                 continue;
+            }
+            Anchor& anchor = anchors.try_emplace(ball.id, Anchor{ball.position, frame}).first->second;
+            if (std::hypot(ball.position.x - anchor.at.x, ball.position.z - anchor.at.z) >= kMoves) {
+                anchor = {ball.position, frame};
+            } else if (frame - anchor.frame >= kMovesWithin) {
+                problem(std::format("ball {} has not moved {} units in {} frames, at ({:.2f}, {:.2f})", ball.id,
+                                    static_cast<double>(kMoves), kMovesWithin, static_cast<double>(ball.position.x),
+                                    static_cast<double>(ball.position.z)));
+                anchor.frame = frame;
             }
             const float speed = std::hypot(ball.velocity.x, ball.velocity.z);
             if (!std::isfinite(speed) || std::fabs(speed - rules.ballSpeed) > kSpeedTolerance * rules.ballSpeed ||
@@ -178,12 +213,12 @@ std::string finish(double at) {
 
 int run(const MaterialLibrary& materials, const LevelCatalog& catalog, double seconds, bool log, bool left,
         const char* only) {
-    std::printf("%-26s | %9s | %5s %7s %4s %5s %6s | %9s | %-11s | %s\n", "level", "targets", "dead", "points", "lost",
-                "bat", "hits", "left", "done at (s)", "ms/step");
-    std::printf("%-26s | %4s %4s | %5s %7s %4s %5s %6s | %4s %4s | %5s %5s |\n", "", "dyn", "type", "", "", "", "", "",
-                "dyn", "type", "dyn", "type");
+    std::printf("%-26s | %9s | %5s %7s %4s %5s %6s %5s | %9s | %-11s | %s\n", "level", "targets", "dead", "points",
+                "lost", "bat", "hits", "freed", "left", "done at (s)", "ms/step");
+    std::printf("%-26s | %4s %4s | %5s %7s %4s %5s %6s %5s | %4s %4s | %5s %5s |\n", "", "dyn", "type", "", "", "", "",
+                "", "", "dyn", "type", "dyn", "type");
     int failed = 0, levels = 0, finishedBy[2] = {0, 0}, withTargets[2] = {0, 0};
-    int emptyLevels = 0, standingHigh = 0, standingOutside = 0, standingOnField = 0;
+    int emptyLevels = 0, standingHigh = 0, standingOutside = 0, standingOnField = 0, freed = 0, levelsWithFreed = 0;
     double share[2] = {0, 0};  // summed over the levels: the part of the targets destroyed
     double stepMs = 0, worstStepMs = 0, slowest = 0;
     std::string worstLevel;
@@ -194,10 +229,10 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, double se
         ++levels;
         const Level level = loadLevelJson(entry.path);
         const Outcome out = play(level, materials, seconds);
-        std::printf("%-26s | %4d %4d | %5d %7lld %4d %5d %6d | %4d %4d | %5s %5s | %.3f\n", entry.name.c_str(),
+        std::printf("%-26s | %4d %4d | %5d %7lld %4d %5d %6d %5d | %4d %4d | %5s %5s | %.3f\n", entry.name.c_str(),
                     out.targetsAtStart[0], out.targetsAtStart[1], out.stats.bricksDestroyed,
                     static_cast<long long>(out.score), out.stats.ballsLost, out.stats.batHits, out.stats.bricksHit,
-                    out.targetsLeft[0], out.targetsLeft[1], finish(out.finishedAt[0]).c_str(),
+                    out.stats.ballsFreed, out.targetsLeft[0], out.targetsLeft[1], finish(out.finishedAt[0]).c_str(),
                     finish(out.finishedAt[1]).c_str(), out.stepMs);
         std::fflush(stdout);
         for (int i = 0; i < 2; ++i) {
@@ -208,6 +243,8 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, double se
             }
         }
         emptyLevels += out.targetsAtStart[0] == 0 || out.targetsAtStart[1] == 0;
+        freed += out.stats.ballsFreed;
+        levelsWithFreed += out.stats.ballsFreed > 0;
         standingHigh += out.standingHigh;
         standingOutside += out.standingOutside;
         standingOnField += out.standingOnField;
@@ -242,6 +279,7 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, double se
     std::printf("targets still standing at the end under either reading: %d on the field, %d higher than %.1f (out of "
                 "reach until they fall), %d beyond where any ball went (out of reach)\n",
                 standingOnField, standingHigh, static_cast<double>(kHigh), standingOutside);
+    std::printf("balls freed from a pin: %d, in %d levels\n", freed, levelsWithFreed);
     if (emptyLevels > 0) {
         std::printf("%d levels have no target under one of the readings\n", emptyLevels);
     }

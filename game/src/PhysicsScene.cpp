@@ -24,6 +24,60 @@ constexpr float kLowBand = 0.3f;  // lowestPoints() gives the points this close 
 // steps pass between two looks at the sleeping bodies that rest on something.
 constexpr std::uint8_t kMaxRewakes = 3;
 constexpr std::uint64_t kLookEvery = 6;
+// A body within this of a removed one's box may have rested on it, and is woken: the check of wakeUnsupported() does
+// not reach one that a joint holds, and a joined assembly rests on the piece through whichever part touches it. That
+// is the saved gap under a body (kSupportGap) and 15 cm more for pieces that lean.
+constexpr float kWakeMargin = kSupportGap + 0.15f;
+
+// The points that make up a shape in its own frame: the corners of a box, the points of a hull, the centre of a sphere,
+// the ends of a capsule's axis (the last two are to be grown by the radius, see roundness()).
+std::vector<Vec3> shapePoints(const PhysicsShape& shape) {
+    switch (shape.type) {
+        case PhysicsShapeType::Box: {
+            std::vector<Vec3> corners;
+            for (int i = 0; i < 8; ++i) {
+                corners.push_back({(i & 1) ? shape.halfExtents.x : -shape.halfExtents.x,
+                                   (i & 2) ? shape.halfExtents.y : -shape.halfExtents.y,
+                                   (i & 4) ? shape.halfExtents.z : -shape.halfExtents.z});
+            }
+            return corners;
+        }
+        case PhysicsShapeType::Sphere: return {{0, 0, 0}};
+        case PhysicsShapeType::Capsule: return {{0, shape.halfHeight, 0}, {0, -shape.halfHeight, 0}};
+        case PhysicsShapeType::ConvexHull: return shape.points;
+    }
+    return {};
+}
+
+float roundness(const PhysicsShape& shape) {
+    return shape.type == PhysicsShapeType::Sphere || shape.type == PhysicsShapeType::Capsule ? shape.radius : 0.0f;
+}
+
+// The box round a body's shapes with its frame at `pose`, in world space.
+struct Bounds {
+    Vec3 low{1e30f, 1e30f, 1e30f};
+    Vec3 high{-1e30f, -1e30f, -1e30f};
+
+    void add(Vec3 p, float grow) {
+        low = {std::min(low.x, p.x - grow), std::min(low.y, p.y - grow), std::min(low.z, p.z - grow)};
+        high = {std::max(high.x, p.x + grow), std::max(high.y, p.y + grow), std::max(high.z, p.z + grow)};
+    }
+    bool near(const Bounds& other, float margin) const {
+        return low.x < other.high.x + margin && high.x > other.low.x - margin && low.y < other.high.y + margin &&
+               high.y > other.low.y - margin && low.z < other.high.z + margin && high.z > other.low.z - margin;
+    }
+};
+
+Bounds boundsOf(const BodyDesc& body, const Mat4& pose) {
+    Bounds bounds;
+    for (const PhysicsShape& shape : body.shapes) {
+        const Mat4 world = shape.localPose * pose;
+        for (const Vec3 p : shapePoints(shape)) {
+            bounds.add(transformPoint(p, world), roundness(shape));
+        }
+    }
+    return bounds;
+}
 
 }  // namespace
 
@@ -31,29 +85,9 @@ std::vector<Vec3> lowestPoints(const BodyDesc& body, const Mat4& pose) {
     std::vector<Vec3> points;
     for (const PhysicsShape& shape : body.shapes) {
         const Mat4 world = shape.localPose * pose;
-        std::vector<Vec3> local;
-        switch (shape.type) {
-            case PhysicsShapeType::Box:
-                for (int i = 0; i < 8; ++i) {
-                    local.push_back({(i & 1) ? shape.halfExtents.x : -shape.halfExtents.x,
-                                     (i & 2) ? shape.halfExtents.y : -shape.halfExtents.y,
-                                     (i & 4) ? shape.halfExtents.z : -shape.halfExtents.z});
-                }
-                break;
-            case PhysicsShapeType::Sphere:
-                local.push_back({0, 0, 0});
-                break;
-            case PhysicsShapeType::Capsule:
-                local = {{0, shape.halfHeight, 0}, {0, -shape.halfHeight, 0}};
-                break;
-            case PhysicsShapeType::ConvexHull:
-                local = shape.points;
-                break;
-        }
-        const bool round = shape.type == PhysicsShapeType::Sphere || shape.type == PhysicsShapeType::Capsule;
-        for (const Vec3 p : local) {
+        for (const Vec3 p : shapePoints(shape)) {
             Vec3 w = transformPoint(p, world);
-            w.y -= round ? shape.radius : 0.0f;
+            w.y -= roundness(shape);
             points.push_back(w);
         }
     }
@@ -293,12 +327,22 @@ void PhysicsScene::removeActor(ActorIndex actor) {
     if (bodies_[actor] == 0) {
         return;
     }
+    const Bounds gone = boundsOf(plan_.actors[actor].body, actorPose(actor));
     world_.removeBody(bodies_[actor]);  // its joints go with it
     bodies_[actor] = 0;
     std::erase(fallingActors_, actor);
     for (const std::size_t joint : jointsOfActor_[actor]) {
         if (jointIds_[joint] != 0) {
             releaseJoint(joint);
+        }
+    }
+    // What rested on it falls. The look of wakeUnsupported() skips a body that a joint holds (to its neighbours, which
+    // rest on the removed piece as well), so every sleeper next to it is woken, and a woken body takes the pieces
+    // joined to it along.
+    for (const ActorIndex other : fallingActors_) {
+        if (!world_.isAwake(bodies_[other]) &&
+            boundsOf(plan_.actors[other].body, actorPose(other)).near(gone, kWakeMargin)) {
+            world_.wake(bodies_[other]);
         }
     }
     lookNow_ = true;
@@ -363,6 +407,10 @@ BodyId PhysicsScene::addBat(Vec3 position, float radius) {
     PhysicsShape sphere;
     sphere.type = PhysicsShapeType::Sphere;
     sphere.radius = radius;
+    // No friction: the bat puts no spin on the ball (docs/GAMEPLAY.md section 3), and a ball that friction holds
+    // between the bat at its limit and the side wall does not come free (a human frees it by moving the bat).
+    sphere.material.staticFriction = sphere.material.dynamicFriction = 0;
+    sphere.material.frictionCombine = CombineMode::Min;
 
     BodyDesc desc;
     desc.pose = Mat4::translation(position);

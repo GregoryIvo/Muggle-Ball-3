@@ -19,12 +19,16 @@ namespace mb {
 // PhysicsScene and reports what happens as events; it draws nothing and plays nothing. The presentation reads the state
 // every frame, takes the events, and gives the session the cursor and the click:
 //
-//     GameSession session(level, materials, {.levelEnd = TargetRule::BrickType});
+//     std::optional<GameSession> session;  // not copyable or movable: it holds the physics world
+//     session.emplace(level, materials, SessionOptions{.levelEnd = TargetRule::BrickType});
 //     // every frame:
-//     session.update(dt, {.batTargetX = batTargetX(mouseX, mouseY, w, h, camera).value_or(last), .launch = clicked});
-//     for (const GameEvent& event : session.takeEvents()) { /* sounds, flashes, the HUD */ }
-//     // drawing: session.scene().actorPose(i) for each actor with !session.actor(i).removed, session.bat(),
-//     // session.balls(); retexture a brick by session.actor(i).textureIndex; the HUD from hearts() and score().
+//     session->update(dt, {.batTargetX = batTargetX(mouseX, mouseY, w, h, camera), .launch = clicked});
+//     for (const GameEvent& event : session->takeEvents()) { /* sounds, flashes, the HUD */ }
+//     // drawing: session->scene().actorPose(i) for each actor with !session->actor(i).removed, session->bat(),
+//     // session->balls(); retexture a brick by session->actor(i).textureIndex; the HUD from hearts() and score().
+//
+// What the presentation reads is the state after the last fixed step (1/60 s, see PhysicsSettings::fixedStep); update()
+// does not interpolate, and a display running at another rate may carry a ball on with its velocity.
 //
 // Space is the level's (Math.h): +y up, +z away from the player. The ball moves on the horizontal plane y = 0.6 and
 // the bat at the near edge, z about -21, along x only.
@@ -75,9 +79,18 @@ struct GameplayRules {
     double batLeaveDelay = 0.6;    // the bat starts to fly off (7874.7)
     double batLeaveTime = 0.4;     // and is gone (7875.1)
     double heartDelay = 2.1;       // a heart is spent (7876.17-.20); with none left, the game is over
-    double batEnterDelay = 2.1;    // the new bat starts to swoop in with it (7876.23)
+    double batEnterDelay = 2.1;    // the new bat starts to swoop in with it (7876.23), never before the heart
     double readyDelay = 2.63;      // the ball is on the bat and can be launched (7876.73)
     double startReadyDelay = 0.7;  // at the start of a level the swoop takes this long (V1 52.2-52.9)
+
+    // ---- A ball that cannot move [?]
+    // A ball can be pinned: between the bat at its limit and the side wall, or in a pocket between a wall and a brick
+    // that is narrower than itself, where friction and the bounces that turn it out of a flat path (above) keep it
+    // still. A player moves the bat, which frees the first kind; nothing frees the second, and the footage shows
+    // neither. A ball that has stayed within jamDistance of where it was for jamTime seconds is put back in the world
+    // (a body with none of the contact state that holds the old one) on a path towards the middle of the board.
+    float jamDistance = 1.0f;
+    double jamTime = 1.0;
 
     // ---- Bricks (section 5)
     // A hit is a contact that begins with the ball closing on the thing at more than this share of its speed along
@@ -109,9 +122,11 @@ struct SessionOptions {
     // BrickType is the default: brickType is the field of the data that tells the targets (characters, buildings,
     // ships, fences, lava) from ground, rocks, crates, animals and trees, and it does not depend on how a level
     // happened to be saved (floor tiles are kinematic, 551 bodies are "dynamic" but welded to the world). In the
-    // autopilot runs every level that finishes under H-dyn finishes under H-type too (tests/gameplay_smoke.cpp counts
-    // both). Neither can finish a level that has a target out of the ball's reach (above it, or beyond the walls), and
-    // some have. The footage will have to say.
+    // autopilot runs nearly every level that finishes under H-dyn finishes under H-type too (tests/gameplay_smoke.cpp
+    // counts both). Neither can finish a level that has a target out of the ball's reach (above it on a support
+    // that stays, or beyond the walls), and 21 of the 83 have, most of them knight boards (docs/OBJECTS.md will say
+    // what the original counted). Until the footage settles it, a flow that must not stall needs forceLevelComplete()
+    // or a skip as well.
     TargetRule levelEnd = TargetRule::BrickType;
     std::optional<int> hearts;  // carried over from the level before; GameplayRules::startHearts for the first
     std::int64_t score = 0;     // likewise
@@ -131,6 +146,7 @@ enum class EventType {
     BrickDestroyed,  // actor, position (centre of mass), points (added to the score), material
     ActorFell,       // actor, position (centre of mass), points (if fallScores), material: it left the board
     BallLost,        // ball, position, velocity: behind the bat's line (or out of the world); it shrinks away
+    BallFreed,       // ball, position: it was pinned and is put back in the world (see GameplayRules::jamTime)
     LifeLost,        // hearts (left): the heart is spent, 2.1 s after the last ball was lost
     BatLeft,         // the bat starts to fly off (after the last ball was lost)
     BatEntered,      // the bat swoops in with the ball on it (at the start of a level, and as the heart is spent)
@@ -180,14 +196,17 @@ enum class BatPhase {
 struct BatView {
     BatPhase phase = BatPhase::Entering;
     double phaseTime = 0;  // seconds since the phase began, for animating the swoop
-    Vec3 position{};       // the centre of its collision sphere; where it will be or was while it swoops or leaves
+    // How long Entering lasts (startReadyDelay at the start of a level, readyDelay - batEnterDelay after a loss) and
+    // Leaving (batLeaveTime); 0 for the others.
+    double phaseDuration = 0;
+    Vec3 position{};  // the centre of its collision sphere; where it will be or was while it swoops or leaves
     float velocityX = 0;
 };
 
 struct BallView {
     int id = 0;  // unique in the session
     Vec3 position{};
-    Vec3 velocity{};  // zero while held
+    Vec3 velocity{};  // zero while held; the rules' own (always ballSpeed along the path), not what the solver left
     bool held = false;  // on the bat, waiting for the click
 };
 
@@ -203,21 +222,25 @@ struct ActorStatus {
 };
 
 struct SessionStats {
-    int ballsLaunched = 0, ballsLost = 0, batHits = 0;
+    int ballsLaunched = 0, ballsLost = 0, ballsFreed = 0, batHits = 0;
     int bricksHit = 0, bricksDestroyed = 0, actorsFallen = 0;
 };
 
 // What the player does in a frame.
 struct GameInput {
-    float batTargetX = 0;  // where the cursor is on the board (batTargetX()); the bat eases towards it
-    bool launch = false;   // the click: lets the held ball go
+    // Where the cursor is on the board (batTargetX(), which has none for a cursor above the horizon); the bat eases
+    // towards it. None keeps the target of the frame before.
+    std::optional<float> batTargetX;
+    bool launch = false;  // the click: lets the held ball go
 };
 
 // ---- Rules that stand on their own
 
 // Whether balls hurt an actor of this object type with this material: it has a brick material (brickType other than
 // 2, which the ball, bullets, board, water and the fallback have, and energy above 0). The board and markers never
-// do. A cloth is a placeholder for a sail the cloth simulation has yet to build (step 5), so a ball goes by it.
+// do. A cloth is a placeholder for a sail the cloth simulation has yet to build (step 5), so a ball goes by it, though
+// the original scored sails (60 each: piratos-ostrovok's 62 bricks and 3 sails are the 65 bricks, 4,231 points of
+// docs/GAMEPLAY.md), and they are not targets here.
 bool canBeDamaged(ObjectType type, const GameMaterial* material);
 
 // Whether an object counts toward the end of the level under a rule. `dynamic` is whether the body is dynamic as the
@@ -254,10 +277,10 @@ public:
     // Each step: the bat eases towards the target and the held ball follows it; the physics runs; then
     //  - a ball that touched the bat leaves along (ball - bat) in the plane (BatHit);
     //  - every ball's speed goes back to GameplayRules::ballSpeed (it stays on its plane by itself), and after a
-    //    bounce a path too near an axis is turned out; one behind ballLostZ is lost (BallLost), and the last of them
-    //    starts the life sequence: the bat leaves (BatLeft), a heart is spent (LifeLost) as the new bat comes
-    //    (BatEntered) with the ball on it, and it can be launched again (phase Ready). With no heart left it is
-    //    GameOver instead;
+    //    bounce a path too near an axis is turned out; one that cannot move is freed (BallFreed); one behind
+    //    ballLostZ is lost (BallLost), and the last of them starts the life sequence: the bat leaves (BatLeft), a
+    //    heart is spent (LifeLost) as the new bat comes (BatEntered) with the ball on it, and it can be launched
+    //    again (phase Ready). With no heart left it is GameOver instead;
     //  - a ball that touches a brick at more than hitFraction of its speed hits it (BrickHit): one hit takes one
     //    energy, at zero the brick explodes exploseDelay milliseconds later (BrickDestroyed): its body goes (and what
     //    rested on it falls), its brickScore is added;
@@ -291,7 +314,8 @@ public:
     Vec3 centreOf(ActorIndex actor) const;
 
     // A ball in flight at `position` along `direction` (in the plane; the rules set its speed). For multiball and
-    // for tests. Returns its id. It is no held ball, and losing it costs a life only if it is the last.
+    // for tests. Returns its id, or -1 if the world refused the body. It is no held ball, and losing it costs a life
+    // only if it is the last.
     int addBall(Vec3 position, Vec3 direction);
 
     // One hit on an actor from something other than a ball (a bullet, dynamite, the Thunderbolt prize): the same as a
@@ -310,6 +334,8 @@ private:
         bool onBat = false;     // touched the bat at the last step: one hit for a stay on it
         bool bounced = false;   // began to touch something besides the bat in this step
         Vec3 heading{0, 0, 1};  // unit, in the plane: where it goes, kept for the step in which it stands still
+        Vec3 anchor{};          // where it was when jamDistance last was exceeded, and when
+        double anchoredAt = 0;
     };
     struct Brick {
         const GameMaterial* material = nullptr;
@@ -364,15 +390,16 @@ private:
     void tick();
     void moveBat();
     void enterBat();
-    void setBatPhase(BatPhase phase);
-    int newBall(Vec3 position, Vec3 heading, bool held);
+    void setBatPhase(BatPhase phase, double duration = 0);
+    int newBall(Vec3 position, Vec3 heading, bool held);  // -1: the world refused the body, and there is no ball
     void launchHeldBall();
     Ball* ballOf(BodyId body);
     void processContacts();
     void hitBat(Ball& ball);
     bool hitBrick(ActorIndex actor, Vec3 at, float speed, int ball);
     void keepBalls();
-    void loseBall(std::size_t index);
+    void loseBall(std::size_t index, Vec3 position, Vec3 velocity);
+    bool freeBall(Ball& ball, Vec3 at);
     void runLifeSequence();
     void explodeDue();
     void removeFallen();

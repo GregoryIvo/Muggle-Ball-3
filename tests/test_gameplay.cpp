@@ -257,6 +257,7 @@ void testBallSpeedStaysAndStaysOnThePlane() {
     check(g.count(EventType::BoardHit) > 15 && g.count(EventType::BallLost) == 0,
           "speed: it bounced off the walls (" + std::to_string(g.count(EventType::BoardHit)) + " hits) and was not lost");
     check(g.session.stats().batHits + g.count(EventType::BoardHit) > 15, "speed: ... and kept bouncing");
+    check(g.count(EventType::BallFreed) == 0, "speed: a ball in free flight is never taken for a pinned one");
 }
 
 void testSlopesDoNotLiftTheBall() {
@@ -287,6 +288,9 @@ void testLaunch() {
     check(g.ready(), "launch: ready after the swoop");
     const double ready = g.session.time();
     check(near(static_cast<float>(ready), 0.7f, 0.02f), "launch: the swoop takes 0.7 s at the start of a level");
+    check(near(static_cast<float>(g.session.bat().phaseDuration), 0.0f) &&
+              near(static_cast<float>(Game(levelOf({board()})).session.bat().phaseDuration), 0.7f),
+          "launch: the bat says how long its swoop lasts, 0.7 s, and nothing once it is there");
     g.run(1);
     check(g.count(EventType::BallLaunched) == 0 && g.session.phase() == SessionPhase::Ready,
           "launch: the ball waits for the click, with no auto-launch");
@@ -539,8 +543,8 @@ void testLosingTheBall() {
 
     g.runUntil([&] { return g.find(EventType::BatLeft) != nullptr; }, 2);
     check(near(static_cast<float>(g.find(EventType::BatLeft)->time - t0), 0.6f, 0.03f) &&
-              g.session.bat().phase == BatPhase::Leaving,
-          "lost: the bat leaves 0.6 s later");
+              g.session.bat().phase == BatPhase::Leaving && near(static_cast<float>(g.session.bat().phaseDuration), 0.4f),
+          "lost: the bat leaves 0.6 s later, for 0.4 s");
     g.runUntil([&] { return g.session.bat().phase == BatPhase::Absent; }, 2);
     check(near(static_cast<float>(g.session.time() - t0), 1.0f, 0.03f) && g.session.hearts() == 2,
           "lost: and is gone by 1.0 s, still with both hearts");
@@ -557,8 +561,9 @@ void testLosingTheBall() {
         }
     }
     check(entered != nullptr && near(static_cast<float>(entered->time - heart->time), 0.0f, 0.04f) &&
-              g.session.phase() == SessionPhase::Entering && g.session.bat().phase == BatPhase::Entering,
-          "lost: the new bat swoops in as the heart is spent");
+              g.session.phase() == SessionPhase::Entering && g.session.bat().phase == BatPhase::Entering &&
+              near(static_cast<float>(g.session.bat().phaseDuration), 0.53f, 0.03f),
+          "lost: the new bat swoops in as the heart is spent, for 0.53 s");
     check(g.session.balls().size() == 1 && g.session.balls()[0].held, "lost: with the ball on it");
     g.runUntil([&] { return g.session.phase() == SessionPhase::Ready; }, 2);
     check(near(static_cast<float>(g.session.time() - t0), 2.63f, 0.03f) && g.session.bat().phase == BatPhase::Present,
@@ -765,6 +770,15 @@ void testRollingIsNoHit() {
     check(head.count(EventType::BrickHit) == 1 && head.find(EventType::BrickHit)->actor == 2 &&
               head.find(EventType::BrickHit)->speed > 14,
           "rolling: a tile met head on is hit, once, at the ball's speed");
+
+    // A slanted hit is one: 60 degrees from the face's normal the ball closes at half its speed, which is above the
+    // 30% that counts and below 60%.
+    Game glancing(levelOf({board(), brick({0, 1, 8}, "Shark.jpg", kStatic)}));
+    glancing.session.addBall({-6.6f, 0.6f, -0.66f}, {0.5f, 0, 0.866f});
+    glancing.run(1.2);
+    const GameEvent* slant = glancing.find(EventType::BrickHit);
+    check(slant != nullptr && slant->speed > 6.0f && slant->speed < 9.0f,
+          "rolling: a ball that meets a face at 60 degrees from its normal hits it, at about half its speed");
 }
 
 void testCompoundBrickHitOnce() {
@@ -924,6 +938,33 @@ void testRemovedBrickLetsGoOfWhatItHeld() {
     check(h.session.actor(1).removed && h.session.scene().world().isAwake(h.session.scene().body(2)),
           "joint: when the pillar goes, what it held is let go");
     check(lowest(h, 3) < 0.55f, "joint: and falls to the floor");
+
+    // Two crates joined to each other, not to the pillar, rest on it. A joint holds both, so the look for hanging bodies
+    // leaves them alone: the pillar's going has to wake them.
+    Joint pair;
+    pair.type = NxJointType::Fixed;
+    pair.actorA = 21;
+    pair.actorB = 22;
+    pair.localAxis[0] = pair.localAxis[1] = {0, 1, 0};
+    pair.localNormal[0] = pair.localNormal[1] = {1, 0, 0};
+    pair.localAnchor[0] = {0.5f, 0, 0};
+    pair.localAnchor[1] = {-0.5f, 0, 0};
+    pair.maxForce = pair.maxTorque = 1e6f;
+    Level stacked = levelOf({board(), brick({0, 1, 6}, "Shark.jpg", kKinematic, {3, 1, 1}),
+                             actor(ObjectType::Brick, {-0.5f, 2.5f, 6}, kDynamic, 10, {box({0.5f, 0.5f, 0.5f})}, "Steel.jpg"),
+                             actor(ObjectType::Brick, {0.5f, 2.5f, 6}, kDynamic, 10, {box({0.5f, 0.5f, 0.5f})}, "Steel.jpg")},
+                            {pair});
+    stacked.actors[2].object->id = 21;
+    stacked.actors[3].object->id = 22;
+    Game rests(stacked);
+    rests.run(2);
+    check(near(rests.where(2).y, 2.5f, 0.05f) && near(rests.where(3).y, 2.5f, 0.05f) && rests.session.scene().held(2) &&
+              !rests.session.scene().world().isAwake(rests.session.scene().body(2)),
+          "pair: two crates joined to each other rest on the pillar, asleep");
+    rests.session.hit(1, {});
+    rests.run(6);
+    check(rests.session.actor(1).removed && rests.where(2).y < 0.55f && rests.where(3).y < 0.55f,
+          "pair: when the pillar goes, both fall to the floor");
 }
 
 void testFallenActors() {
@@ -972,6 +1013,94 @@ void testFallenActors() {
     check(dying.count(EventType::ActorFell) == 1 && dying.count(EventType::BrickDestroyed) == 1 && dying.session.score() == 20 + 77 &&
               !dying.session.actor(2).exploding,
           "fallen: out of the world first, and scored once");
+}
+
+void testPinnedBall() {
+    // A ball shut into a pocket 1.5 wide has nowhere to go. It bounces between the walls, never farther than a unit from
+    // where it was: every jamTime it is put back in the world, in the same place, and keeps its speed.
+    const auto wall = [](Vec3 at, Vec3 half) {
+        return actor(ObjectType::Brick, at, kStatic, 100, {box(half)}, "Steel.jpg");
+    };
+    const Level pocket = levelOf({board(), wall({-1.25f, 1, 10}, {0.5f, 1, 1.75f}), wall({1.25f, 1, 10}, {0.5f, 1, 1.75f}),
+                                  wall({0, 1, 8.75f}, {0.75f, 1, 0.5f}), wall({0, 1, 11.25f}, {0.75f, 1, 0.5f})});
+    Game g(pocket);
+    g.run(3);
+    check(g.count(EventType::BallFreed) == 0, "pinned: a ball held on the bat is not a pinned one");
+    const double began = g.session.time();
+    const int id = g.session.addBall({0, 0.6f, 10}, {0.5f, 0, 1});
+    g.run(3.5);
+    const GameEvent* freed = g.find(EventType::BallFreed);
+    check(freed != nullptr && freed->ball == id && near(static_cast<float>(freed->time - began), 1.0f, 0.05f) &&
+              near(freed->position, {0, 0.6f, 10}, 0.8f),
+          "pinned: a ball that stays within a unit for a second is freed, at the place it was");
+    check(g.count(EventType::BallFreed) == 3 && g.session.stats().ballsFreed == 3 && g.session.balls().size() == 2 &&
+              g.count(EventType::BallLost) == 0,
+          "pinned: and again every second while it is shut in, and it is not lost");
+    const BallView* shut = g.ball(id);
+    check(shut != nullptr && near(std::hypot(shut->velocity.x, shut->velocity.z), 15, 0.05f) &&
+              near(shut->position.x, 0, 0.8f) && near(shut->position.z, 10, 0.8f),
+          "pinned: with its speed, in the pocket");
+
+    // Where it is put back: away from the wall it was against and towards the middle of the board. Made to fire in free
+    // flight by a distance no ball covers in the time, a ball from the left half and the near half is sent on to the right
+    // and the far side, and from the far half to the near side.
+    SessionOptions eager = options();
+    eager.rules.jamDistance = 1000;
+    eager.rules.jamTime = 0.5;
+    Game e(levelOf({board()}), eager);
+    const int fromNear = e.session.addBall({-10, 0.6f, -12}, {0, 0, 1});
+    const int fromFar = e.session.addBall({10, 0.6f, 5}, {0, 0, 1});
+    e.runUntil([&] { return e.count(EventType::BallFreed) == 2; }, 1);
+    e.step();
+    const BallView* a = e.ball(fromNear);
+    const BallView* b = e.ball(fromFar);
+    check(a != nullptr && b != nullptr && e.count(EventType::BallFreed) == 2, "pinned: both are freed");
+    if (a != nullptr && b != nullptr) {
+        const Vec3 nearWay = normalize({0.3f, 0, 1.0f}), farWay = normalize({-0.3f, 0, -1.0f});
+        check(near(a->velocity, nearWay * 15, 0.1f), "pinned: from the left and near half, to the right and on");
+        check(near(b->velocity, farWay * 15, 0.1f), "pinned: from the right and far half, to the left and back");
+    }
+}
+
+void testRefusedBall() {
+    // A world with room for the board and the bat only cannot make a ball: the click and addBall() do nothing.
+    SessionOptions tight = options();
+    tight.physicsSettings.maxBodies = 2;
+    Game g(levelOf({board()}), tight);
+    check(g.ready(), "refused: the bat comes in with its ball");
+    g.step({.launch = true});
+    check(g.count(EventType::BallLaunched) == 0 && g.session.phase() == SessionPhase::Ready &&
+              g.session.balls().size() == 1 && g.session.balls()[0].held && g.session.stats().ballsLaunched == 0,
+          "refused: a click that cannot launch leaves the ball waiting on the bat");
+    check(g.session.addBall({0, 0.6f, 0}, {0, 0, 1}) == -1 && g.session.balls().size() == 1 &&
+              g.count(EventType::BallLaunched) == 0,
+          "refused: addBall() says -1, and there is no ball");
+}
+
+void testLevelCompleteEndsTheLifeSequence() {
+    // A level that is won while the bat is flying off costs no heart and brings no bat back.
+    Game g(levelOf({board(false)}));
+    loseTheBall(g);
+    g.runUntil([&] { return g.session.bat().phase == BatPhase::Leaving; }, 2);
+    g.session.forceLevelComplete();
+    g.run(5);
+    check(g.count(EventType::LevelComplete) == 1 && g.count(EventType::LifeLost) == 0 && g.count(EventType::BatEntered) == 1 &&
+              g.session.hearts() == 2 && g.session.phase() == SessionPhase::Complete,
+          "complete: winning while the bat leaves spends no heart and brings no new bat");
+    check(g.session.bat().phase == BatPhase::Absent, "complete: the bat that was leaving is gone");
+
+    Game entering(levelOf({board()}));
+    entering.session.forceLevelComplete();
+    check(entering.session.bat().phase == BatPhase::Present, "complete: a bat that was swooping in is there");
+}
+
+void testBatTargetIsKept() {
+    // No target in a frame is no change: a cursor that left the board (batTargetX() has none) does not send the bat home.
+    Game g(levelOf({board()}));
+    g.run(1.5, {.batTargetX = 10});
+    check(near(g.session.bat().position.x, 10, 0.05f), "target: the bat is where the cursor was");
+    g.run(1.5, {});
+    check(near(g.session.bat().position.x, 10, 0.05f), "target: and stays there when there is no target");
 }
 
 void testCursor() {
@@ -1091,6 +1220,10 @@ int main() {
     testHitOnOthers();
     testRemovedBrickLetsGoOfWhatItHeld();
     testFallenActors();
+    testPinnedBall();
+    testRefusedBall();
+    testLevelCompleteEndsTheLifeSequence();
+    testBatTargetIsKept();
     testCursor();
     testCarriedState();
     testEventQueueIsBounded();

@@ -148,9 +148,10 @@ public:
     bool held(ActorIndex actor) const;
 
     // Takes an actor out of the world, body and joints: a brick that was destroyed, a piece that fell off the board.
-    // Whatever rested on it falls (the next step looks at once for sleeping bodies with nothing under them) and the
-    // pieces it was joined to wake. The actor has no body afterwards, like a marker; actorPose() gives where it was
-    // saved, so a caller that draws it must stop. Does nothing for an actor with no body.
+    // Whatever rested on it falls: the sleeping bodies within 0.3 units of it wake at once (and with them whatever is
+    // joined to them, which the look for hanging bodies skips), and the next step looks for others with nothing under
+    // them. The pieces it was joined to wake, too. The actor has no body afterwards, like a marker; actorPose() gives
+    // where it was saved, so a caller that draws it must stop. Does nothing for an actor with no body.
     void removeActor(ActorIndex actor);
 
     struct Counts {
@@ -205,7 +206,8 @@ public:
     // body (0 if the world refused).
     BodyId addGameBall(Vec3 position, Vec3 velocity);
     // A kinematic sphere that moves only where setKinematicTarget() puts it, and pushes what it meets: the bat. It
-    // carries kBatData. Returns its body (0 if the world refused).
+    // has no friction, so that it turns no ball (the combined friction is the lesser). It carries kBatData. Returns
+    // its body (0 if the world refused).
     BodyId addBat(Vec3 position, float radius);
 
     // Actors a test ball has touched, counting from the start.

@@ -232,19 +232,54 @@ Ammo prizes stack with other icons (up to 3 seen at once, V1 84-92). A second pr
 - **Level timing.** Level 1 takes about 90 s in V1 and about 85 s in V2 for good players.
 - **Not captured:** Yo-Yo, Magnet behaviour, Power/Big/Weak ball size effects, Drunken path, Wind mechanics, game over, edge-of-bat hits, hits-to-destroy for E3 bricks (pirates, prizes), far-wall at both ends.
 
+## Corrections from an independent re-check (read these before section 10)
+
+A second agent re-measured the most consequential claims from the same footage. Where it disagrees, it wins:
+
+- **Losing the ball [M].** z < -23.5 is where a *vanish animation ends*, not the trigger. The ball starts shrinking
+  when its centre passes the bat's line, z about -21 (just past the floor edge at z = -20), at V1 7874.10, and is
+  gone 0.25 s later (7874.35); its on-screen size falls from 348 to 0 dark-blue pixels over 8 frames. Use: a ball
+  whose centre goes below about z = -21 behind the bat is lost, then shrinks away over 0.25 s.
+- **Walls are not pure mirrors [M].** Of 7 measured wall bounces, 2 were clean mirrors and 4 turned the ball by
+  about 11-18 degrees, in both directions (V1 134.2, 92.7, 64.0; V2 9.97), so it is not a wall tilt: most likely
+  the ball's spin and friction (BallMaterial friction 0.5/0.5, restitution 0.999). Let the physics bounce the ball
+  off walls and bricks; then set the speed back to 15.
+- **Hits per brick [?].** Only energy-1 bricks are verified to die on the first hit (shark, islands, planks,
+  chests, palms). An energy-3 pirate survived several nearby passes (V1 57.9, 64.6, 66.2) and died at a ball
+  contact at 132.1, which fits more than one hit but does not prove 3.
+- **Loose pieces die without the ball [M].** A plank scored +34 at V1 132.9 while the ball was across the board.
+  Pieces are destroyed (and scored) some other way: falling off the board, sinking, or hard impacts between
+  bodies; the cause was not determined. Level completion may depend on those pieces.
+- **Scoring is exactly additive [M].** 55 score jumps in V1 level 1 (template OCR of the HUD every 1/30 s), each
+  one brickScore or a prize catch, no multiplier. Level 1 holds 65 bricks worth 4,231; the final 6,278 means
+  about 2,047 came from prizes. Single values seen: shark 91, island 66, palma1 110, palma2 120, chest 111,
+  plank 34 or 37, shturval 28, flag 40, fparus 20, sail cloth 60, pirat-2 262, pirat-1 290.
+- **Held ball and launch [M].** The held ball sits at z about -17.4, 0.25-0.8 left of the bat centre; after a
+  respawn it is held about 0.4 s (player-triggered; the input is not visible). Launch about 10.7-11.2 degrees
+  left of +z at about 15 u/s.
+- **Bat hit law [M].** Five more hits fit "exit along the contact normal" (offset +2.07 gave +30.7 degrees; a V2
+  hit at offset about 2.2 gave -37 measured vs -37 predicted); contact z follows the sphere: z = -21 +
+  sqrt(3.6^2 - d^2). The exact law (asin(d/R) or about 15 degrees per unit) is still open.
+- **Life timeline [M].** Heart drops exactly as the new bat starts entering (V1 7876.17-7876.20, bat pixels rise at
+  7876.233), ball on the bat at 7876.73, launch about 7877.1. After a Skull catch every ball vanishes mid-field
+  about 1.5 s later.
+- **Ball material.** The ball uses BallMaterial (friction 0.5/0.5, restitution 0.999), not the 0.01/0.5 pair
+  quoted in section 2 (that is the unused `ball.jpg` material).
+- **Wall prize** lasts 30 s (caught at 73.97, countdown 16 at 88.2); its box sits at z about -20.0.
+
 ## 10. Constants for step 4 (summary)
 
 | constant | value |
 |---|---|
 | ball radius / speed | 0.6 / **15.0** u/s, y fixed at 0.6, speed renormalised after every collision |
-| walls | side inner faces ±20.4 (centre limit ±19.8), far wall 22.6 (centre 22.0), mirror reflection |
-| ball lost | centre z < -23.5 |
+| walls | side inner faces ±20.4 in the footage's overlay (centre limit ±19.8); the converted boards have them at ±20.0 at the ball's height (centre limit ±19.4, as the measured turning points 19.31 and -19.35), far wall 22.6; the physics bounces (not pure mirrors, see Corrections) |
+| ball lost | centre passes the bat line, z < about -21 (then a 0.25 s shrink); see Corrections |
 | bat | x only; collision sphere r 3, centre z about -21; centre x clamp about ±16 [?]; no speed cap |
 | exit after bat hit | direction = normalize(ball - bat centre) in XZ, speed 15 (R 3.6-4.5 fits; ignore incoming angle) |
 | held ball | z = bat z + 3.7 (about -17.3), x = bat x - 0.75; follows the bat |
-| launch | click; velocity (-3.0, 14.7), i.e. 11.5 degrees left of +z; no auto-launch |
+| launch | click; about 11 degrees left of +z at 15 u/s (10.7-11.2 measured, see Corrections; first read 11.5); no auto-launch |
 | lives | 2 hearts = spare lives; a heart is spent when the new bat appears; Life +1; no cap seen |
-| loss to ready | about 2.5 s: ball removed, bat leaves about 0.5-0.8 s later, heart -1 at about 1.9 s, new bat swoops in over about 0.35 s, ball on bat 0.2-0.4 s later |
+| loss to ready | about 2.6 s from the ball passing the bat line: bat flies off at +0.6 s, heart -1 and the new bat starts to swoop in at +2.1 s (see Corrections), ball on the bat at +2.63 s |
 | brick | energy hits; damage texture index = energy-1 for multi-texture materials; explode `exploseDelay` ms after the last hit; score +brickScore at the explosion |
 | level end | last brick gone: fade about 1 s, next level fade-in; no tally; `endlevel` prize does the same at once |
 | prize | falls straight toward the bat at about 9.1 u/s; catch = +brickScore of the prize material; caption about 2.2 s |

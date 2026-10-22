@@ -575,9 +575,9 @@ void testJointFrames() {
           "joint frames: and its axis and normal point the same way in the world");
 
     // A joint to the world: the world frame is in world space.
-    Joint toWorld = fixedJoint(0, 3, {2.0f, 0.5f, 0.5f}, {0, 0, 0});
+    Joint toWorld = breakable(fixedJoint(0, 3, {2.0f, 0.5f, 0.5f}, {0, 0, 0}));  // (an unbreakable one would weld b and go)
     const PhysicsPlan world = planPhysics(levelOf({board(), a, b}, {toWorld}), materials());
-    check(near(transformPoint(world.joints[0].desc.localAnchor[1], poseB), {2.0f, 0.5f, 0.5f}, 1e-4f),
+    check(world.joints.size() == 1 && near(transformPoint(world.joints[0].desc.localAnchor[1], poseB), {2.0f, 0.5f, 0.5f}, 1e-4f),
           "joint frames: for the world as the first end too");
 
     // Nothing is pulled together when the world starts: both bodies stay where they are.
@@ -975,6 +975,48 @@ void testBallAndBodies() {
     check(falling.balls().empty(), "ball: and is removed once it is below y = -30");
 }
 
+void testGameBallAndBat() {
+    // The ball of the game stays on its plane and turns only about the vertical, whatever it hits: a wedge turned 35 degrees
+    // about x pushes it up and back, and it leaves the plane neither in position nor in spin.
+    Actor wedge = actor(ObjectType::Wall, 5, {0, 1, 10}, 0x17F, 100, {box({3, 1.5f, 1})}, "Wood.jpg");
+    const float c = std::cos(radians(35.0f)), sn = std::sin(radians(35.0f));
+    wedge.pose.rotation = {1, 0, 0, 0, c, -sn, 0, sn, c};
+    PhysicsScene scene(levelOf({board(), wedge}), materials(), options(), singleThreaded());
+    const BodyId ball = scene.addGameBall({0.5f, 0.6f, 0}, {0, 0, 15});
+    bool pushedUp = false, flat = true;
+    for (int i = 0; i < 90; ++i) {
+        scene.step(1.0f / 60);
+        for (const ContactEvent& contact : scene.contacts()) {
+            pushedUp = pushedUp || ((contact.userDataA == 1 || contact.userDataB == 1) && std::fabs(contact.normal.y) > 0.3f);
+        }
+        const Vec3 spin = scene.world().angularVelocity(ball);
+        flat = flat && near(scene.world().pose(ball).translationPart().y, 0.6f, 1e-4f) && near(spin.x, 0, 1e-4f) &&
+               near(spin.z, 0, 1e-4f);
+    }
+    check(pushedUp && flat, "game ball: a face that leans does not lift it or tip it over");
+    check(scene.world().linearVelocity(ball).z < 0, "game ball: it bounced back off the wedge");
+
+    // Swept collision: at 150 units/s it moves 2.5 units in a step, and does not go through a wall 2 cm thick.
+    Actor thin = actor(ObjectType::Wall, 5, {0, 2, 10}, 0x17F, 100, {box({5, 2, 0.01f})}, "Wood.jpg");
+    PhysicsScene fast(levelOf({board(), thin}), materials(), options(), singleThreaded());
+    const BodyId shot = fast.addGameBall({0, 0.6f, 0}, {0, 0, 150});
+    run(fast, 0.5f);
+    check(fast.world().pose(shot).translationPart().z < 10, "game ball: a fast one is stopped by a thin wall");
+
+    // The bat puts no spin on the ball, however it grazes it, and a bat that is held still does not hold the ball: friction
+    // would turn it (and keep it).
+    PhysicsScene bat(levelOf({board()}), materials(), options(), singleThreaded());
+    const BodyId batBody = bat.addBat({0, 0.6f, -21}, 3);
+    const BodyId grazed = bat.addGameBall({3.2f, 0.6f, -10}, {0, 0, -15});
+    float spin = 0;
+    for (int i = 0; i < 90; ++i) {
+        bat.step(1.0f / 60);
+        spin = std::max(spin, std::fabs(bat.world().angularVelocity(grazed).y));
+    }
+    check(batBody != 0 && bat.world().linearVelocity(grazed).x > 1 && near(spin, 0, 1e-3f),
+          "bat: a ball that grazes it is turned aside and gets no spin, " + std::to_string(spin));
+}
+
 }  // namespace
 
 int main() {
@@ -1002,6 +1044,7 @@ int main() {
     testOldLevelsAreNotSimulated();
     testRemoveActor();
     testBallAndBodies();
+    testGameBallAndBat();
     if (failures == 0) {
         std::puts("all physics scene tests passed");
     }
