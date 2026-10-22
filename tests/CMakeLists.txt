@@ -112,6 +112,11 @@ add_executable(mb_physics_test physics_test.cpp)
 target_link_libraries(mb_physics_test PRIVATE mb_engine)
 add_test(NAME mb_physics_test COMMAND mb_physics_test)
 
+# Paths: the curve through a path's points and the actors bound to it, on made-up paths. CPU only.
+add_executable(mb_path_tests test_paths.cpp)
+target_link_libraries(mb_path_tests PRIVATE mb_game)
+add_test(NAME mb_path_tests COMMAND mb_path_tests)
+
 # Level -> physics mapping and levels running in a PhysicsScene, with made-up levels. CPU only.
 add_executable(mb_physics_scene_tests test_physics_scene.cpp)
 target_link_libraries(mb_physics_scene_tests PRIVATE mb_game)
@@ -122,6 +127,13 @@ add_executable(mb_physics_smoke physics_smoke.cpp)
 target_link_libraries(mb_physics_smoke PRIVATE mb_game)
 add_test(NAME mb_physics_smoke COMMAND mb_physics_smoke)
 set_tests_properties(mb_physics_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# The path actors of all converted levels running in the physics world when MB3_ASSETS points at the data: on their paths, at
+# their tracks' speeds; exits 77 (skipped) otherwise.
+add_executable(mb_path_smoke path_smoke.cpp)
+target_link_libraries(mb_path_smoke PRIVATE mb_game)
+add_test(NAME mb_path_smoke COMMAND mb_path_smoke)
+set_tests_properties(mb_path_smoke PROPERTIES SKIP_RETURN_CODE 77)
 
 # Plays all converted levels with the autopilot when MB3_ASSETS points at the data; exits 77 (skipped) otherwise.
 add_executable(mb_gameplay_smoke gameplay_smoke.cpp)

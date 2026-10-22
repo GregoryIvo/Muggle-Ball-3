@@ -4,8 +4,11 @@
 #include "mb/game/ObjectType.h"
 
 #include <array>
+#include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace mb {
@@ -130,9 +133,30 @@ struct PathPoint {
     Vec3 pos{}, tangent{}, dir{}, up{};
 };
 
+// A named curve through points, one of the editor's tracks (docs/LEVEL_FORMAT.md, "Path motion").
 struct Path {
     std::string name;
+    bool closed = false;    // the file's param: 1 for a loop, whose last point joins the first; 0 for an open path
+    bool tangents = false;  // bit 0 of the file's mask: the points' tangents are used, else Catmull-Rom's
     std::vector<PathPoint> points;
+};
+
+// Where an object is on its path when the level begins: its position, the way it faces and its up (the three vectors of
+// a binding key) and the id of the GameObject it moves.
+struct PathKey {
+    Vec3 position{}, dir{}, up{};
+    std::uint32_t object = 0;
+};
+
+struct PathTrack {
+    float speed = 0;  // world units per millisecond, along the path, the same for all its keys
+    std::vector<PathKey> keys;
+};
+
+// The objects that move along the path of this name; a path nothing is bound to has no tracks.
+struct PathBinding {
+    std::string name;
+    std::vector<PathTrack> tracks;
 };
 
 // The level JSON version this build reads, the one tools/mb3level.py writes (LEVEL_JSON_VERSION
@@ -151,6 +175,7 @@ struct Level {
     std::vector<Actor> actors;
     std::vector<Joint> joints;
     std::vector<Path> paths;
+    std::vector<PathBinding> pathBindings;
 
     std::size_t countObjects(ObjectType type) const;
 };
@@ -170,5 +195,10 @@ struct ActorRef {
 
 // The actors of the level in index order, pointing into it.
 std::vector<ActorRef> flattenActors(const Level& level);
+
+// Level object id -> actor, the way docs/LEVEL_FORMAT.md ("Joint actor references") has joints name actors: an object's
+// id names its actor, a cloth with id N names its segments N + 1 ..., and when two names clash an object id wins over a
+// segment and the earlier object over a later one. (Id 0, the world, is not in it.)
+std::unordered_map<std::uint32_t, ActorIndex> actorsById(std::span<const ActorRef> actors);
 
 }  // namespace mb

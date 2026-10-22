@@ -161,6 +161,13 @@ for (const GameEvent& e : session.takeEvents()) { /* BrickHit, BrickDestroyed, B
 | The cursor as a bat position | `cursorOnPlane`, `batTargetX` |
 | A player that needs no hands | `Autopilot`, `autoplay()` (returns the events; `mb_gameplay_smoke --log <level>` prints them) |
 
+The sharks and birds that follow a path move without the rules doing anything: `PhysicsScene` owns a `PathPlayer`
+(`game/PathPlayer.h`: the curve through a path's points, walked at a steady speed, and where each bound actor is at a
+time) and sets the kinematic target of each path actor before every fixed step, so a session's ball and bricks meet
+them where they are (`PhysicsScene::pathMovers()`, `pathTime()`). The player is pure (no physics, no GPU) and has its
+own tests: `mb_path_tests` on made-up paths, `mb_path_smoke` on the real levels; the format is in `LEVEL_FORMAT.md`
+("Path motion") and the rules in `GAMEPLAY.md` section 13.
+
 What falls off the board stops being a target and is taken out (`ActorFell`), with no points and no explosion
 (`GameplayRules::fallLimitY`, `fallScores`): loose pieces are destroyed by weapons and blasts, not by falling.
 

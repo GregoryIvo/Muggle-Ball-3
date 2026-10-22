@@ -935,6 +935,87 @@ void testRemoveActor() {
           "contacts: the game ball's contact with the brick is in contacts(), and it is no test ball");
 }
 
+// A straight path along +x at height y, and a binding of `speed` (units a millisecond) for the objects with these ids, each
+// starting at its own x.
+void addPath(Level& level, const std::string& name, float y, float z, float speed,
+             std::vector<std::pair<std::uint32_t, float>> objects) {
+    Path path;
+    path.name = name;
+    path.points = {PathPoint{{-10, y, z}, {}, {1, 0, 0}, {0, 1, 0}}, PathPoint{{30, y, z}, {}, {1, 0, 0}, {0, 1, 0}}};
+    level.paths.push_back(path);
+    PathTrack track;
+    track.speed = speed;
+    for (const auto& [id, x] : objects) {
+        track.keys.push_back({{x, y, z}, {1, 0, 0}, {0, 1, 0}, id});
+    }
+    level.pathBindings.push_back({name, {track}});
+}
+
+void testPathActors() {
+    // A shark (a kinematic box) swims along +x at 5 units a second from x = -10, with a light brick 6 units ahead of its
+    // nose, and a second one on a path of its own further along.
+    const auto shark = [](std::uint32_t id, Vec3 at) {
+        return actor(ObjectType::Brick, id, at, 0x180, 50, {box({1, 0.5f, 1})}, "Wood.jpg");
+    };
+    Level level = levelOf({board(100), shark(2, {-10, 0.5f, 0}), brick(3, {-3, 0.5f, 0}, 0, 10), shark(4, {-10, 0.5f, 10})});
+    addPath(level, "track/shark", 0.5f, 0, 0.005f, {{2, -10}});
+    addPath(level, "track/other", 0.5f, 10, 0.004f, {{4, -10}});
+    PhysicsScene scene(level, materials(), options(), singleThreaded());
+    check(scene.pathMovers().size() == 2 && scene.counts().pathMovers == 2 && scene.counts().kinematicBodies == 2,
+          "paths: the two kinematic actors of the bindings are movers");
+    check(scene.pathMovers()[0].actor == 1 && scene.pathMovers()[1].actor == 3, "paths: by actor index");
+    check(near(scene.actorPose(1).translationPart(), {-10, 0.5f, 0}, 1e-5f) && scene.pathTime() == 0,
+          "paths: the shark starts where its path starts");
+
+    run(scene, 0.5f);
+    check(near(scene.actorPose(1).translationPart(), {-7.5f, 0.5f, 0}, 2e-3f) &&
+              near(scene.actorPose(3).translationPart(), {-8, 0.5f, 10}, 2e-3f) && near(scene.pathTime(), 0.5, 1e-4),
+          "paths: it swims at the track's speed, five units a second (0.005 a millisecond), the other at four");
+    const Mat4 pose = scene.actorPose(1);
+    check(near(pose.m[2][0], 1, 1e-4f) && near(pose.m[1][1], 1, 1e-4f) && near(pose.m[0][2], -1, 1e-4f),
+          "paths: it faces along the path, upright");
+    check(near(scene.actorPose(2).translationPart(), {-3, 0.5f, 0}, 1e-5f), "paths: the brick lies untouched until the shark comes");
+
+    run(scene, 1.5f);  // t = 2: the shark's middle is at x = 0
+    const Vec3 shoved = scene.actorPose(2).translationPart();
+    check(near(scene.actorPose(1).translationPart(), {0, 0.5f, 0}, 2e-3f), "paths: and goes on: x = 0 at two seconds");
+    check(shoved.x > scene.actorPose(1).translationPart().x + 1.4f && shoved.x < 12,
+          "paths: the shark pushes the brick ahead of it, " + std::to_string(shoved.x));
+
+    // A body is where the path has it at the end of every fixed step, however many a call takes.
+    PhysicsScene coarse(level, materials(), options(), singleThreaded());
+    coarse.step(8.0f / 60);
+    check(near(coarse.pathTime(), 8.0 / 60, 1e-6) && near(coarse.actorPose(1).translationPart(), {-10 + 5 * 8.0f / 60, 0.5f, 0}, 2e-3f),
+          "paths: one call of eight fixed steps gives each its own target");
+
+    // An actor that is taken out of the world stops; the other goes on.
+    PhysicsScene removed(level, materials(), options(), singleThreaded());
+    run(removed, 0.5f);
+    removed.removeActor(1);
+    run(removed, 1);
+    check(removed.body(1) == 0 && near(removed.actorPose(1).translationPart(), {-10, 0.5f, 0}, 1e-5f) &&
+              near(removed.actorPose(3).translationPart(), {-4, 0.5f, 10}, 2e-3f),
+          "paths: a destroyed shark is gone and no longer driven, the other swims on");
+
+    // The saved pose is where it was a frame or two before; the actor begins on its path instead, and that is not a push.
+    Level astray = levelOf({board(100), shark(2, {-9, 0.5f, 3}), brick(3, {-8.5f, 0.5f, 3}, 0, 10)});
+    addPath(astray, "track/shark", 0.5f, 0, 0.005f, {{2, -10}});
+    PhysicsScene start(astray, materials(), options(), singleThreaded());
+    check(near(start.actorPose(1).translationPart(), {-10, 0.5f, 0}, 1e-5f), "paths: the actor starts on its path, not where it was saved");
+    run(start, 0.1f);
+    check(near(start.actorPose(2).translationPart(), {-8.5f, 0.5f, 3}, 1e-4f),
+          "paths: it was put there before anything ran, so it pushed nothing out of the way");
+
+    // A path actor that is not kinematic is left alone.
+    Level loose = levelOf({board(100), brick(2, {-10, 5, 0}, 0, 10)});
+    addPath(loose, "track/shark", 0.5f, 0, 0.005f, {{2, -10}});
+    PhysicsScene falling(loose, materials(), options(StartState::Still), singleThreaded());
+    run(falling, 0.5f);
+    check(falling.pathMovers().empty() && falling.counts().pathMovers == 0 &&
+              falling.actorPose(1).translationPart().y < 4.5f && near(falling.actorPose(1).translationPart().x, -10, 1e-3f),
+          "paths: a dynamic body bound to a path is no mover, it just falls");
+}
+
 void testBallAndBodies() {
     const Level level = levelOf({board(), brick(2, {0, 0.5f, 10})});
     PhysicsScene scene(level, materials(), options(), singleThreaded());
@@ -1043,6 +1124,7 @@ int main() {
     testKinematicBodiesAreImmovable();
     testOldLevelsAreNotSimulated();
     testRemoveActor();
+    testPathActors();
     testBallAndBodies();
     testGameBallAndBat();
     if (failures == 0) {

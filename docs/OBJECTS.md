@@ -383,9 +383,9 @@ holds each object as type `cannon`, `firework` and so on, with these shapes.
 Other typed objects with no `<extra>`: `vibro` (`Sea/Other/barrel-func.XML`: a
 capsule barrel; `krug-func.xml`: a ring of 2 boxes; all 23 level instances are
 kinematic. No level's `pathBindings` lists one (they bind only the sharks and
-birds), though nearly every level carries paths named `track/krug1` (82 of 83) and
-`track/krug2` (80; `piratos-bad-night` has only `track/track`):
-how they move is **unknown**), `cloth` (19 sails and
+birds), and the paths named `track/krug1` and `track/krug2` that nearly every level carries are the circles the
+sharks of `piratos-po-krugy` swim on, not the vibros': `LEVEL_FORMAT.md` "Path motion". How a vibro moves is
+**unknown**), `cloth` (19 sails and
 flags in `Sea/Ships`: one sphere 1.1, plus a `<cloth>` element, below), `tree`
 (6 in `Trees`; every level trunk is `tree.x`, material `Tree`, brick type 5,
 energy 5, score 130; the fruit are separate `brick` objects, apples, melons,
@@ -472,7 +472,7 @@ the default; `Default` is `brickType` 2, energy 1, score 10.
 - **Kinematic bricks**: 2,592 of the 12,330 bricks (body flag `0x80`). They are
   the *floor* (`Ground-2-ground` 686, `plitka` 521, `Lava.jpg` 415, `Ground-2.jpg`
   380, `Water-brick` 185, `Fence` 155), plus path-following sharks and birds
-  (flag `0x01`), and buildings or apples in a level or two. Kinematic is **not**
+  (flag `0x01`, which move: `LEVEL_FORMAT.md` "Path motion"), and buildings or apples in a level or two. Kinematic is **not**
   "scenery": the sharks have score 91 and the tiles scores 10 (`Lava.jpg`) to 44.
 - **Brick type 4 that is dynamic**: 1,174 objects: ground tiles that are loose
   (`Ground-2.jpg` 231), crates (175), sheep (121), rocks (98), and the animals.

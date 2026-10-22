@@ -759,6 +759,34 @@ void testKinematicBrick() {
     check(g.count(EventType::LevelComplete) == 1, "kinematic: and it was the last target");
 }
 
+void testPathShark() {
+    // A shark that swims along z = 12 towards +x at five units a second (a track speed of 0.005 a millisecond), the way the
+    // levels' sharks and birds go round their paths; a ball that meets it destroys it, and a destroyed shark stays gone.
+    Actor shark = brick({-10, 1, 12}, "Shark.jpg", kKinematic);
+    shark.object->id = 7;
+    Level level = levelOf({board(), shark});
+    level.paths.push_back({"track/shark", false, false,
+                           {PathPoint{{-10, 1, 12}, {}, {1, 0, 0}, {0, 1, 0}}, PathPoint{{20, 1, 12}, {}, {1, 0, 0}, {0, 1, 0}}}});
+    level.pathBindings.push_back({"track/shark", {PathTrack{0.005f, {PathKey{{-10, 1, 12}, {1, 0, 0}, {0, 1, 0}, 7}}}}});
+    Game g(level, options(TargetRule::BrickType));
+    check(g.session.scene().pathMovers().size() == 1 && g.session.targetsLeft(TargetRule::DynamicBricks) == 0,
+          "path shark: a path actor is a kinematic brick, not a target of the default rule");
+    g.run(1);
+    check(near(g.where(1), {-5, 1, 12}, 0.05f), "path shark: in a second of play it has swum five units");
+
+    // The ball reaches z = 10.4, the shark's face, 0.69 s later, when the shark is at x = -1.5.
+    g.session.addBall({-1.5f, 0.6f, 0}, {0, 0, 1});
+    check(g.runUntil([&] { return g.count(EventType::BrickDestroyed) == 1; }, 3), "path shark: the ball destroys it as it passes");
+    const GameEvent* hit = g.find(EventType::BrickHit);
+    check(hit != nullptr && hit->actor == 1 && hit->position.z < 12 && hit->position.x > -3 && hit->position.x < 0,
+          "path shark: on its side, where it was swimming");
+    check(g.session.score() == 91 && g.session.actor(1).removed && g.session.scene().body(1) == 0,
+          "path shark: for its 91 points, and it is gone");
+    g.run(1);
+    check(g.session.scene().body(1) == 0 && g.session.actor(1).removed && g.count(EventType::BrickDestroyed) == 1,
+          "path shark: and nothing drives it any more");
+}
+
 void testRollingIsNoHit() {
     // A strip of floor tiles level with the floor (kinematic, top at y = 0, scored like the real ones): the ball meets the
     // edge of each at a slant of up to a quarter of its speed, and no tile is hurt.
@@ -1475,6 +1503,7 @@ int main() {
     testBrickDamage();
     testExplosionDelayAndScore();
     testKinematicBrick();
+    testPathShark();
     testRollingIsNoHit();
     testCompoundBrickHitOnce();
     testLevelEndRules();

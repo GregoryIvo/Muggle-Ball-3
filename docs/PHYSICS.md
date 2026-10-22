@@ -17,6 +17,7 @@ by its segments), which draws (`SceneDraw::actor`), bodies (`BodyDesc::userData`
 | friction, restitution, combine modes | the game material the **owning object** names (a cloth segment: its cloth's); none, or one the library lacks (3 bricks and 11 flickers), gives 0.5 / 0.5 / 0. `Shape::materialIndex` is a per-level handle and is not used |
 | group 5 (markers of lights, shadow casters, backgrounds) | no shape, so no body (148 actors); they sit inside the board and collide with nothing |
 | group 11 (one box per board at the player's end) | not in the simulation; kept as `PhysicsPlan::zones` for the bat and the lost-ball test (step 4). Trigger shapes (flags 0x7, the teleport sources) are zones too |
+| actors that follow a path (35 sharks and birds, object flag 0x01) | kinematic bodies that `PhysicsScene::step` moves along their path, see "Path actors". Put on the path before the first step |
 | cloth and its 431 segments | kinematic: they keep their saved poses until step 5 simulates them. The 84 joints that hold their corners (75 ball joints, 9 fixed) are planned but not built, or they would pin the ships to where the sails were saved |
 | joint actors | resolved as `LEVEL_FORMAT.md` says (0 = world, else object id, else cloth segment); all 4,895 resolve. Fixed -> fixed, revolute -> hinge, spherical -> ball. `collideConnected` is false |
 | fixed joints to the world that never break | the body is static and the joint is dropped, see "Welded to the world" |
@@ -154,6 +155,29 @@ wakes. Two things escape that, and left bodies asleep in the air:
 it, is asleep and has no live joint, and seeing what falls: 1 in 664 shots with the look switched off (the zombie),
 0 of 205,512 bodies standing on something in 1,992 shots with it on.
 
+## Path actors
+
+The 35 sharks and birds with the path flag are kinematic bodies, and `PhysicsScene::step` moves them: before every fixed
+step it asks `PathPlayer` for the pose at the end of that step and calls `setKinematicTarget`, so they reach it by the end
+of the step and push whatever is in the way. (`PhysicsWorld::step` takes a function it calls before each fixed step, so
+a call of several steps, the level viewer's, still gives each its own target.) What the paths are and how fast the
+actors go is in `LEVEL_FORMAT.md`, "Path motion"; the speed is the one thing not checked against footage ([?],
+`GAMEPLAY.md` section 13).
+
+- They start on their path: the constructor teleports each body to its pose at time 0. The saved poses are a frame or
+  two behind the paths, and one shark (`piratos-ostrovok`) was saved 3.2 units from its path: as a target of the first
+  step that would be a kinematic velocity of 190 units a second.
+- A kinematic body that moves wakes the sleeping dynamic body it touches, which is how a shark that swims into a brick
+  starts it (the bodies all start asleep, see "The starting state"). With no ball, the 8 levels with path actors stand
+  for 45 s and nothing but those actors moves (`mb_physics_smoke --seconds 45`).
+- A destroyed shark has no body (`removeActor`) and the scene drives no more of it. Only a kinematic body is driven: an
+  actor with the path flag that is not (there is none in the levels) stays where it is, with a warning.
+- The linear velocity of a body is that of its centre of mass, not of the origin of its frame, so while a shark turns it
+  is not the path's speed. `mb_path_smoke` compares poses, and `mb_physics_smoke` leaves the path actors out of its speed
+  limit.
+- Three paths have turns of 110 to 155 degrees with a radius of a few centimetres (`LEVEL_FORMAT.md`): the body is asked
+  to turn that much in a step or two, and a loose brick next to its tail at that moment is thrown.
+
 ## The test ball
 
 Sphere of radius 0.6, mass 500 (bricks weigh 51 at the median and 930 at the 90th percentile), the game material
@@ -190,9 +214,9 @@ light pieces of wrecked ships); the rest are a documented allowance of the smoke
 
 The bat's lane (`PhysicsPlan::zones`) is not used: the rules take the bat's line as a number. There are no prizes
 yet, and no render interpolation (a 120 Hz display shows each 60 Hz physics state twice). Step 5: cloth and its 84 joints,
-moving sharks and trains on paths, cannons, teleports, springs, volcanoes. Several dynamic bodies are saved with
+cannons, teleports, springs, volcanoes (the sharks and birds on paths are in, see above). Several dynamic bodies are saved with
 nothing under them and fall when woken (the pirate of `piratos-po-volnam` at x = 30, outside the board, falls 490
-units; some boulders of `cowboys-samba` and others 11): they need step 5's paths or a settle. Not decoded: how the
+units; some boulders of `cowboys-samba` and others 11): they need a settle (none of those in the levels with path actors is near one). Not decoded: how the
 original's `ballMaterial` and the board's restitution 1.0 combine on bricks (they bounce at 0.75 here); friction
 uses only the dynamic coefficient. Awake, a few jointed models still pop when a hit wakes them (up to 0.69 in 0.1 s,
 `cowboys-strelki`, the ships of `Piratos-Kartejniki`): that is overlap depenetration, not the joints.
