@@ -169,6 +169,30 @@ to regenerate them; that is the only thing that needs `glslangValidator` and
    An app without bundled assets, started from the Finder, also looks for the converted
    assets in `assets/` inside that folder.
 
+## Releases
+
+Tagged builds are on the [releases page](https://github.com/GregoryIvo/Muggle-Ball-3/releases).
+A release is a universal (arm64 + x86_64) macOS app that carries **no game data**:
+install your own copy of Magic Ball 3 and convert its files (see "Game data"
+above) next to the app or at `MB3_ASSETS`. The app is ad-hoc signed, so on first
+launch macOS quarantines it; clear that once with:
+
+```sh
+xattr -dr com.apple.quarantine /path/to/MuggleBall3.app
+```
+
+(or right-click the app, choose Open, and confirm). Packaged builds need macOS
+13.3 or later. A notarized build, which skips this step, needs an Apple Developer
+ID — see [`docs/MACOS.md`](docs/MACOS.md).
+
+## Contributing
+
+Contributions are welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to
+build, test and get the game data, the project layout, and the pull-request
+process, and [`CHANGELOG.md`](CHANGELOG.md) for what has changed. The code is
+MIT-licensed ([`LICENSE`](LICENSE)); it is original code and documentation only,
+never game files.
+
 ## Legal
 
 Magic Ball 3 and its assets are owned by Alawar Entertainment and Dream Dale.
