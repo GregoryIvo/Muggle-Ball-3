@@ -633,6 +633,7 @@ void printUsage() {
 
 int main(int argc, char** argv) {
     SDL_SetMainReady();
+    bool windowed = false;  // the game or the level viewer, which may have been started from the Finder, with no log to read
     try {
         Options options;
         for (int i = 1; i < argc; ++i) {
@@ -759,9 +760,16 @@ int main(int argc, char** argv) {
         if (!options.screenshot.empty()) {
             return options.autoplay ? runPlayScreenshot(options) : runScreenshot(options);
         }
+        windowed = true;
         return options.viewer && !options.autoplay ? runWindow(options) : runGame(options);
     } catch (const std::exception& e) {
         mb::logError("fatal: {}", e.what());
+        if (windowed) {  // say why instead of vanishing (SDL allows this before SDL_Init and after the window is gone)
+            // On macOS 14 and later SDL leaves bringing the app forward to the system, and the alert of an app that
+            // is not active stays hidden; this has SDL activate it.
+            SDL_SetHint(SDL_HINT_MAC_BACKGROUND_APP, "0");
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Muggle Ball 3", e.what(), nullptr);
+        }
         return 1;
     }
 }

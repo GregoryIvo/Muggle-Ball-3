@@ -66,6 +66,11 @@ refuses to combine `--bundle-assets` with a Developer ID or notarization, and al
 
 Without bundled assets the app looks in `MB3_ASSETS`, `./assets`, then `assets/` inside the per-user data folder
 (`~/Library/Application Support/MuggleBall3/`), where each player can put the folder `convert_assets.py` made.
+A build of your own (CMake's `MB3_DEV_ASSETS`, on by default) then also tries `MB3_ASSETS_DIR`, the repository's
+`assets/` unless you set it, so `build/app/MuggleBall3.app` opens from the Finder as it is. `package_macos.sh`
+turns that off: a packaged app may go to other Macs and carries no path to this one's files. If the game finds
+no assets anywhere, or fails in any other way before or while its window is up, it says why in a dialog
+instead of quitting silently (the log has it too).
 
 ## Packaging
 
