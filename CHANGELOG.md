@@ -25,6 +25,14 @@ included here.
   `PhysicsSettings`, sized from `mb_physics_smoke --measure`; selected with
   `--physics-profile <name>` in `MuggleBall3` (the game and the level viewer alike),
   `mb_physics_smoke`, `mb_gameplay_smoke` and `mb_cloth_smoke`.
+- PlayStation Vita port, milestone M3b: the physics benchmark (`app/bench/PhysicsBench.{h,cpp}`), shared by a
+  desktop executable (`mb_physics_bench`) and a Vita VPK (`mb3_vita_bench.vpk`, title ID `MUGB00004`). It
+  plays a configured set of levels with the Autopilot in fixed steps, timing each `GameSession::update()`
+  call, and appends one CSV line per level, so a host run and a device run of the same `bench-physics.json`
+  line up and their ratio becomes the measured speed of the console, replacing the plan's 45-110x (70x
+  central) estimate once a device CSV exists. `tools/bench_ratio.py` joins the two CSVs and reports the
+  ratios and the plan's per-step budget. See `docs/VITA.md`, "Physics benchmark", for the Mac's pass-1
+  numbers and the 45-minute wall-time estimate.
 
 ## [0.1.0] - 2026-10-23
 

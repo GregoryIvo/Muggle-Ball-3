@@ -92,8 +92,9 @@ treated as a failure.
 
 `game/include/mb/game/PhysicsProfile.h` names a `PhysicsSettings` for a platform: `physicsProfile("desktop")` is
 `PhysicsSettings{}` unchanged; `physicsProfile("vita")` keeps the same fixed step and solver iterations above (a
-lighter solver for the 79 non-windmill levels waits for M3b's device benchmark and a repeat of the 240 s stability
-check on real hardware) but runs on the caller's thread with one explicit body-mutex stripe (`threads = 0`,
+lighter solver for the 79 non-windmill levels waits for M3b's device benchmark (`app/bench/PhysicsBench.h`,
+`docs/VITA.md` "Physics benchmark") and a repeat of the 240 s stability check on real hardware) but runs on the
+caller's thread with one explicit body-mutex stripe (`threads = 0`,
 `bodyMutexes = 1`: nothing but the caller ever touches the world, so there is no concurrency for more stripes to
 protect against), `maxStepsPerCall = 4` (two 30 fps frames' worth), and a world sized for what the levels actually
 use rather than for 32768 bodies. The four windmill levels (`village-dinner`, `village-na-melnice`,
