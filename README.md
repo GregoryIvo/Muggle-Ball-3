@@ -122,6 +122,7 @@ so far (a hello VPK); the desktop build is not affected.
    $MuggleBall3 --check assets/Data/Levels/piratos-po-krugy.json
    $MuggleBall3 --play-sound pirat_hit           # play a named sound (sounds.xml), wait, exit
    $MuggleBall3 --play-music Pirates --seconds 20  # one pass of Menu, Village, Pirates, Cowboys or Knights
+   $MuggleBall3 --autoplay --physics-profile vita   # played with the Vita's PhysicsSettings (docs/PHYSICS.md), to check it on the host
    $MuggleBall3 --form MainMenu                  # a menu form on its own (any file in assets/Data/Menu, any case)
    $MuggleBall3 --form Options --screenshot out.png [--size 1024x768] [--language Russian]
    ```
@@ -162,7 +163,9 @@ so far (a hello VPK); the desktop build is not affected.
    sets a particle effect of `Data/Particles` going at that time of play at a point (over the middle of the board without one; a beam's second end is the second point), to
    look at a file without waiting for the game to need it (`explosebig@5`, `Lightning@1,-8,1,0,8,1,10`; `docs/GAMEPLAY.md` 19.8). In the window
    the log reports the frame time every few seconds. `MB3_GPU_DEBUG=1` turns on the GPU back end's validation
-   layer. `--form` shows a menu form over the `background` form
+   layer. `--physics-profile <name>` (any command above; default `desktop`, or `vita` on a Vita build) picks
+   the `PhysicsSettings` every level is built with (`game/include/mb/game/PhysicsProfile.h`, `docs/PHYSICS.md`);
+   an unknown name lists the known ones and exits. `--form` shows a menu form over the `background` form
    (`--no-background` leaves it out), with sample high scores; in the window Left/Right
    switch form and the menus work as in the game (the log names the sounds they would
    play and the settings they would save), and a screenshot can show one widget hovered

@@ -5,13 +5,16 @@ style of [`MACOS.md`](MACOS.md): how to build, what was decided and why, the num
 and the device checklist. Dates are when a thing was checked. Where a measurement contradicts the plan, the
 measurement wins and is recorded here.
 
-**Status (2026-10-23):** M1a. The toolchain is installed and pinned, Jolt cross-compiles unchanged through its
+**Status (2026-10-23):** M3a. The toolchain is installed and pinned, Jolt cross-compiles unchanged through its
 "Platform Blue" hook, and a hello VPK (`mb3_vita_hello.vpk`, title ID `MUGB00003`) builds: it draws a lit triangle
 with the game's mesh shader in GLSL ES over vitaGL, paces at two vblanks, probes the IME, SDL's GPU API, the audio
 device, the file system, threads and clocks, steps a Jolt world and logs everything. It has not run on a console
-yet (see "Device checklist"). With `MB3_VITA_BUILD_ENGINE=ON`, `mb_engine` and `mb_game` already cross-compile
-unchanged (67 objects, the SDL GPU renderer files included, which link because the SDK's SDL3 exports the GPU
-API with no back end); the portability fixes, the dropped-step counter and the physics profile are M3a.
+yet (see "Device checklist"). `MB3_VITA_BUILD_ENGINE` now defaults ON: `mb_engine` and `mb_game` cross-compile
+unchanged (the SDL GPU renderer files included, which link because the SDK's SDL3 exports the GPU API with no
+back end), with the portability fixes below, the dropped-step counter (`PhysicsWorld::droppedSteps()`) and the
+"vita" `PhysicsProfile` added in M3a. This milestone is about behaviour, not compilation (M1a already found the
+engine and the game cross-compile as they are); the app's own VPK is M5b, once M2's renderer seam lands a vitaGL
+backend (M4a).
 
 ## Toolchain (pinned)
 
@@ -69,7 +72,7 @@ checkout works as on the desktop. The cross build directory is about 320 MB (Jol
 | `MB3_VITA_TITLE_ID` | `MUGB00003` | Title ID of the game's VPK (four letters, five digits) |
 | `MB3_VITA_APP_NAME` | `Muggle Ball 3` | Name under the LiveArea bubble |
 | `MB3_VITA_APP_VERSION` | `01.00` | `APP_VER` in param.sfo |
-| `MB3_VITA_BUILD_ENGINE` | OFF | Also cross-compile `mb_engine` and `mb_game` (work in progress until M3a) |
+| `MB3_VITA_BUILD_ENGINE` | **ON** (M3a; was OFF before it) | Also cross-compile `mb_engine` and `mb_game`, which belong in every Vita build from here on; the app's VPK follows in M5b |
 | `MB3_BUILD_TESTS` | OFF on Vita | A cross build cannot run them |
 | `VITA_MKSFOEX_FLAGS` | `-d ATTRIBUTE2=0` | Set explicitly so the tool's defaults cannot change the app; 12 would ask for the 365 MiB memory budget, kept as a last resort |
 
@@ -172,6 +175,65 @@ Host-side checks, 2026-10-23, against the pinned toolchain:
   source change was needed for GCC 15.2 and newlib, and no file is built with fast-math. What they do at run
   time (`std::filesystem` on `ux0:`, `random_device`, `hardware_concurrency`, the SDL GPU device creation that
   must fail) is what the hello's probe measures first.
+
+### M3a: portability fixes, the dropped-step counter, the physics profile (2026-10-23)
+
+With `MB3_VITA_BUILD_ENGINE` now defaulting ON, `mb_engine` and `mb_game` stay cross-compiling unchanged after
+every fix below (confirmed by building `build-vita` fresh; see the device checklist for what still needs a
+console). None of these change desktop behaviour: every one is guarded by `__vita__` or (where the code tests
+the build, not the compiler) `MB3_PLATFORM_VITA`, which `cmake/Vita.cmake` now defines for the whole Vita build
+right next to the `MB3_PLATFORM_VITA` CMake variable it has always set.
+
+- **stb** (`engine/src/StbImpl.cpp`): `STBI_NO_THREAD_LOCALS` on `__vita__`, because TLS there is emulated, not
+  real, and stb's thread-local error buffer does not need it (nothing here decodes off the main thread).
+- **Filesystem** (`engine/src/Paths.cpp` and an audit of `engine/src`, `game/src`, `app`): `assetRoot()`'s
+  `current_path()` candidate now uses the `error_code` overload and is skipped, not thrown, when there is no
+  working directory (`app0:/` is a read-only sandbox with no notion of one). One more throwing call was found
+  and fixed on the way: `ParticleLibrary::load` (`game/src/ParticleDef.cpp`) iterated a `directory_iterator`
+  with a range-`for`, whose implicit `operator++()` throws on a read error partway through the folder; it now
+  increments through the `error_code` overload like every other directory walk in the codebase (`LevelCatalog`,
+  `TextureIndex`, `UiAssets`). Everywhere else already used the non-throwing overloads.
+- **Saves** (`engine/src/Files.cpp`, `writeFileAtomic`): if `rename(temp, path)` refuses to replace an existing
+  target outright (some file systems do; it is a real, reproducible case on this host too, not hypothetical —
+  `path` a directory gets `EISDIR`, which `tests/test_save.cpp` exercises), the target is moved aside with
+  `keepAsBackup()` and the rename retried; if that also fails, the backup is put back. Whether the Vita's file
+  system (exFAT via `sceIo`) ever refuses an ordinary save file's rename this way is unmeasured — the hello's
+  probe already checks a plain `rename` over an existing file, and this fallback is the answer if that or a
+  real save ever needs it. See `docs/SAVES.md`, "Writes".
+- **Logging** (`engine/include/mb/engine/Log.h`, `Log.cpp`): `setLogFile(path)` appends every message to a file
+  from then on (opened once, flushed per message, failures silenced after one `SDL_Log` warning); on `__vita__`,
+  `logMessage` also calls `sceClibPrintf`, because `SDL_Log` has nowhere useful to go there. Neither changes
+  desktop behaviour unless `setLogFile` is called. The hello already writes its own log by hand
+  (`sceIoOpen`/`write`); wiring the game's own entry point through `setLogFile` to `ux0:data/MuggleBall3/log.txt`
+  is for the Vita front end (M5b).
+- **Threads** (`engine/src/Physics.cpp`, `makeJobSystem`): unchanged. `hardware_concurrency()` returning 0 (very
+  likely on the Vita; unverified until the hello's probe runs there) already takes the existing clamp,
+  `std::clamp(0 - 1, 0, 3)` with the subtraction in `int` before the clamp, to 0 workers, which is
+  `JobSystemSingleThreaded` — the single-threaded job system a `threads = 0` setting also asks for. So the
+  existing code needed no change for this; the Vita profile sets `threads = 0` explicitly anyway, rather than
+  leaving it to chance.
+- **`random_device`**: left as is, per the plan (§5.4): the device probe showing whether it throws on the Vita
+  has not run yet. `game/include/mb/game/SoundLibrary.h:69`, `app/PlaySession.cpp:145` and `app/main.cpp` are
+  the call sites; a replacement seeded from `SDL_GetPerformanceCounter` is ready to drop in if the probe shows
+  it is needed.
+- **The physics profile** (`game/include/mb/game/PhysicsProfile.h`, `game/src/PhysicsProfile.cpp`): "desktop" is
+  `PhysicsSettings{}` unchanged (verified identical trajectories, below). "vita" keeps the fixed step and solver
+  iterations the desktop uses (docs/PHYSICS.md, "The solver"; a lighter solver waits for M3b's device benchmark),
+  runs single-threaded with one explicit body-mutex stripe, caps `maxStepsPerCall` at 4 (two 30 fps frames), and
+  sizes the world from measurement rather than the desktop's 32768-body headroom: `mb_physics_smoke --measure`,
+  extended to track peak `bodyCount()`/`activeBodyCount()`, found **374 bodies, 372 of them awake at once** as
+  the peak over all 83 levels and every starting configuration (both on `knight-miss-1457`). The rule
+  (docs/PHYSICS.md, "The Vita profile") gives `maxBodies` 1024 (next power of two at or above 2x374), `maxBodyPairs`
+  8192, `maxContactConstraints` 4096, and a flat 4 MiB `TempAllocator`. The four windmill levels keep their own
+  override at 100 velocity iterations, pinned separately from the base settings so a later retune of the other
+  79 levels cannot quietly drop them too. `--physics-profile <name>` (default `defaultPhysicsProfileName()`:
+  "vita" under `MB3_PLATFORM_VITA`, else "desktop") is now a flag of `MuggleBall3` and all three physics smokes;
+  desktop runs that never pass it are unaffected (checked below).
+- **Behaviour unchanged on the desktop, verified**: `mb_physics_smoke --shots 4 --seconds 10` against the main
+  branch's own build and this worktree's gives identical per-level numbers (same seeds, same default settings,
+  same trajectories) — see the PR description / M3a report for the pasted comparison. All three physics smokes
+  also pass with `--physics-profile vita` on the host, with zero dropped steps (they step at a fixed dt, which
+  never exceeds `maxStepsPerCall` at 4).
 
 ## Known limits and open questions
 

@@ -78,6 +78,35 @@ and some sink into the floor). A step costs 0.09 ms on average with a ball in th
 of the 1,992 runs of `mb_physics_smoke --shots 24`. Worker threads are capped at 3: nine workers took twice as long as three on
 the biggest level and used nine cores.
 
+A step keeps a running count of whole fixed steps it has to throw away, `PhysicsWorld::droppedSteps()`: a call to
+`step()` that is handed more time than `maxStepsPerCall` steps cover takes that many and keeps the remainder below
+one step, dropping the whole steps in between so the simulation falls behind real time instead of spiralling into
+ever-larger catch-up calls. It is logged once per level (`PlaySession`, and the end of each level in the three
+smokes) and is expected to be zero on a machine that keeps up with the fixed step; the host can go briefly over
+budget under load, which is reported, not treated as a failure.
+
+### The Vita profile
+
+`game/include/mb/game/PhysicsProfile.h` names a `PhysicsSettings` for a platform: `physicsProfile("desktop")` is
+`PhysicsSettings{}` unchanged; `physicsProfile("vita")` keeps the same fixed step and solver iterations above (a
+lighter solver for the 79 non-windmill levels waits for M3b's device benchmark and a repeat of the 240 s stability
+check on real hardware) but runs on the caller's thread with one explicit body-mutex stripe (`threads = 0`,
+`bodyMutexes = 1`: nothing but the caller ever touches the world, so there is no concurrency for more stripes to
+protect against), `maxStepsPerCall = 4` (two 30 fps frames' worth), and a world sized for what the levels actually
+use rather than for 32768 bodies. The four windmill levels (`village-dinner`, `village-na-melnice`,
+`village-rinok`, `Village-Dvorik`) carry their own override in the profile, pinned at 100 velocity iterations, so
+that a later retuning of the base "vita" settings cannot drop the only levels measured to need them below that.
+
+The world size is measured, not guessed: `mb_physics_smoke --measure` (extended for this) tracks, for every level
+and every one of its eleven starting configurations, the peak of `PhysicsWorld::bodyCount()` and
+`activeBodyCount()` during a 240 s run. Over all 83 shipped levels (2026-10-23) the peak is **374 bodies, 372 of
+them awake at once**, both on `knight-miss-1457`. The rule the Vita profile is sized by: `maxBodies` is the next
+power of two at or above twice the peak body count, at least 512 (374 x 2 = 748, so **1024**); `maxBodyPairs` is
+8x that (**8192**); `maxContactConstraints` is 4x that (**4096**); the `TempAllocator` is a flat **4 MiB**, well
+above the 16 MiB desktop block's actual high-water mark for these levels (docs/VITA.md records the measurement
+that justified not needing more). Re-run `mb_physics_smoke --measure` and update this paragraph (and
+`PhysicsProfile.cpp`'s table) if new levels are added or a body count ever gets close to these numbers.
+
 ## Welded to the world
 
 555 fixed joints tie 551 bodies to the world with a maxForce that never breaks (trees, fences, rocks, cacti, mirrors
