@@ -444,6 +444,59 @@ out for; so the UI draws N from the atlas nearest 1.25 N at scale N / size (0.8 
 is about 1.7 times `size` for bookworm and 1.5 times for brushType. `bookworm.ttf_23`'s atlas is a few rows too short
 for its first, unprintable glyphs, which the converter cuts off at the edge.
 
+## Vita pack: `tools/vita_pack.py`
+
+`docs/VITA_PLAN.md` 5.6 "Asset delivery": the Vita build never ships the whole `assets/` folder (77 MB,
+and most of it -- the original `.x` meshes, the `.xml`/`.XML` sources, `.mb3` levels, `.dds` textures, the
+object templates under `Data/Objects`...) is intermediate or source data the converters above produced
+along the way, never opened by the game itself. `tools/vita_pack.py` mirrors only the files the runtime
+actually reads (about 51 MB) into a separate folder, for `ux0:data/MuggleBall3/assets` or an
+`MB3_VITA_BUNDLE_ASSETS` build:
+
+```
+python3 tools/vita_pack.py --assets assets --out /path/to/pack
+```
+
+- **What is copied.** By folder and extension, each tied to the loader that proves it (the tool's module
+  docstring has the full list and the reasoning, including the one subtlety: `Data/Objects/**/*.json`,
+  348 files, is never copied despite the extension, because nothing under `Objects/` is ever opened at
+  runtime -- the concrete per-level data those templates describe is already baked into each level's own
+  JSON). In short: `Textures/**/*.jpg|png`, `Data/Fonts/*.json|png`, `Data/Levels/*.json`,
+  `Data/Materials/*.json`, `Data/Menu/*.json`, `Data/Particles/*.json`, `Data/xml/*.json`,
+  `Sounds/*.ogg`, `Musics/*.ogg`, `Data/Meshes/**/*.glb`.
+- **Resampling.** `docs/VITA_PLAN.md` 5.7 "Textures": vitaGL's mipmap generator misbehaves on a
+  non-power-of-two (NPOT) texture. A texture `ModelCache` loads with mipmaps (the 3D materials, plus the
+  particle and prize-pickup sprites in `Textures/Oreols/` and `Textures/Particles/`) is therefore
+  resampled, stretched (not padded -- UVs are normalised) to the next power of two in each dimension, when
+  it is not already one. A texture `UiAssets`/`BitmapFont` load without mipmaps (menu and HUD art, found
+  by folder -- `Textures/Forms/`, `Textures/Icons/` -- or because some `Data/Menu/*.json` form names it as
+  an `img_name`) is left exactly as it is, because some of it (the scrolling `Textures/Forms/Sky.jpg`)
+  relies on tiling at its real size. One folder-rule exception, confirmed harmless rather than guessed:
+  `Data/Materials/materials.json`'s "Lazer.png" material points into `Textures/Icons/Lazer.png` (76x76,
+  NPOT) and is mipmapped, but nothing in the shipped data ever draws that material (the laser weapon and
+  its particle use different assets entirely) -- see the tool's module docstring for the full chain of
+  evidence. Dimensions come from the file's own header (PNG IHDR; JPEG SOF0/SOF2), never a decode; a
+  `Textures/` file whose header cannot be read this way is copied as is and listed in the manifest's
+  `unreadableTextures` rather than silently skipped. The actual resampling is tried with Pillow (LANCZOS)
+  if it is importable, else macOS's `sips` if it is on `PATH`, else the file is left as it was copied and
+  listed as unresampled; the same thing happens if a resample attempt raises (a header that lied about the
+  body, or a failing `sips`) -- one bad texture never aborts the whole pack. In the shipped data this is
+  four files that do get resampled: three NPOT JPEGs (`ptica.jpg`, `ptica1.jpg`, `Parus-2a.jpg`) and one
+  NPOT PNG (`Particles/ParticleLaser1.png`).
+- **The manifest**, `<out>/vita_pack.json`: how many files and bytes this run actually copied or
+  resampled, the resampled textures (original and new size, method), any NPOT mipmapped texture that
+  could not be resampled or whose header could not even be read (for a device-side fallback), and the
+  tool's rule version (bumped if what gets copied or resampled ever changes).
+- **Mirroring.** A re-run only touches files whose source changed: same mtime, and -- for a file that
+  should be resampled -- `--out`'s own copy already has the resampled (power-of-two) size, not just a
+  matching mtime (a `--no-resample` run, or one where neither Pillow nor sips was available, would
+  otherwise look "done" forever). Anything `--out` has that `--assets` no longer does is deleted, so the
+  pack always matches the source exactly -- but only inside a folder this tool already built (one holding
+  its own `vita_pack.json`); `--out` pointing anywhere else that already has content, or sitting inside
+  `--assets` or around it, is refused rather than risking someone else's files. `--no-resample` copies
+  every file as it is; `--dry-run` prints what would happen and writes nothing (and still reports the
+  textures it would resample as resolved, not left unresampled).
+
 ## App icon: `assets/AppIcon.icns`
 
 macOS only, and not read by the game: `tools/make_icon.py` builds it, `tools/convert_assets.py` runs that

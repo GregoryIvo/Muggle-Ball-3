@@ -5,6 +5,23 @@ Notable changes to Muggle Ball 3. The format roughly follows
 runtime is new code and the game's assets are supplied by the player, never
 included here.
 
+## Unreleased
+
+### Added
+- `tools/vita_pack.py` (PlayStation Vita port, M6a): mirrors only the asset
+  files the runtime actually reads into a separate folder, resampling
+  non-power-of-two mipmapped textures to the next power of two (Pillow, or
+  macOS `sips`, or left as copied and listed in its manifest, along with any
+  texture whose header could not even be read). A re-run only trusts a
+  matching mtime for an already-resampled file once it also checks the
+  resampled file is actually power-of-two, so a `--no-resample` or
+  Pillow/sips-unavailable run never permanently skips a texture that still
+  needs fixing; a per-file resample failure is caught and reported instead of
+  aborting the whole pack; `--out` is refused when it is inside `--assets` (or
+  the reverse), or already holds unrelated content with no `vita_pack.json`
+  of its own, so a wrong `--out` can never delete someone else's files. See
+  `docs/ASSET_FORMATS.md`, "Vita pack".
+
 ## [0.1.0] - 2026-10-23
 
 First tagged release. The game is playable on macOS from your own copy of
