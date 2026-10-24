@@ -1710,6 +1710,42 @@ void testStepping() {
     }
 }
 
+// PhysicsWorld::step()'s companion counter (engine/include/mb/engine/Physics.h, "Fixed steps thrown away"): whole
+// fixed steps lost at the point step() gives up catching up, floor(accumulator / fixedStep) at the time it last
+// did. docs/VITA.md: the Vita's frame target wants this at zero.
+void testDroppedSteps() {
+    PhysicsSettings s = settingsFor();
+    s.maxStepsPerCall = 8;
+    PhysicsWorld world(kGravity, s);
+    check(world.droppedSteps() == 0, "droppedSteps: zero before any step() call");
+    check(world.step(kStep) == 1 && world.droppedSteps() == 0, "droppedSteps: a normal step reports none dropped");
+    check(world.step(kStep * 20.0f) == 8 && world.droppedSteps() == 12,
+          "droppedSteps: 20 fixed steps' worth of time with maxStepsPerCall 8 takes 8 steps and drops the other 12");
+    // The remainder below one step is kept, not thrown away with the dropped steps: feeding it what is left
+    // takes exactly one more step, and droppedSteps does not move again.
+    check(world.step(kStep * 0.999f) == 1, "droppedSteps: the remainder kept below one step still carries over");
+    check(world.droppedSteps() == 12, "droppedSteps: and stays at 12 once nothing more is dropped");
+}
+
+// PhysicsWorld::bodyCount() (the world's body records) and activeBodyCount() (Jolt's awake rigid bodies):
+// together what the Vita profile's world size is sized from (docs/PHYSICS.md, "The Vita profile").
+void testBodyAndActiveCount() {
+    PhysicsWorld world(kGravity, settingsFor());
+    check(world.bodyCount() == 0 && world.activeBodyCount() == 0, "activeBodyCount: an empty world has neither");
+    addGround(world);
+    check(world.bodyCount() == 1 && world.activeBodyCount() == 0, "activeBodyCount: a static ground body is never active");
+    const BodyId box = world.addBody(dynamicBody(at({0, 3, 0}), boxShape({0.5f, 0.5f, 0.5f})));
+    check(world.bodyCount() == 2, "bodyCount: the ground and the falling box");
+    check(world.activeBodyCount() == 1, "activeBodyCount: the box starts awake while it falls");
+    for (int i = 0; i < 600 && world.isAwake(box); ++i) {
+        world.step(kStep);
+    }
+    check(!world.isAwake(box), "activeBodyCount: the box settles on the ground and falls asleep within 10 s");
+    check(world.activeBodyCount() == 0, "activeBodyCount: and is no longer counted as active");
+    check(world.bodyCount() == 2, "bodyCount: unchanged (nothing was added or removed)");
+    check(world.activeBodyCount() <= static_cast<int>(world.bodyCount()), "activeBodyCount: never more than bodyCount");
+}
+
 void testBodyFlags() {
     {
         PhysicsWorld world(kGravity, settingsFor());
@@ -1919,6 +1955,8 @@ int main() {
     testDegenerateInput();
     testLimitsAndLifetime();
     testStepping();
+    testDroppedSteps();
+    testBodyAndActiveCount();
     testBodyFlags();
     testThreadsGiveTheSameResult();
     reportPerformance(0, false);
