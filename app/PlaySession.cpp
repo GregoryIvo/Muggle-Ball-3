@@ -126,12 +126,29 @@ PlaySession::PlaySession(mb::Renderer& renderer, Assets& assets, const mb::SaveD
     }
 }
 
+PlaySession::~PlaySession() {
+    logPhysicsSummary();
+}
+
+// docs/PHYSICS.md: fixed steps taken and dropped (PhysicsWorld::droppedSteps, not a failure, the host can drop
+// steps when it stalls), and the peak awake and total body counts the Vita profile's world size is sized from.
+void PlaySession::logPhysicsSummary() const {
+    if (!session_) {
+        return;
+    }
+    const mb::PhysicsWorld& world = session_->scene().world();
+    const std::uint64_t steps = static_cast<std::uint64_t>(std::llround(session_->time() / world.settings().fixedStep));
+    mb::logInfo("physics: {} ended after {} steps ({} dropped), peak {} awake, {} bodies", currentLevelName_, steps,
+                world.droppedSteps(), peakAwakeBodies_, world.bodyCount());
+}
+
 bool PlaySession::start(std::string_view levelName, const mb::GameHud& hud, const Progress& progress) {
     const std::optional<std::size_t> index = assets_.catalog.find(levelName);
     if (!index) {
         mb::logError("the campaign names the level \"{}\", which is not among the converted levels", levelName);
         return false;
     }
+    logPhysicsSummary();  // the level being left, if there was one
     const mb::LevelEntry& entry = assets_.catalog.levels()[*index];
     try {
         const Clock::time_point begin = Clock::now();
@@ -143,6 +160,10 @@ bool PlaySession::start(std::string_view levelName, const mb::GameHud& hud, cons
         rules.campaignLevel = hud.level;
         // What drops differs from play to play; an autoplay (the screenshots, the scripted checks) repeats.
         rules.prizeSeed = options_.autoplay ? static_cast<std::uint64_t>(hud.level) : std::random_device{}();
+        rules.physicsSettings = mb::physicsSettingsFor(options_.profile, entry.name);
+        const mb::PhysicsSettings& ps = rules.physicsSettings;
+        mb::logInfo("physics: profile {}, {}/{}/{} at {:.4f} s, threads {}, maxSteps {}", options_.profile.name,
+                    ps.velocitySteps, ps.positionSteps, ps.collisionSteps, ps.fixedStep, ps.threads, ps.maxStepsPerCall);
         auto session = std::make_unique<mb::GameSession>(level, assets_.materials, rules);
         progress(0.6f);
         auto scene = std::make_unique<mb::PlayScene>(models_, assets_.materials, assets_.textures, assets_.particles, level,
@@ -162,6 +183,8 @@ bool PlaySession::start(std::string_view levelName, const mb::GameHud& hud, cons
     caption_ = {};
     cues_ = options_.prizes;
     effectCues_ = options_.effects;
+    currentLevelName_ = entry.name;
+    peakAwakeBodies_ = 0;
     return true;
 }
 
@@ -198,6 +221,7 @@ mb::LevelOutcome PlaySession::update(const mb::InputEvents& input, double second
     clock_ += seconds;
     giveCues();
     session_->update(seconds, options_.autoplay ? mb::Autopilot{}.decide(*session_) : player_.read(input, width, height, camera_));
+    peakAwakeBodies_ = std::max(peakAwakeBodies_, session_->scene().world().activeBodyCount());
 
     const std::vector<mb::GameEvent> events = session_->takeEvents();
     for (const mb::GameEvent& event : events) {

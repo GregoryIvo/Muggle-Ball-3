@@ -1,7 +1,8 @@
 // Plays every converted level with the autopilot against the real game data (needs it: skips with exit code 77 when
 // MB3_ASSETS is not set), no GPU.
 //
-//   mb_gameplay_smoke [--seconds S] [--rule never|type|bricks] [--strict|--no-stall] [--campaign-level N] [--seed N] [--log] [--left] [level]
+//   mb_gameplay_smoke [--seconds S] [--rule never|type|bricks] [--strict|--no-stall] [--campaign-level N] [--seed N]
+//                     [--physics-profile name] [--log] [--left] [level]
 //        each level is played for S seconds of game time (default 60) by the autopilot (the bat follows the ball that
 //        comes down first), with hearts to spare so that it plays on after a lost ball, and ends as the game ends it
 //        (SessionOptions::levelEnd: every brick and tree, with the look at what the ball can reach and the stall
@@ -24,7 +25,10 @@
 //        place in the campaign (the summary prints N, and how many of the 28 kinds dropped; a run of 300 s or more over all the
 //        levels fails when too few did, which a seed shared by every level would). --strict switches the look at what the ball can
 //        reach and the stall rule off, --no-stall only the stall rule. The level is any part of its name, in any case. With a level
-//        name, --log prints its event log.
+//        name, --log prints its event log. --physics-profile (default "desktop", see mb/game/PhysicsProfile.h) picks the per-level
+//        PhysicsSettings every level is built with; a trailing line under each level's row gives the fixed steps taken and dropped
+//        (PhysicsWorld::droppedSteps, not a failure here: the host can drop steps when it stalls) and the peak awake and total body
+//        counts, and the summary totals them.
 
 #include "mb/game/Autopilot.h"
 #include "mb/game/Campaign.h"
@@ -32,6 +36,7 @@
 #include "mb/game/LevelCatalog.h"
 #include "mb/game/LevelLoader.h"
 #include "mb/game/MaterialLibrary.h"
+#include "mb/game/PhysicsProfile.h"
 
 #include <algorithm>
 #include <array>
@@ -46,7 +51,9 @@
 #include <filesystem>
 #include <format>
 #include <map>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -100,6 +107,9 @@ struct Outcome {
     int bolts = 0, meteors = 0;                    // that struck
     std::array<int, kPrizeKindCount> dropped{};    // prizes dropped, by kind
     int givenUp = 0;  // balls lost in a pocket they could not be freed from, see play()
+    std::uint64_t fixedSteps = 0, droppedSteps = 0;  // PhysicsWorld::step()/droppedSteps(), over the whole run
+    int peakAwake = 0;   // the most bodies awake at once, sampled a few times a second
+    int bodyCount = 0;   // the world's bodies at the end (it does not change during a run)
     std::vector<GameEvent> events;
     std::vector<std::string> problems;
     std::vector<std::string> standing;  // the targets left, one line each
@@ -123,6 +133,11 @@ bool gStrict = false;   // every target counts, whatever the ball can reach, and
 bool gNoStall = false;  // the look at what the ball can reach stays, the stall rule goes
 int gCampaignLevel = 0; // every level is played as this one of the campaign (0: as its own)
 std::uint64_t gSeed = 1;  // of the prizes, see prizeSeedOf()
+// --physics-profile; every level's settings come from it. Set to the "desktop" profile at the top of main(), not
+// here: a global initialized by calling into mb_game's own globals (PhysicsProfile.cpp's profile table) at static
+// init time would race them across translation units, so this stays default-constructed (which needs nothing
+// from another TU) until main() runs, after which every static object in the program is guaranteed built.
+PhysicsProfile gProfile;
 
 // The seed of one level's prizes. The default of SessionOptions is the same for every level, so every level would replay the same
 // first drops (a cannon, a bonus, a bat size ...) and nine of the 28 prizes would never drop in a run of 83 levels.
@@ -130,11 +145,13 @@ std::uint64_t prizeSeedOf(int place) {
     return gSeed * 0x9E3779B97F4A7C15ull + static_cast<std::uint64_t>(place);
 }
 
-Outcome play(const Level& level, const MaterialLibrary& materials, double seconds, int campaignLevel, int place) {
+Outcome play(const Level& level, const MaterialLibrary& materials, double seconds, int campaignLevel, int place,
+            std::string_view levelId) {
     SessionOptions options;
     options.levelEnd = gRule;
     options.campaignLevel = campaignLevel;
     options.prizeSeed = prizeSeedOf(place);
+    options.physicsSettings = physicsSettingsFor(gProfile, levelId);
     if (gStrict) {
         options.ignoreUnreachable = false;
     }
@@ -207,6 +224,7 @@ Outcome play(const Level& level, const MaterialLibrary& materials, double second
             out.farthest = std::max(out.farthest, ball.position.z);
         }
         if (frame % 6 == 0) {  // a tenth of a second is fine-grained enough to catch a body that flies away
+            out.peakAwake = std::max(out.peakAwake, scene.world().activeBodyCount());
             const ClothSet& cloths = scene.cloths();
             for (std::size_t i = 0; i < cloths.size(); ++i) {  // the sails: every particle finite, and the solver has not had to put one back
                 if (cloths.alive(i) && (scene.world().clothResets(cloths.body(i)) > 0 ||
@@ -229,6 +247,9 @@ Outcome play(const Level& level, const MaterialLibrary& materials, double second
     });
     out.stepMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count() /
                  static_cast<double>(std::max<std::uint64_t>(frame, 1));
+    out.fixedSteps = static_cast<std::uint64_t>(std::llround(session.time() / options.physicsSettings.fixedStep));
+    out.droppedSteps = scene.world().droppedSteps();
+    out.bodyCount = static_cast<int>(scene.world().bodyCount());
 
     // The frees of each ball that came one after the other where the one before was: a ball freed jamFreesInARow times like that
     // and pinned again is lost where it is, not past the bat (GameSession::freeBall()).
@@ -338,6 +359,9 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, const Cam
     double share[2] = {0, 0};  // summed over the levels: the part of the targets destroyed
     double stepMs = 0, worstStepMs = 0, slowest = 0;
     std::string worstLevel;
+    std::uint64_t totalFixedSteps = 0, totalDroppedSteps = 0;
+    int peakAwakeOfAll = 0, peakBodiesOfAll = 0;
+    int levelsWithDroppedSteps = 0;
     for (const LevelEntry& entry : catalog.levels()) {
         if (only && lower(entry.name).find(lower(only)) == std::string::npos) {
             continue;
@@ -345,13 +369,24 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, const Cam
         ++levels;
         const Level level = loadLevelJson(entry.path);
         const int place = campaign.indexOf(entry.name).value_or(0) + 1;
-        const Outcome out = play(level, materials, seconds, gCampaignLevel > 0 ? gCampaignLevel : place, place);
+        const Outcome out = play(level, materials, seconds, gCampaignLevel > 0 ? gCampaignLevel : place, place, entry.name);
         std::printf("%-26s | %4d %4d %4d | %5d %7lld %4d %5d %6d %5d | %4d %4d | %5s %5s | %7.1f | %3d/%-3d%s | %.3f\n", entry.name.c_str(),
                     out.targetsAtStart[0], out.targetsAtStart[1], out.stats.targetsOutOfPlay, out.stats.bricksDestroyed,
                     static_cast<long long>(out.score), out.stats.ballsLost, out.stats.batHits, out.stats.bricksHit,
                     out.stats.ballsFreed, out.targetsLeft[0], out.targetsLeft[1], finish(out.finishedAt[0]).c_str(),
                     finish(out.finishedAt[1]).c_str(), out.lastProgress, out.stats.prizesDropped, out.stats.prizesCaught,
                     out.starCaught && out.complete ? " *" : (out.starDropped ? " s" : "  "), out.stepMs);
+        // Not part of the table above (it would not fit): fixed steps taken and dropped (PhysicsWorld::droppedSteps,
+        // docs/PHYSICS.md), and the peak awake and total body counts the Vita's world size (docs/VITA.md) is sized
+        // from. The host can drop steps when the machine running the test stalls; that is reported, not failed on.
+        std::printf("  physics: %llu steps (%llu dropped), peak %d awake, %d bodies\n",
+                    static_cast<unsigned long long>(out.fixedSteps), static_cast<unsigned long long>(out.droppedSteps),
+                    out.peakAwake, out.bodyCount);
+        totalFixedSteps += out.fixedSteps;
+        totalDroppedSteps += out.droppedSteps;
+        levelsWithDroppedSteps += out.droppedSteps > 0;
+        peakAwakeOfAll = std::max(peakAwakeOfAll, out.peakAwake);
+        peakBodiesOfAll = std::max(peakBodiesOfAll, out.bodyCount);
         std::fflush(stdout);
         for (int i = 0; i < 2; ++i) {
             withTargets[i] += out.targetsAtStart[i] > 0;
@@ -464,6 +499,11 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, const Cam
     std::printf("a fixed step took %.3f ms on average, %.3f ms in the slowest level (%s); the fastest body moved at "
                 "%.0f units per second\n",
                 stepMs / std::max(levels, 1), worstStepMs, worstLevel.c_str(), slowest);
+    std::printf("physics profile \"%.*s\": %llu fixed steps over all levels, %llu dropped (in %d levels; the host can drop "
+                "steps when it stalls, which is not a failure here); peak %d bodies awake at once, %d bodies in the "
+                "largest level\n",
+                static_cast<int>(gProfile.name.size()), gProfile.name.data(), static_cast<unsigned long long>(totalFixedSteps),
+                static_cast<unsigned long long>(totalDroppedSteps), levelsWithDroppedSteps, peakAwakeOfAll, peakBodiesOfAll);
     return failed == 0 && levels > 0 ? 0 : 1;
 }
 
@@ -481,6 +521,7 @@ int main(int argc, char** argv) {
         std::printf("SKIP: converted levels or materials not found under %s\n", assets.string().c_str());
         return 77;
     }
+    gProfile = *physicsProfile("desktop");
     double seconds = kDefaultSeconds;
     bool log = false, left = false;
     const char* only = nullptr;
@@ -502,10 +543,22 @@ int main(int argc, char** argv) {
         } else if (std::strcmp(argv[i], "--rule") == 0 && i + 1 < argc) {
             const std::string rule = argv[++i];
             gRule = rule == "type" ? TargetRule::BrickType : (rule == "bricks" ? TargetRule::Bricks : TargetRule::Never);
+        } else if (std::strcmp(argv[i], "--physics-profile") == 0 && i + 1 < argc) {
+            const std::optional<PhysicsProfile> profile = physicsProfile(argv[++i]);
+            if (!profile) {
+                std::printf("unknown physics profile \"%s\"; known profiles:", argv[i]);
+                for (const std::string_view name : physicsProfileNames()) {
+                    std::printf(" %.*s", static_cast<int>(name.size()), name.data());
+                }
+                std::printf("\n");
+                return 2;
+            }
+            gProfile = *profile;
         } else if (argv[i][0] != '-') {
             only = argv[i];
         } else {
-            std::printf("usage: mb_gameplay_smoke [--seconds S] [--rule never|type|bricks] [--strict|--no-stall] [--campaign-level N] [--seed N] [--log] [--left] [level]\n");
+            std::printf("usage: mb_gameplay_smoke [--seconds S] [--rule never|type|bricks] [--strict|--no-stall] [--campaign-level N] "
+                        "[--seed N] [--physics-profile name] [--log] [--left] [level]\n");
             return 2;
         }
     }
