@@ -84,9 +84,10 @@ public:
     // The size in points of the display the window is on; false if SDL cannot tell.
     bool displaySize(int& width, int& height) const;
 
-    // Pumps the window system's events without reading them, for a long load: on the Vita this is also what
-    // keeps the console from sleeping (SDL ticks the power timer in its event pump), so it is called even on
-    // platforms where there is nothing else to gain from it.
+    // On the Vita, pumps the window system's events without reading them, for a long load: SDL ticks the
+    // power timer in its own event pump, which is what keeps the console from sleeping while nothing else
+    // is. A no-op everywhere else, where loading does not risk a sleep and there is nothing to gain from it;
+    // safe to call unconditionally either way.
     void keepAwake();
 
     // Desktop fullscreen: the window covers the display at the display's own size, so the 3D view keeps

@@ -35,6 +35,8 @@ bool circleConfirmsOnVita() {
 bool findFrontTouchId(std::uint64_t& id) {
     int count = 0;
     SDL_TouchID* ids = SDL_GetTouchDevices(&count);
+    // Read before SDL_free below: this is the fallback used only if no device name contains "Front".
+    const SDL_TouchID first = count > 0 ? ids[0] : 0;
     bool found = false;
     for (int i = 0; i < count && !found; ++i) {
         const char* name = SDL_GetTouchDeviceName(ids[i]);
@@ -45,7 +47,7 @@ bool findFrontTouchId(std::uint64_t& id) {
     }
     SDL_free(ids);
     if (!found && count > 0) {
-        id = ids[0];  // SDL registers the front panel first; fall back to it if the name ever changes
+        id = first;  // SDL registers the front panel first; fall back to it if the name ever changes
         found = true;
     }
     return found;
@@ -133,8 +135,12 @@ Window::Window(const std::string& title, int width, int height, bool startFullsc
             joystick_ = SDL_OpenJoystick(ids[0]);
             logInfo("Window: joystick 0 '{}', a gamepad mapping {}",
                     joystick_ ? SDL_GetJoystickName(joystick_) : "?", SDL_IsGamepad(ids[0]) ? "exists" : "does not exist");
+        } else {
+            logInfo("Window: no joystick");
         }
         SDL_free(ids);
+    } else {
+        logInfo("Window: no joystick");
     }
     if (findFrontTouchId(frontTouchId_)) {
         frontTouchKnown_ = true;
@@ -262,22 +268,60 @@ bool Window::pollEvents(InputEvents& input) {
                 input.pointer.push_back({-1, -1, leftHeld_});  // off the window: nothing is hovered
                 break;
 #ifdef MB3_PLATFORM_VITA
+            case SDL_EVENT_JOYSTICK_ADDED:
+                // A PSTV's pad can drop and re-pair (sleep, low battery) with a new instance id; SDL only
+                // delivers button/axis events for an opened joystick, so without this the game would take no
+                // more pad input until restarted. Only replace it if nothing is open already.
+                if (!joystick_) {
+                    joystick_ = SDL_OpenJoystick(event.jdevice.which);
+                    logInfo("Window: joystick {} '{}' connected", event.jdevice.which,
+                            joystick_ ? SDL_GetJoystickName(joystick_) : "?");
+                }
+                break;
+            case SDL_EVENT_JOYSTICK_REMOVED:
+                if (joystick_ && SDL_GetJoystickID(joystick_) == event.jdevice.which) {
+                    SDL_CloseJoystick(joystick_);
+                    joystick_ = nullptr;
+                    if (console_) {
+                        // Nothing stays held once the pad is gone: release confirm and every d-pad direction,
+                        // as a real buttonUp would. ConsoleInput ignores an up with no matching down, so this
+                        // is harmless for whichever of these were not actually held.
+                        const int confirm = console_->settings().circleConfirms
+                                                 ? static_cast<int>(ConsoleButton::Circle)
+                                                 : static_cast<int>(ConsoleButton::Cross);
+                        console_->buttonUp(confirm);
+                        console_->buttonUp(static_cast<int>(ConsoleButton::DpadLeft));
+                        console_->buttonUp(static_cast<int>(ConsoleButton::DpadRight));
+                        console_->buttonUp(static_cast<int>(ConsoleButton::DpadUp));
+                        console_->buttonUp(static_cast<int>(ConsoleButton::DpadDown));
+                    }
+                    logInfo("Window: joystick {} disconnected", event.jdevice.which);
+                }
+                break;
             case SDL_EVENT_JOYSTICK_BUTTON_DOWN:
             case SDL_EVENT_JOYSTICK_BUTTON_UP:
                 if (console_) {
                     if (event.type == SDL_EVENT_JOYSTICK_BUTTON_DOWN) {
-                        console_->buttonDown(event.jbutton.button);
                         // sceImeDialog is one-shot: once it closes (confirmed or cancelled) nothing SDL does
                         // reopens it, and FrontEnd starts text input only when wantsText changes, so without
                         // this a cancel (or a second look at the name) would be stuck with no keyboard at all.
+                        // Reopening and forwarding the press to ConsoleInput are mutually exclusive: forwarding
+                        // it too would send Return (ConsoleInput::buttonDown, text input on) and submit the
+                        // field's current text in the very press that is meant to reopen the dialog instead.
                         const int confirm = console_->settings().circleConfirms ? static_cast<int>(ConsoleButton::Circle)
                                                                                  : static_cast<int>(ConsoleButton::Cross);
-                        if (textInputOn_ && event.jbutton.button == confirm && !SDL_ScreenKeyboardShown(window_)) {
+                        const bool reopen =
+                            textInputOn_ && event.jbutton.button == confirm && !SDL_ScreenKeyboardShown(window_);
+                        if (reopen) {
                             SDL_StopTextInput(window_);
                             SDL_StartTextInput(window_);
                             logInfo("Window: confirm pressed with no IME shown while text input is on; reopening it");
+                        } else {
+                            console_->buttonDown(event.jbutton.button);
                         }
                     } else {
+                        // The matching up for a press that reopened the IME is simply ignored: ConsoleInput
+                        // never saw the down, so its "up without down" rule (ConsoleInput.cpp) drops it.
                         console_->buttonUp(event.jbutton.button);
                     }
                 }
@@ -374,7 +418,12 @@ void Window::setCursorHidden(bool hidden) {
 }
 
 void Window::keepAwake() {
+#ifdef MB3_PLATFORM_VITA
+    // SDL ticks the power timer in its own event pump, which is the only thing keeping the console from
+    // sleeping during a long, blocking level load. Desktop has nothing to gain from this (and must not
+    // start processing OS events mid-load where it did not before), so the call is Vita-only.
     SDL_PumpEvents();
+#endif
 }
 
 void Window::setSize(int width, int height) {

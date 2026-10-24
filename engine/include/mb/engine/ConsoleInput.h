@@ -10,7 +10,9 @@
 //   - Confirm (Cross, or Circle when the system's enter-button setting says so) is the left mouse button at the
 //     cursor, held for as long as the button is held: it clicks in menus, drags sliders, launches the ball (the
 //     press edge) and resumes from the pause screen. While text input is on it sends Enter instead (the IME's
-//     confirmation is a Return already, this is for the on-screen field).
+//     confirmation is a Return already, this is for the on-screen field). One exception lives in Window.cpp, not
+//     here: on the Vita, a confirm press while text input is on but the IME dialog is not showing reopens the
+//     dialog instead of reaching ConsoleInput at all, so the game sees either a reopen or an Enter, never both.
 //   - Back (the other of the two) is Escape: pause in play, back in menus, quit to the menu when paused. Start is
 //     Escape too (confirm with the user in M5b whether Start while paused should resume instead).
 //   - The left stick and the d-pad move the cursor: speed in pixels per second scaled by the stick's deflection,
@@ -18,7 +20,8 @@
 //   - Front touch in the menus: a finger down is a press at the finger, its motion a drag, lifting it a release.
 //   - Front touch in play (the cursor hidden, Window::setCursorHidden(true)): a finger moving sets the cursor only
 //     and never presses, so a hand landing on the screen does not launch; a short tap (released within
-//     kTapSeconds, moved less than kTapPixels) is a press and a release at the finger, which launches.
+//     kTapSeconds, moved less than kTapPixels) is a press and a release at the point it lifted at (not where it
+//     landed; the two differ by less than kTapPixels, so play is barely affected either way), which launches.
 //   - Any key the game does not know is `Other`, which the pause screen takes as "carry on".
 
 #include "mb/engine/Window.h"

@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
+#include <limits>
 
 using namespace mb;
 
@@ -156,7 +157,7 @@ void testPlayModeDragNeverPresses() {
     check(console.cursorX() == 400, "play: the cursor still follows the finger");
 }
 
-void testPlayModeTapPressesAndReleasesAtTheLandingPoint() {
+void testPlayModeTapPressesAndReleasesAtTheLiftPoint() {
     ConsoleInput console;
     console.setPlaying(true);
     console.fingerDown(1, 500, 250, 0.0);  // moves the cursor there; not a press
@@ -287,6 +288,106 @@ void testSetTextInputFlipWhileConfirmHeld() {
     check(c.pointer.empty(), "text input flip: letting go afterwards presses or releases nothing more");
 }
 
+void testCrossIsBackWhenCircleConfirms() {
+    // When the system's setting swaps confirm to Circle, back swaps the other way, to Cross.
+    ConsoleInput console({.circleConfirms = true});
+    console.buttonDown(static_cast<int>(ConsoleButton::Cross));
+    InputEvents a = frameOf(console);
+    check(hasKey(a, SDLK_ESCAPE), "circleConfirms: Cross is back");
+    check(a.pointer.empty(), "circleConfirms: Cross does not also press (it is not confirm here)");
+}
+
+void testStickYAndPartialDeflectionScaling() {
+    ConsoleInput console;  // default cursor (480, 272), cursorSpeed 900, dead zone 0.2
+    console.stick(0.0f, 1.0f);  // full deflection, positive Y
+    frameOf(console, 1.0);
+    check(console.cursorY() > 272.0f, "stick: positive Y moves the cursor down (larger y)");
+
+    // 0.6 deflection, 0.2 dead zone: (0.6 - 0.2) / (1 - 0.2) = 0.5 of cursorSpeed.
+    ConsoleInput partial;
+    partial.stick(0.6f, 0.0f);
+    InputEvents b = frameOf(partial, 1.0);
+    const float expected = 480.0f + 0.5f * partial.settings().cursorSpeed;
+    check(std::fabs(partial.cursorX() - expected) < 0.01f, "stick: a partial deflection scales from the dead zone");
+    check(std::fabs(b.mouseX - expected) < 0.01f, "stick: the scaled move is what InputEvents reports");
+}
+
+void testDpadMovesAtExactlyCursorSpeedTimesDt() {
+    ConsoleInput console;
+    console.buttonDown(static_cast<int>(ConsoleButton::DpadRight));
+    InputEvents a = frameOf(console, 0.1);
+    const float expected = 480.0f + console.settings().cursorSpeed * 0.1f;
+    check(std::fabs(console.cursorX() - expected) < 0.01f, "d-pad: moves at exactly cursorSpeed * dt, full speed");
+}
+
+void testClampAtOriginAndSetTargetSizeShrinksTheCursorIn() {
+    ConsoleInput console;
+    console.stick(-1.0f, -1.0f);  // toward the top-left corner
+    frameOf(console, 10.0);       // long enough to reach both edges
+    check(console.cursorX() == 0.0f && console.cursorY() == 0.0f, "stick: clamps at the left/top edge (0), not past it");
+
+    ConsoleInput shrink;  // default cursor (480, 272), inside the default 960x544 target
+    shrink.setTargetSize(100, 100);
+    check(shrink.cursorX() <= 100.0f && shrink.cursorY() <= 100.0f,
+          "setTargetSize: pulls the cursor inside a target that shrank past it");
+}
+
+void testPressAndReleaseDoNotFeedMouseDxUnlikeMoveCursorTo() {
+    ConsoleInput console;
+    console.setPlaying(true);
+    console.fingerDown(1, 500, 250, 0.0);  // a moveCursorTo: this frame's mouseDX below is from this, cleared after
+    frameOf(console);
+    console.fingerUp(1, 505, 250, 0.1);    // a tap that drifted 5 px: press() then release() move the cursor again
+    InputEvents a = frameOf(console);
+    check(console.cursorX() == 505.0f, "press/release: still move the cursor to the given point");
+    check(a.mouseDX == 0 && a.mouseDY == 0 && a.leftDragDX == 0 && a.leftDragDY == 0,
+          "press/release: unlike moveCursorTo, do not feed mouseDX/DY or leftDragDX/DY");
+}
+
+void testPlayModeTapLatchSurvivesReturningCloseToTheStart() {
+    ConsoleInput console;
+    console.setPlaying(true);
+    console.fingerDown(1, 500, 250, 0.0);
+    console.fingerMotion(1, 600, 250, 0.05);  // 100 px: past tapPixels, latches "moved too far" for good
+    console.fingerMotion(1, 502, 250, 0.08);  // back within tapPixels of the start
+    console.fingerUp(1, 502, 250, 0.1);       // released quickly, close to the start: still not a tap
+    InputEvents a = frameOf(console);
+    bool anyPress = false;
+    for (const PointerSample& sample : a.pointer) {
+        anyPress = anyPress || sample.leftDown;
+    }
+    check(!anyPress, "play: once moved past tapPixels, returning close to the start before a quick lift is still not a tap");
+}
+
+void testNonFiniteInputsDoNotPoisonTheCursor() {
+    constexpr float kNan = std::numeric_limits<float>::quiet_NaN();
+    constexpr double kInf = std::numeric_limits<double>::infinity();
+    constexpr double kNanD = std::numeric_limits<double>::quiet_NaN();
+
+    ConsoleInput atRest;
+    InputEvents a;
+    atRest.frame(kInf, a);
+    check(std::isfinite(atRest.cursorX()) && std::isfinite(atRest.cursorY()),
+          "frame: a non-finite dt with the stick at rest does not poison the cursor");
+
+    ConsoleInput deflected;
+    deflected.stick(1.0f, 0.0f);
+    InputEvents b;
+    deflected.frame(kInf, b);
+    check(std::isfinite(deflected.cursorX()) && std::isfinite(deflected.cursorY()),
+          "frame: a non-finite dt with the stick deflected does not poison the cursor either");
+
+    ConsoleInput nanDt;
+    InputEvents c;
+    nanDt.frame(kNanD, c);
+    check(std::isfinite(nanDt.cursorX()) && std::isfinite(nanDt.cursorY()), "frame: a NaN dt does not poison the cursor");
+
+    ConsoleInput badTouch;
+    badTouch.fingerDown(1, kNan, 5.0f, 0.0);
+    check(std::isfinite(badTouch.cursorX()) && std::isfinite(badTouch.cursorY()),
+          "fingerDown: a non-finite coordinate does not poison the cursor");
+}
+
 }  // namespace
 
 int main() {
@@ -298,7 +399,7 @@ int main() {
     testDpadMoves();
     testMenuTouchPressDragRelease();
     testPlayModeDragNeverPresses();
-    testPlayModeTapPressesAndReleasesAtTheLandingPoint();
+    testPlayModeTapPressesAndReleasesAtTheLiftPoint();
     testSlowOrLongTouchDoesNotPress();
     testSecondFingerIgnored();
     testLeftButtonReflectsHeldState();
@@ -307,6 +408,13 @@ int main() {
     testFingerIdMismatch();
     testSetPlayingFlipWhileFingerDown();
     testSetTextInputFlipWhileConfirmHeld();
+    testCrossIsBackWhenCircleConfirms();
+    testStickYAndPartialDeflectionScaling();
+    testDpadMovesAtExactlyCursorSpeedTimesDt();
+    testClampAtOriginAndSetTargetSizeShrinksTheCursorIn();
+    testPressAndReleaseDoNotFeedMouseDxUnlikeMoveCursorTo();
+    testPlayModeTapLatchSurvivesReturningCloseToTheStart();
+    testNonFiniteInputsDoNotPoisonTheCursor();
     if (failures == 0) {
         std::puts("all console input tests passed");
     }

@@ -60,6 +60,16 @@ included here.
   `MUGB00003`); the hello moved to its own title ID, `MUGB00009`, so both install at once. No
   behaviour change on the desktop build (verified byte-identical screenshots).
 
+  Review fixes on top of the above: a confirm press that reopens a cancelled, one-shot IME no longer also
+  submits the name field's current text in the same press (the two were sent together; now exclusive);
+  `findFrontTouchId`'s unreached fallback no longer reads `SDL_GetTouchDevices`' array after freeing it;
+  a reconnecting PSTV pad (sleep, low battery) is now re-opened through `SDL_EVENT_JOYSTICK_ADDED` instead of
+  leaving the game with no button input until restart, and `SDL_EVENT_JOYSTICK_REMOVED` releases anything the
+  departing pad still held; `ConsoleInput::frame`/`press`/`release`/`moveCursorTo` fall back to the last good
+  value on a non-finite dt or coordinate instead of latching NaN into the cursor permanently; `Window::keepAwake`
+  is now a no-op off the Vita (it pumped SDL events on every platform during a level load, which is unneeded,
+  and newly started processing OS events mid-load on desktop where the previous build did not).
+
 ## [0.1.0] - 2026-10-23
 
 First tagged release. The game is playable on macOS from your own copy of

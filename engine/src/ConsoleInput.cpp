@@ -18,6 +18,13 @@ int backButton(const ConsoleInputSettings& settings) {
     return static_cast<int>(settings.circleConfirms ? ConsoleButton::Cross : ConsoleButton::Circle);
 }
 
+// A coordinate should always be finite (SDL's normalised touch is 0..1, and the stick/d-pad only ever add a
+// finite speed times a finite dt), but std::clamp passes NaN straight through and a NaN cursor position never
+// recovers on its own: fall back to the last good position instead of ever accepting one.
+float finiteOr(float value, float fallback) {
+    return std::isfinite(value) ? value : fallback;
+}
+
 }  // namespace
 
 ConsoleInput::ConsoleInput(ConsoleInputSettings settings) : settings_(settings) {}
@@ -166,7 +173,10 @@ void ConsoleInput::fingerUp(std::int64_t finger, float x, float y, double timeSe
 }
 
 void ConsoleInput::frame(double dtSeconds, InputEvents& input) {
-    const float dt = static_cast<float>(dtSeconds);
+    // Window.cpp clamps dt to a finite, non-negative value before calling this, but a non-finite dt would
+    // otherwise poison the cursor with NaN permanently (every clamp below passes NaN straight through, and
+    // nothing after this ever recovers): guard it here too, since this class is host-tested on its own.
+    const float dt = std::isfinite(dtSeconds) ? static_cast<float>(dtSeconds) : 0.0f;
     // The dead zone is cut from the deflection and the rest scaled so full deflection reaches cursorSpeed;
     // the d-pad always drives at full speed. Both are added, so holding both at once is simply faster.
     const auto axisSpeed = [&](float value) {
@@ -205,14 +215,14 @@ void ConsoleInput::frame(double dtSeconds, InputEvents& input) {
 }
 
 void ConsoleInput::press(InputEvents& input, float x, float y) {
-    cursorX_ = std::clamp(x, 0.0f, static_cast<float>(width_));
-    cursorY_ = std::clamp(y, 0.0f, static_cast<float>(height_));
+    cursorX_ = std::clamp(finiteOr(x, cursorX_), 0.0f, static_cast<float>(width_));
+    cursorY_ = std::clamp(finiteOr(y, cursorY_), 0.0f, static_cast<float>(height_));
     input.pointer.push_back({cursorX_, cursorY_, true});
 }
 
 void ConsoleInput::release(InputEvents& input, float x, float y) {
-    cursorX_ = std::clamp(x, 0.0f, static_cast<float>(width_));
-    cursorY_ = std::clamp(y, 0.0f, static_cast<float>(height_));
+    cursorX_ = std::clamp(finiteOr(x, cursorX_), 0.0f, static_cast<float>(width_));
+    cursorY_ = std::clamp(finiteOr(y, cursorY_), 0.0f, static_cast<float>(height_));
     input.pointer.push_back({cursorX_, cursorY_, false});
 }
 
@@ -221,8 +231,8 @@ void ConsoleInput::release(InputEvents& input, float x, float y) {
 // would. press()/release() deliberately do not: Window.cpp's button events do not touch them either, only its
 // motion events do, so a touch that teleports the cursor on landing is not counted as a drag.
 void ConsoleInput::moveCursorTo(InputEvents& input, float x, float y) {
-    const float clampedX = std::clamp(x, 0.0f, static_cast<float>(width_));
-    const float clampedY = std::clamp(y, 0.0f, static_cast<float>(height_));
+    const float clampedX = std::clamp(finiteOr(x, cursorX_), 0.0f, static_cast<float>(width_));
+    const float clampedY = std::clamp(finiteOr(y, cursorY_), 0.0f, static_cast<float>(height_));
     const float dx = clampedX - cursorX_;
     const float dy = clampedY - cursorY_;
     cursorX_ = clampedX;

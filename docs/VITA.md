@@ -474,7 +474,7 @@ covers every rule on the host with no window, SDL events or device) but only *in
   continuous, and `cursorX()`/`cursorY()` are right immediately), whether or not it turns out to be a menu press
   or a play-mode tap. A play-mode tap is therefore three `PointerSample`s (the landing move, then the tap's press
   and release at the lift point), not two: `test_console_input.cpp`'s
-  `testPlayModeTapPressesAndReleasesAtTheLandingPoint` checks that order precisely, rather than assuming two.
+  `testPlayModeTapPressesAndReleasesAtTheLiftPoint` checks that order precisely, rather than assuming two.
 - **Start-while-paused** still sends Escape (quits to the main menu on a second press), as the header says to do
   until this milestone settles it with the user — see "Open questions" below.
 
@@ -534,7 +534,8 @@ Hello") instead of the game's `MUGB00003`, so both install and sit on the LiveAr
 - **The front touch screen in the menus**: a tap is a click where the finger is; dragging a finger drags
   whatever is under it (a slider). **In play**: a finger moving only sets the bat's target, so a hand landing on
   the screen never launches the ball; a short tap — released within 0.2 s, moved less than about 12 px — both
-  presses and releases at the finger, which is what launches. A drag, or a touch held too long, never presses.
+  presses and releases at the point it lifted at (not where it landed; the two differ by less than 12 px), which
+  is what launches. A drag, or a touch held too long, never presses.
   The rear touch pad is disabled (`SDL_HINT_VITA_ENABLE_BACK_TOUCH=0`), so a palm there does nothing.
 - **No touch screen (PSTV)**: every screen works with the buttons and the stick alone — there is nothing in the
   menus, the pause screen or play that touch does and the stick/d-pad/confirm cannot also do.
@@ -543,8 +544,10 @@ Hello") instead of the game's `MUGB00003`, so both install and sit on the LiveAr
   closes (confirmed, which also sends an automatic Return, or cancelled) nothing SDL does reopens it on its own.
   **To reopen it** — after a cancel, or to retype the name — press confirm again while the field still has the
   keyboard and no IME is currently shown; `Window.cpp` notices and does `SDL_StopTextInput` then
-  `SDL_StartTextInput`. Characters the bitmap font's glyph table does not have are silently dropped, as on
-  desktop.
+  `SDL_StartTextInput`, and that press is *not* also forwarded to `ConsoleInput` as the Enter that would
+  otherwise submit the field's current (possibly empty) text in the very press meant to reopen the dialog — the
+  two are mutually exclusive, decided before either happens. Characters the bitmap font's glyph table does not
+  have are silently dropped, as on desktop.
 - **The PS button, sleep and wake**: SDL sends no background/foreground events on the Vita, so this plays out
   through `sceAppMgrReceiveSystemEvent` instead — on `SCE_APPMGR_SYSTEMEVENT_ON_RESUME` while a level is playing
   (the cursor hidden), `Window.cpp` pushes one `SDLK_ESCAPE`, which pauses the level exactly as if the player had
@@ -619,10 +622,16 @@ M5b (tick with the date and a short note once tried on hardware or in Vita3K):
 - [ ] touching to move the bat during play never launches the ball by itself (only a tap, or confirm, does);
 - [ ] everything above, and the menus, work the same with the system's enter button set to Circle instead of
       Cross (so back/confirm are swapped);
-- [ ] pause (Back or Start while playing), resume (confirm, a menu touch, or the stick/d-pad moving), and quit to
-      the main menu (Back or Start again while paused) all work from both buttons and touch;
+- [ ] pause (Back or Start while playing) and resume (confirm, or a touch press on the pause screen — moving the
+      stick or d-pad alone does **not** resume: `GameFlow`'s Paused case only takes a key other than Escape or a
+      pointer press edge, and a stick/d-pad move is neither) both work from buttons and touch; quit to the main
+      menu (Back or Start again while paused) too;
 - [ ] high-score name entry: the IME opens, typing and confirming enters the name; cancelling, then pressing
-      confirm again on the name field, reopens the IME; an empty name still enters as "Player";
+      confirm again on the name field, reopens the IME (that same press does not also submit the field's current
+      text — the two are mutually exclusive, see "Controls" above); an empty name still enters as "Player";
+      **unverified**: whether sceCtrl still delivers button data to the app while the IME dialog is on screen —
+      if it does, Circle inside the dialog would also reach ConsoleInput as Escape and `Menu::back()` would leave
+      the name form underneath it;
 - [ ] Options' changes (volumes, Smart Camera, Freeze Sky, Shadows, Mirrors) persist across a quit and restart
       (there is no window size or Fullscreen box to check: confirm they are indeed hidden);
 - [ ] the PS button, sleep and wake mid-level: the game pauses (per "Controls" above) and nothing hangs or loses
