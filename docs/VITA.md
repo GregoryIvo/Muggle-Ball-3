@@ -201,7 +201,7 @@ VAOs, no sRGB, no instancing.
   `glBufferData(..., GL_STREAM_DRAW)` every frame (orphaning: a same-size reallocation before the
   `glBufferSubData`, so the GPU can keep reading the old store instead of stalling on one it may still be
   reading).
-- `renderToImage` draws into an FBO (an `RGBA8` colour texture, a `GL_DEPTH_COMPONENT24` depth renderbuffer),
+- `renderToImage` draws into an FBO (a `GL_RGBA` 8-bit colour texture, a `GL_DEPTH_COMPONENT24` depth renderbuffer),
   reused while the size is unchanged, then `glReadPixels` and a row flip (GL reads bottom-up; vitaGL's FBOs are
   flipped internally to match GL, so the same flip is right on both targets).
 - `createTexture` rejects (logs and returns handle 0, like the SDL GPU back end) an image wider or taller than
@@ -256,7 +256,7 @@ it's produced instead of sitting in a buffer a crash never flushes.
   sampling point — the `glClear` finding above was the only real defect, fixed in the back end, not in the test.
 - The full suite with `MB3_RENDERER=GL` (`ctest`, `MB3_ASSETS` set): 43 of 43, one skipped
   (`mb_window_tests`, SDL's dummy driver, as on every other back end). `python3 -m unittest discover -s tests -p
-  'test_*.py'`: 201 tests, 4 skipped, 0 failed.
+  'test_*.py'`: 202 tests, 4 skipped, 0 failed.
 - M4b-style screenshot comparison (`tools/image_diff.py`, SDL GPU on Metal vs. `GL`, 960x544, each level's start
   camera at time 0, `renderToImage`): a knight-garden (peak triangles), knight-miss-1457 (heaviest physics),
   piratos-ostrovok with `--hud` (reference screenshot, 3 sails), piratos-bul-bul (a Water-material level: its

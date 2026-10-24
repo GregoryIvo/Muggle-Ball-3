@@ -347,10 +347,10 @@ void Renderer::Impl::drawFrame(GLuint targetFbo, int width, int height, const Fr
     // Re-synced directly, not just invalidated: unlike the object-id caches above (where 0 is never a real
     // name, so the next bind always re-issues the real call), a stale *boolean* here could read as already
     // correct by coincidence while the real GL enable state is something else.
-    if (!attrib2Enabled) {
-        glEnableVertexAttribArray(2);
-        attrib2Enabled = true;
-    }
+    // Unconditionally: another Renderer on the same context may have disabled the array (its line draws do), and
+    // this one's flag would still read true. One redundant enable per frame, like the other caches' reset.
+    glEnableVertexAttribArray(2);
+    attrib2Enabled = true;
 
     collectDraws(frame, items);
 
@@ -424,6 +424,7 @@ Image Renderer::Impl::renderOffscreen(int width, int height, const FrameParams& 
         return {};
     }
     if (!ensureOffscreen(width, height)) {
+        drainGlErrors("renderToImage");
         return {};
     }
     drawFrame(offscreen.fbo, width, height, frame, items, lines, sprites, effects);
