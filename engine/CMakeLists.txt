@@ -41,6 +41,7 @@ add_library(mb_engine
   src/Paths.cpp
   src/Files.cpp
   src/Window.cpp
+  src/ConsoleInput.cpp
   src/render/RenderCommon.cpp
   ${MB3_RENDERER_SOURCES}
   src/Image.cpp

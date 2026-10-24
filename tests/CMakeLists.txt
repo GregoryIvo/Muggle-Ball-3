@@ -84,6 +84,12 @@ target_link_libraries(mb_window_tests PRIVATE mb_engine)
 add_test(NAME mb_window_tests COMMAND mb_window_tests)
 set_tests_properties(mb_window_tests PROPERTIES SKIP_RETURN_CODE 77)
 
+# The Vita's buttons, stick and touch turned into InputEvents (docs/VITA_PLAN.md 5.8), driven with no window,
+# SDL events or device: platform-neutral on purpose, so these rules are covered on the host. CPU only.
+add_executable(mb_console_input_tests test_console_input.cpp)
+target_link_libraries(mb_console_input_tests PRIVATE mb_engine)
+add_test(NAME mb_console_input_tests COMMAND mb_console_input_tests)
+
 # Mixer maths on synthetic PCM, rendered offline: no audio device, no game data.
 add_executable(mb_mixer_tests test_mixer.cpp)
 target_link_libraries(mb_mixer_tests PRIVATE mb_engine Threads::Threads)
