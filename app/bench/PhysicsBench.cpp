@@ -63,6 +63,9 @@ constexpr double kProgressIntervalMs = 100.0;
 // to (static_cast<int>(std::llround(seconds / fixedStep))) and the step-time vector reserve() built from it.
 // A day is far past anything the plan contemplates (the longest run discussed is a 240 s stability pass).
 constexpr double kMaxBenchSeconds = 24.0 * 60.0 * 60.0;
+// The shortest run: one fixed step at the fastest step any profile uses, so no level ever runs zero steps and
+// writes a row of zeros that looks like a result.
+constexpr double kMinBenchSeconds = 1.0 / 60.0;
 
 double millisBetween(clock_type::time_point start, clock_type::time_point end) {
     return std::chrono::duration<double, std::milli>(end - start).count();
@@ -169,9 +172,9 @@ std::optional<BenchConfig> loadBenchConfig(const std::filesystem::path& path, st
     }
     // Zero, negative or absurdly large all produce a plausible-looking CSV row (0 steps and all-zero times
     // for the first two; an overflowing stepsPlanned for the last) rather than an obvious error.
-    if (!(config.seconds > 0) || config.seconds > kMaxBenchSeconds) {
-        error = std::format("{}: \"seconds\" must be greater than 0 and at most {} ({} given)", path.string(),
-                           kMaxBenchSeconds, config.seconds);
+    if (!(config.seconds >= kMinBenchSeconds) || config.seconds > kMaxBenchSeconds) {
+        error = std::format("{}: \"seconds\" must be at least {} (one fixed step) and at most {} ({} given)",
+                           path.string(), kMinBenchSeconds, kMaxBenchSeconds, config.seconds);
         return std::nullopt;
     }
 
@@ -270,6 +273,11 @@ std::optional<LevelResult> runLevel(const Assets& assets, const BenchConfig& con
     // but a future fallback to 30 Hz physics (docs/VITA_PLAN.md section 5.5) must not silently double how
     // long a level actually runs against what bench-physics.json's "seconds" asked for.
     const int stepsPlanned = static_cast<int>(std::llround(config.seconds / fixedStep));
+    if (stepsPlanned <= 0) {
+        mb::logError("bench: {}: {} s is less than one fixed step of {} s, nothing to run", levelId, config.seconds,
+                     fixedStep);
+        return std::nullopt;
+    }
 
     mb::Autopilot autopilot;
     std::vector<double> stepTimes;
@@ -408,7 +416,7 @@ int runAll(const Assets& assets, const BenchConfig& config, std::string_view pla
     // Opened and closed without writing anything, before any level runs: appendCsv() itself is only tried
     // once a level has already spent up to `seconds` running, so a bad --out (or, on the Vita, a full or
     // read-only ux0:) would otherwise only surface after every level's real work was already thrown away.
-    // Leaves a new path still missing and an existing file untouched either way.
+    // Appending creates a missing file (empty, which appendCsv treats as new) and leaves an existing one untouched.
     if (!config.levels.empty()) {
         std::FILE* probe = std::fopen(csv.string().c_str(), "a");
         if (!probe) {

@@ -146,13 +146,18 @@ void testBoundaryValuesAreAccepted() {
     // threads' own convention (engine/include/mb/engine/Physics.h) makes -1 and 0 both meaningful, and 1 is
     // the least a solver iteration count can be: none of these should be rejected by the range check above.
     const fs::path path = writeFile(dir.path, "config.json", R"({
-        "levels": ["village-love"], "seconds": 0.001,
+        "levels": ["village-love"], "seconds": 0.0166667,
         "velocitySteps": 1, "positionSteps": 1, "collisionSteps": 1, "threads": -1
     })");
     std::string error;
     const std::optional<BenchConfig> config = loadBenchConfig(path, error);
-    check(config.has_value(), "the smallest sensible seconds and solver values are accepted");
+    check(config.has_value(), "one fixed step of seconds and the smallest solver values are accepted");
     check(error.empty(), "and leave no error");
+
+    const fs::path tooShort = writeFile(dir.path, "short.json", R"({"levels": ["village-love"], "seconds": 0.001})");
+    std::string errorShort;
+    check(!loadBenchConfig(tooShort, errorShort).has_value(), "less than one fixed step is refused");
+    check(errorShort.find("one fixed step") != std::string::npos, "and says why");
 
     const fs::path path2 = writeFile(dir.path, "config2.json", R"({"levels": ["village-love"], "threads": 0})");
     std::string error2;

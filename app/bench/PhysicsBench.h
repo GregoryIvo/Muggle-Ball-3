@@ -53,7 +53,7 @@ struct LevelResult {
     double simulatedSeconds = 0;    // how long the Autopilot played (less than asked when the level ended)
     int steps = 0;                  // fixed steps taken
     std::string endedBy;            // "time", "complete", "over" or "stopped"
-    bool stopRequested = false;     // a Progress callback returned false at some point (see Progress above);
+    bool stopRequested = false;     // a Progress callback returned false at some point (see Progress below);
                                      // independent of endedBy, so runAll can stop the whole run on it even when
                                      // this level's own endedBy stayed "time", "complete" or "over"
     double loadMs = 0;              // reading and parsing the level's JSON
