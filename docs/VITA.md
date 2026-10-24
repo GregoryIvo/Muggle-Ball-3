@@ -27,6 +27,9 @@ window to resize); and `platform/vita/game/` is the console's own entry point, p
 ID `MUGB00003`, "Muggle Ball 3", no game data: `unzip -l` shows only `eboot.bin`, `param.sfo` and the LiveArea
 set). It cross-compiles with no warning from this project's own files, and `arm-vita-eabi-nm` shows the three
 memory globals as `D` symbols and zero undefined symbols.
+The physics benchmark (M3b) is a third VPK beside those: `mb3_vita_bench.vpk` (title ID `MUGB00004`; see "Physics
+benchmark" below) draws its progress with SDL's own GXM renderer rather than vitaGL; its Mac twin
+(`mb_physics_bench`) has run pass 1 of the plan's 15-level set, the device has not yet.
 
 ## Toolchain (pinned)
 
@@ -305,6 +308,157 @@ it's produced instead of sitting in a buffer a crash never flushes.
   follows from this on the GL side (§4.3 is explicit that it wants isotropic filtering); re-measure once on the
   device to confirm the gap is this and not something new, and record M4b's own tolerance against it knowing
   the ~95% baseline this comparison already set, not a hoped-for ~99%.
+
+## Physics benchmark (M3b)
+
+`app/bench/PhysicsBench.{h,cpp}` is the bench core, shared by two targets: `mb_physics_bench` on the Mac
+(`app/CMakeLists.txt`) and `mb3_vita_bench.vpk` (title ID `MUGB00004`, `platform/vita/bench/`) on the console,
+which compiles the same `PhysicsBench.cpp` straight in rather than linking a shared library across the two
+very different build graphs. Both read the same `bench-physics.json` and write the same CSV columns, so a
+host run and a device run of the same JSON line up level by level — the point of the whole milestone: the
+per-level ratio of the two replaces the plan's estimated speed factor (section 4.4) with a measured one.
+
+**What it measures.** For each level it builds a `GameSession` (the Autopilot playing it, 99 hearts so a lost
+ball never ends the run early) and calls `session.update(fixedStep, input)` once per planned step, timing
+each call with `steady_clock` on the Mac and the kernel's own process-time counter on the Vita
+(`PhysicsBench.cpp`'s `VitaProcessClock`, `sceKernelGetProcessTimeWide`): this SDK's libstdc++ has no
+`CLOCK_MONOTONIC`, so `steady_clock` there falls back to `gettimeofday`, a wall clock with no monotonicity
+guarantee — not what a step timer wants. `mb3_vita_bench` also logs `steady_clock`'s own period and a 50 ms
+delay measured against both clocks once at start-up, so `bench.log` validates that gap for itself rather than
+taking this paragraph's word for it. That is **one physics step plus the rules** (the bat easing towards the
+Autopilot's target, the ball's speed and angle correction, hit detection, bricks exploding, prizes) — not the
+bare `PhysicsScene::step()` that section 4.4's desktop numbers measured. The two are not directly comparable:
+section 4.4's per-level averages (knight-miss-1457 0.70 ms, and so on) are physics alone over a much longer
+(900 s) Autoplay run; the numbers below are a 20 s window of physics *and* rules. Expect the bench's own
+numbers to be the baseline from here on, not section 4.4's.
+
+Per level, a run also tracks the peak and mean of `PhysicsWorld::activeBodyCount()` (sampled every step),
+`PhysicsWorld::bodyCount()` once after the build, `tempAllocatorPeakBytes()` and `GameSession::droppedSteps()`
+at the end, plus how long reading the level's JSON and building the `GameSession` took. A level stops early
+(and says so, as `endedBy`) when the session reaches `SessionPhase::Complete` or `GameOver`, or when a
+caller's progress callback asks it to (the Vita's "press a button to stop"); otherwise it runs for the
+configured simulated seconds and `endedBy` is `"time"`.
+
+**Running it on the Mac:**
+
+```sh
+./build/app/mb_physics_bench platform/vita/bench/bench-physics.pass1.json --out /tmp/host-pass1.csv
+# or, with your own converted assets found some other way:
+MB3_ASSETS=/path/to/assets ./build/app/mb_physics_bench bench-physics.json [--out csv] [--platform host]
+```
+
+It prints one progress line and the CSV line per level to stdout as it goes, exits 0 if every level in the
+JSON produced a CSV line, 1 if any did not (a level not in the catalogue, say), 2 for a bad command line.
+
+**Running it on the console:** copy `bench-physics.json` (start from `platform/vita/bench/bench-physics.pass1.json`)
+to `ux0:data/MuggleBall3/bench-physics.json` (next to the converted `assets/` folder, as the other milestones'
+checklists already ask for) and start `mb3_vita_bench` from VitaShell. It sets the clocks to 444/222/222/166
+MHz, like the hello, and draws its progress with SDL's own GXM renderer (`SDL_render_vita_gxm`; this VPK never
+touches vitaGL, because nothing here needs a picture of the game) — the config's label, which level is
+running and of how many, the step count, the previous level's mean/p95, elapsed time, and "press a button to
+stop". Pressing a button stops the whole run (not just the current level) once the current level's partial
+result is written, so an interrupted run still keeps every level it finished plus the one it was on. If
+`bench-physics.json` is missing, or the asset pack is not at `ux0:data/MuggleBall3/assets`, it says so on
+screen (and in `ux0:data/MuggleBall3/bench.log`) and waits for a button instead of crashing. At the end it
+shows every level's mean/p95 and waits for a button before exiting. Send back `bench-physics.csv` and
+`bench.log`.
+
+**`bench-physics.json` keys** (`app/bench/PhysicsBench.h` has the authoritative comment):
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `levels` | array of strings | required | level ids (the file stem under `Data/Levels`), any case |
+| `seconds` | number | 20 | simulated seconds per level |
+| `profile` | string | `"desktop"` | the `PhysicsProfile` the settings start from (`"desktop"` or `"vita"`) |
+| `velocitySteps`, `positionSteps`, `collisionSteps`, `threads` | integer | the profile's own | each, if given, replaces the profile's value (and its per-level override's) for every level |
+| `label` | string | `""` | free text copied into every CSV line, for telling passes apart |
+
+Unknown keys are ignored, so a file can carry notes (the committed `bench-physics.pass1.json` has one).
+
+**CSV columns:** `platform,label,level,profile,velocitySteps,positionSteps,collisionSteps,threads,`
+`simulatedSeconds,steps,endedBy,loadMs,buildMs,stepMeanMs,stepP95Ms,stepP99Ms,stepMaxMs,bodies,peakAwake,`
+`meanAwake,droppedSteps,tempAllocatorPeakBytes,score,wallSeconds`. The four solver columns are the settings
+the level was *actually* simulated with (`settingsFor()`: the profile's per-level override, if any, then the
+JSON's explicit values on top) — not just whatever `bench-physics.json` happened to say — so a host CSV and a
+device CSV of the same JSON always agree on what they are comparing. The file is appended to, with the header
+written only once (when it is new or empty), so an interrupted run keeps whatever it already measured.
+
+**`tools/bench_ratio.py`** joins a host and a device CSV by `(level, profile, velocitySteps, positionSteps,
+collisionSteps, threads)` and prints, per level, the host and device mean/p95 step times, the two ratios, how
+many steps each side actually ran and the dropped steps; a row whose steps or `endedBy` differ between the
+two sides (a different window of the same noisy Autopilot run) is flagged and left out of the medians below,
+rather than averaged in as if it were comparable. It then prints the median and maximum **mean-time** ratio
+over every remaining matched level — this is the measured scale factor that replaces the plan's 70x, which
+section 4.4 itself derives from mean step times, not p95 — with the p95-time ratio reported alongside it as
+the device's own tail (cache misses, the newlib allocator) on top of that mean, not folded into the headline.
+It also flags any level whose device p95 is over the plan's 8 ms per-step budget, or whose device mean is over
+half the 16 ms per-frame budget (also 8 ms, section 1):
+
+```sh
+python3 tools/bench_ratio.py host-pass1.csv device-pass1.csv
+```
+
+### Pass 1: the Mac baseline (2026-10-24, `bench-physics.pass1.json`: profile "vita", 100/1/1, threads 0, 20 s each)
+
+All 15 levels ran the full 20 s (`endedBy` "time") with zero dropped steps. Times are milliseconds per
+`GameSession::update()` call (physics plus the rules), not section 4.4's physics-only numbers:
+
+| Level | Steps | stepMean | p95 | p99 | max | peakAwake | dropped |
+|---|---|---|---|---|---|---|---|
+| knight-miss-1457 | 1200 | 0.182 | 0.446 | 2.819 | 3.396 | 220 | 0 |
+| village-tennis | 1200 | 0.359 | 1.711 | 1.831 | 1.971 | 167 | 0 |
+| piratos-dom-na-vode | 1200 | 0.619 | 2.183 | 2.273 | 2.460 | 140 | 0 |
+| knight-eggs | 1200 | 0.567 | 2.104 | 2.510 | 7.503 | 111 | 0 |
+| village-dinner | 1200 | 0.403 | 0.827 | 0.967 | 1.149 | 94 | 0 |
+| piratos-dva-doma | 1200 | 0.019 | 0.064 | 0.086 | 0.139 | 15 | 0 |
+| village-logovo-vedmi | 1200 | 0.037 | 0.125 | 0.553 | 0.663 | 70 | 0 |
+| knight-shashki | 1200 | 0.179 | 1.468 | 1.827 | 2.295 | 80 | 0 |
+| knight-v-yablochko | 1200 | 0.107 | 0.408 | 0.506 | 0.928 | 60 | 0 |
+| piratos-gorillas | 1200 | 0.085 | 0.594 | 0.677 | 0.996 | 52 | 0 |
+| village-na-melnice | 1200 | 0.152 | 0.390 | 0.484 | 0.557 | 103 | 0 |
+| village-rinok | 1200 | 0.124 | 0.207 | 0.271 | 0.513 | 50 | 0 |
+| Village-Dvorik | 1200 | 0.133 | 0.296 | 0.333 | 0.801 | 51 | 0 |
+| knight-garden | 1200 | 0.171 | 0.599 | 0.688 | 0.834 | 176 | 0 |
+| village-love | 1200 | 0.047 | 0.226 | 0.276 | 0.333 | 38 | 0 |
+
+Sum of `stepMeanMs x steps` over all 15 levels: 3.82 s; sum of `loadMs + buildMs`: 95 ms. At the plan's three
+estimates of the device's speed (section 4.4: 45-110x, 70x central), scaling both sums by the same factor:
+
+| Factor | Estimated Vita wall time for pass 1 |
+|---|---|
+| 45x (low) | ~176 s (2.9 min) |
+| 70x (central) | ~274 s (4.6 min) |
+| 110x (high) | ~431 s (7.2 min) |
+
+All three stay far under the plan's 45-minute rule (section 6, "M3b"): even the pessimistic 110x estimate
+leaves a 6x margin. **Pass 1's 20 s per level needs no shortening.** If anything, there is enough headroom
+that a future pass could afford more simulated seconds per level for a steadier p95/p99 (the 20 s window
+here is short enough that a level with a slow start, such as a level the Autopilot does not reach a brick in
+for a few seconds, can bias its own mean down) — left to a later pass, since the committed `bench-physics.pass1.json`
+is this milestone's given file, not something to change here.
+
+### Pass 2 (planned; device numbers decide which are worth running)
+
+Only the combinations pass 1 leaves open, per the plan (section 6, "M3b", and section 5.5): on the
+**non-windmill** levels only (the windmills — village-dinner, village-na-melnice, village-rinok, Village-Dvorik —
+keep 100 velocity iterations; docs/PHYSICS.md "The solver" found nothing cheaper stable), 30/1/1, 20/1/1 and
+10/1/1; separately, 30/1/2 and 10/1/4 (docs/PHYSICS.md's two measured-stable alternatives for the windmills
+themselves, so these two are worth trying on *all* 15 levels); and threads 1 and 2 (today's "vita" profile is
+single-threaded; the plan's section 4.4 found three Jolt workers gave no wall-time gain and 2.4x the CPU on
+the Mac, but that was never checked on the Vita's four-core, three-usable-core ARM). Each needs its own
+`bench-physics.json` (same 15 levels, same `seconds`; a `velocitySteps`/`positionSteps`/`collisionSteps`/
+`threads` override and a distinct `label`) and its own device run, agreed with the user once pass 1's own
+device numbers are in (section 7, "Stop and agree the frame-rate target and the physics profile with the
+user before M7").
+
+### Device checklist (M3b)
+
+- [ ] the bench VPK installs and runs; the pass-1 CSV (`bench-physics.csv`) comes back;
+- [ ] the measured scale factor (`tools/bench_ratio.py` against the host CSV above; its mean-time ratio is
+      the number that replaces the 70x, since section 4.4 derives 70x from mean step times, not p95) replaces
+      the 70x estimate in this document, and the per-level estimates in section 4.4 are recomputed against it;
+- [ ] pass 2's combinations (above) are agreed with the user and, once run, their device CSVs come back too;
+- [ ] the frame-rate target and physics profile are agreed with the user before M7 starts.
 
 ## Decisions and findings
 

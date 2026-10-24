@@ -254,6 +254,16 @@ target_include_directories(mb_player_input_tests PRIVATE ${PROJECT_SOURCE_DIR}/a
 target_link_libraries(mb_player_input_tests PRIVATE mb_game)
 add_test(NAME mb_player_input_tests COMMAND mb_player_input_tests)
 
+# The physics bench's core (docs/VITA_PLAN.md M3b): loadBenchConfig's validation, settingsFor's layering,
+# the CSV formatting and appendCsv's header-once behaviour. Compiles app/bench/PhysicsBench.cpp straight in,
+# the same way other smokes above compile an app/ source directly, rather than a new library target. CPU
+# only, no game data: runLevel and runAll (which need a real Assets and real levels) are exercised by hand,
+# see the M3b PR description, not here.
+add_executable(mb_bench_tests test_bench.cpp ${PROJECT_SOURCE_DIR}/app/bench/PhysicsBench.cpp)
+target_include_directories(mb_bench_tests PRIVATE ${PROJECT_SOURCE_DIR}/app ${PROJECT_SOURCE_DIR}/app/bench)
+target_link_libraries(mb_bench_tests PRIVATE mb_game nlohmann_json::nlohmann_json)
+add_test(NAME mb_bench_tests COMMAND mb_bench_tests)
+
 # The particle definitions (the parser and what it reports) and the particle simulation, on made-up files with the real numbers: each
 # type's behaviour, beams and bolts, the system's handles and the batches. CPU only.
 add_executable(mb_particle_tests test_particles.cpp)
