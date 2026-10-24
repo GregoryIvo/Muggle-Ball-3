@@ -107,7 +107,7 @@ public:
 
 // Sorts a frame's draw items into the opaque and the blended lists. An item whose mesh does not exist is
 // left out after warnMissing; an item whose texture does not exist is kept after warnMissing and drawn
-// with the white texture (as for handle 0) — unlike sprites and effect batches below, which drop on a
+// with the white texture (as for handle 0); unlike sprites and effect batches below, which drop on a
 // missing texture. The lists keep their storage between frames; call collect() once per frame and read
 // the results until the next call.
 class DrawCollector {
