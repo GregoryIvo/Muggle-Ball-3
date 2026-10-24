@@ -217,8 +217,10 @@ public:
     int activeBodyCount() const;
     // The most the step allocator (PhysicsSettings::tempAllocatorBytes) has needed at once over this world's life,
     // in or out of its block: what a step would have taken from the block had it been big enough, even on a step
-    // that spilled to the heap. Sizing tempAllocatorBytes at or above this (with headroom) keeps every step inside
-    // the block. Zero until the first step() call.
+    // that spilled to the heap (every spilled allocation still live is counted). Mostly Jolt's per-step buffer of
+    // 488 bytes per maxContactConstraints, so it is measured per profile (docs/PHYSICS.md, "The Vita profile").
+    // Sizing tempAllocatorBytes at or above this (with headroom) keeps every step inside the block. Zero until the
+    // first step() call.
     std::size_t tempAllocatorPeakBytes() const;
 
     Mat4 pose(BodyId body) const;  // the body's frame, as given in BodyDesc::pose

@@ -15,6 +15,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <thread>
+#include <vector>
 
 namespace mb {
 
@@ -66,16 +67,18 @@ public:
             return nullptr;
         }
         const std::size_t padded = JPH::AlignUp(static_cast<std::size_t>(bytes), JPH_RVECTOR_ALIGNMENT);
-        // The high-water mark is what the block would have needed to serve this allocation without spilling,
-        // so it is tracked even when the allocation below falls through to the heap.
-        peak_ = std::max(peak_, top_ + padded);
+        // The high-water mark is what the block would have needed to serve everything live right now, this
+        // allocation included: what is in the block plus what spilled to the heap and is not yet freed.
+        peak_ = std::max(peak_, top_ + spilledLive_ + padded);
         if (top_ + padded > size_) {
             if (!loggedFallback_) {
                 loggedFallback_ = true;
                 logWarn("physics: the {} MiB step allocator overflowed, taking {} bytes from the heap (logged once)",
                         size_ >> 20, padded);
             }
-            return JPH::AlignedAllocate(bytes, JPH_RVECTOR_ALIGNMENT);
+            spilledLive_ += padded;
+            spilled_.push_back({JPH::AlignedAllocate(bytes, JPH_RVECTOR_ALIGNMENT), padded});
+            return spilled_.back().address;
         }
         void* address = block_ + top_;
         top_ += padded;
@@ -89,9 +92,17 @@ public:
         auto* p = static_cast<std::uint8_t*>(address);
         if (p >= block_ && p < block_ + size_) {
             top_ = static_cast<std::size_t>(p - block_);  // Jolt frees in reverse order of allocating
-        } else {
-            JPH::AlignedFree(address);
+            return;
         }
+        // A spilled block: Jolt frees in reverse order, so it is almost always the last one.
+        for (auto it = spilled_.rbegin(); it != spilled_.rend(); ++it) {
+            if (it->address == address) {
+                spilledLive_ -= it->bytes;
+                spilled_.erase(std::next(it).base());
+                break;
+            }
+        }
+        JPH::AlignedFree(address);
     }
 
     std::size_t peakBytes() const { return peak_; }
@@ -101,6 +112,12 @@ private:
     std::uint8_t* block_;
     std::size_t top_ = 0;
     std::size_t peak_ = 0;       // the most this allocator has needed at once, in or out of the block
+    std::size_t spilledLive_ = 0;  // bytes handed out from the heap and not yet freed
+    struct Spilled {
+        void* address;
+        std::size_t bytes;
+    };
+    std::vector<Spilled> spilled_;  // empty unless the block overflowed
     bool loggedFallback_ = false;
 };
 

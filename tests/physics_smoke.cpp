@@ -690,10 +690,10 @@ int measure(const MaterialLibrary& materials, const LevelCatalog& catalog, const
     // docs/PHYSICS.md, "The Vita profile": maxBodies is the next power of two at or above 2x the peak body count
     // (at least 512), maxBodyPairs 8x that and maxContactConstraints 4x that; these two are rule-derived from the
     // body peak, not measured on their own. tempAllocatorBytes is sized by a separate rule, from its own measured
-    // peak: the next whole MiB at or above 2x that peak, at least 1 MiB. That peak depends on the thread count and
-    // the maxBodyPairs/maxContactConstraints already in force as much as on the bodies in play (Jolt holds more of
-    // the step allocator live at once with several workers than with one), so pass --physics-profile to match the
-    // profile being sized, or this number is for a different thread count than the one that will use it.
+    // peak: the next whole MiB at or above 2x that peak, at least 1 MiB. That peak is mostly Jolt's per-step
+    // contact-constraint buffer, 488 bytes per maxContactConstraints in force (the thread count plays no part), so
+    // pass --physics-profile to match the profile being sized, or this number is for a different constraint count
+    // than the one that will use it.
     const std::uint32_t suggestedMaxBodies =
         std::bit_ceil(std::max<std::uint32_t>(512, static_cast<std::uint32_t>(peakBodiesOfAll) * 2));
     constexpr std::size_t kMiB = 1u << 20;

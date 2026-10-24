@@ -112,15 +112,18 @@ from them do not:
   **1024**); `maxBodyPairs` is 8x that (**8192**) and `maxContactConstraints` 4x that (**4096**) — both rules of
   thumb applied to the body peak, not separately measured quantities.
 - `tempAllocatorBytes` is the next whole MiB at or above twice the allocator's own measured peak, at least
-  1 MiB. The step allocator's peak depends on more than the bodies in play: **`--measure --physics-profile
-  vita`** (measuring with the Vita's own `threads = 0` and smaller `maxBodyPairs`/`maxContactConstraints`
-  already in force, not the desktop's) gives a peak of **2,187,184 bytes**, so 2 x 2,187,184 = 4,374,368 bytes,
-  **5 MiB (5,242,880 bytes)**. A bare `--measure` (the desktop profile: several worker threads, 65536
-  `maxBodyPairs`) measures the same levels at **16,179,120 bytes** instead — threads matter more than body
-  count here, because Jolt holds more of the step allocator live at once with several workers in flight than
-  with one, so the two profiles need different budgets even though they play identically (`droppedSteps()` is
-  zero either way). Always measure with `--physics-profile <name>` matching the profile being sized, or the
-  number is for a different thread count than the one that will use it.
+  1 MiB. The step allocator's peak is dominated not by the bodies in play but by a buffer Jolt takes from it
+  every step for the contact constraints: 488 bytes per `maxContactConstraints` (`ContactConstraintManager.cpp`,
+  `mMaxConstraints * cMaxConstraintSize` plus a `uint32` each), with about 188 KB of level-dependent data on top.
+  So a profile must be measured with its own `maxContactConstraints` in force: **`--measure --physics-profile
+  vita`** (4096 constraints) gives a peak of **2,187,184 bytes** (4096 x 488 = 1,998,848 plus 188,336), so
+  2 x 2,187,184 = 4,374,368 bytes, **5 MiB (5,242,880 bytes)**. A bare `--measure` (the desktop profile, 32768
+  constraints) measures the same levels at **16,179,120 bytes**, exactly (32768 - 4096) x 488 more; the thread
+  count and `maxBodyPairs` have no effect on it (measured on `knight-miss-1457` with `--threads 0` and `3` under
+  both profiles: identical peaks; Jolt's per-step body-pair buffer is sized by its own `mMaxInFlightBodyPairs`,
+  not by `maxBodyPairs`). The two profiles play identically (`droppedSteps()` is zero either way). Always
+  measure with `--physics-profile <name>` matching the profile being sized, and re-measure whenever
+  `maxContactConstraints` changes, or a Jolt upgrade changes the size of a contact constraint.
 
 Re-run `mb_physics_smoke --measure --physics-profile vita` and update this paragraph (and `PhysicsProfile.cpp`'s
 table) if new levels are added or a measured peak ever gets close to these numbers.

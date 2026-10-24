@@ -230,11 +230,12 @@ right next to the `MB3_PLATFORM_VITA` CMake variable it has always set.
   them awake at once** over all 83 levels and every starting configuration (both on `knight-miss-1457`). The rule
   (docs/PHYSICS.md, "The Vita profile") gives `maxBodies` 1024 (next power of two at or above 2x374),
   `maxBodyPairs` 8192, `maxContactConstraints` 4096. `tempAllocatorBytes` needed its own measurement run with
-  `--physics-profile vita` (not a bare `--measure`, which measures the desktop's several worker threads instead
-  of the Vita's single one): the step allocator's own peak then is **2,187,184 bytes**, giving **5 MiB**
-  (next whole MiB at or above 2x that). A bare `--measure` measures the same levels at **16,179,120 bytes**
-  instead — Jolt holds more of the step allocator live at once with several workers in flight than with one, so
-  the two profiles need different budgets though they play identically (`droppedSteps()` is zero either way).
+  `--physics-profile vita`, because the step allocator's peak is mostly Jolt's per-step contact-constraint buffer,
+  488 bytes per `maxContactConstraints`, so it must be measured with the profile's own constraint count in force:
+  the peak then is **2,187,184 bytes**, giving **5 MiB** (next whole MiB at or above 2x that). A bare `--measure`
+  (the desktop's 32768 constraints) measures the same levels at **16,179,120 bytes**, exactly (32768 - 4096) x 488
+  more; the thread count makes no difference (checked with `--threads 0` and `3` under both profiles). The two
+  profiles play identically (`droppedSteps()` is zero either way). Re-measure if `maxContactConstraints` changes.
   5 MiB is close to the 2-4 MiB the plan guessed (section 5.5) before anything measured it. The four windmill
   levels keep their own override at 100 velocity iterations, pinned separately from the base settings so a later
   retune of the other 79 levels cannot quietly drop them too. `--physics-profile <name>` (default

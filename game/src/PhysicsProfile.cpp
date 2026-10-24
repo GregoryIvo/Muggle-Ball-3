@@ -21,9 +21,9 @@ namespace {
 //     couple of frames instead of spiralling; droppedSteps() reports whenever it does not.
 //   - maxBodies, maxBodyPairs, maxContactConstraints: sized from the measured peak body count by a rule of
 //     thumb, not themselves separately measured; tempAllocatorBytes is sized the same way from its own
-//     measured peak, 2,187,184 bytes (measured with these settings already in force, in particular
-//     threads = 0: Jolt holds less of the step allocator live at once with one worker than with several,
-//     see docs/PHYSICS.md, "The Vita profile"). Re-measure both if threads or bodyMutexes ever change.
+//     measured peak, 2,187,184 bytes, measured with these settings already in force: the peak is mostly Jolt's
+//     per-step contact-constraint buffer, 488 bytes per maxContactConstraints (docs/PHYSICS.md, "The Vita
+//     profile"). Re-measure it if maxContactConstraints changes, or a Jolt upgrade changes a constraint's size.
 constexpr PhysicsSettings kVitaSettings{
     .fixedStep = 1.0f / 60.0f,
     .maxStepsPerCall = 4,
