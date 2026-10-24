@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../RenderCommon.h"
 #include "PipelineCache.h"
 #include "mb/engine/Renderer.h"
 
@@ -54,35 +55,9 @@ struct StreamBuffer {
     Uint32 capacity = 0;  // in bytes
 };
 
-// Consecutive sprites that share a texture, drawn with one call.
-struct SpriteRun {
-    SDL_GPUTexture* texture = nullptr;
-    Uint32 firstVertex = 0;
-    Uint32 vertexCount = 0;
-};
-
-// One effect batch after its handles are resolved: where its triangles are in the uploaded stream.
-struct EffectRun {
-    SDL_GPUTexture* texture = nullptr;
-    BlendMode blend = BlendMode::Additive;
-    bool depthTest = false;
-    bool colourOnly = false;
-    Uint32 firstVertex = 0;
-    Uint32 vertexCount = 0;
-};
-
-// A draw item after its handles are resolved, ready to sort.
-struct PendingDraw {
-    const DrawItem* item = nullptr;
-    const GpuMesh* mesh = nullptr;
-    SDL_GPUTexture* texture = nullptr;
-    PipelineKey pipeline;
-    float distanceSq = 0;  // from the eye, for back-to-front sorting
-};
-
 // The renderer's state. Device, resource creation and the public API live in Renderer.cpp;
 // render targets and frame recording live in RenderFrame.cpp.
-struct Renderer::Impl {
+struct Renderer::Impl : render::ResourceQuery {
     Window* window = nullptr;
     bool windowClaimed = false;
     bool initedVideo = false;
@@ -106,10 +81,9 @@ struct Renderer::Impl {
     StreamBuffer spriteBuffer;
     StreamBuffer effectBuffer;
 
-    std::vector<PendingDraw> opaqueDraws;   // kept between frames to reuse their storage
-    std::vector<PendingDraw> blendedDraws;
-    std::vector<SpriteRun> spriteRuns;
-    std::vector<EffectRun> effectRuns;
+    render::DrawCollector drawCollector;   // kept between frames to reuse its storage
+    std::vector<render::SpriteRun> spriteRuns;
+    std::vector<render::EffectRun> effectRuns;
     bool warnedMissingResource = false;
     bool swapchainFailed = false;
 
@@ -136,7 +110,7 @@ struct Renderer::Impl {
                           std::span<const DebugLine> lines, std::span<const Sprite> sprites,
                           std::span<const EffectBatch> effects);
 
-    void collectDraws(SDL_GPUTextureFormat colorFormat, const FrameParams& frame, std::span<const DrawItem> items);
+    void collectDraws(const FrameParams& frame, std::span<const DrawItem> items);
     void releaseStream(StreamBuffer& buffer);
     void* mapStream(StreamBuffer& buffer, std::size_t bytes, const char* what);
     void uploadStream(SDL_GPUCommandBuffer* cmd, StreamBuffer& buffer, Uint32 bytes);
@@ -147,13 +121,20 @@ struct Renderer::Impl {
                    SDL_GPUTexture* depth, Uint32 width, Uint32 height, const FrameParams& frame,
                    std::span<const DrawItem> items, std::span<const DebugLine> lines,
                    std::span<const Sprite> sprites, std::span<const EffectBatch> effects);
-    void drawMeshes(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, const Mat4& viewProj,
-                    const FrameParams& frame);
+    void drawMeshes(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, SDL_GPUTextureFormat colorFormat,
+                    const Mat4& viewProj, const FrameParams& frame);
     void drawEffects(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, SDL_GPUTextureFormat colorFormat,
                      const Mat4& viewProj);
     void drawSprites(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, SDL_GPUTextureFormat colorFormat,
                      Uint32 width, Uint32 height);
-    void warnMissing(const char* what, std::uint32_t handle);
+    // Resolves a texture handle to its GPU texture, falling back to the white texture (handle 0, or one that
+    // does not exist); one lookup per sprite or effect run, not per sprite or triangle.
+    SDL_GPUTexture* resolveTexture(TextureHandle handle) const;
+
+    // render::ResourceQuery: what the common draw-collection and vertex-building code asks about resources.
+    bool hasMesh(MeshHandle mesh) const override { return meshes.find(mesh) != meshes.end(); }
+    bool hasTexture(TextureHandle texture) const override { return textures.find(texture) != textures.end(); }
+    void warnMissing(const char* what, std::uint32_t handle) override;
 };
 
 }  // namespace mb

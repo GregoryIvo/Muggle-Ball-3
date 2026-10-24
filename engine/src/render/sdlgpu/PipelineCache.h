@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../RenderCommon.h"
 #include "mb/engine/Renderer.h"
 
 #include <SDL3/SDL_gpu.h>
@@ -9,45 +10,27 @@
 
 namespace mb {
 
-// Vertex layout of the DebugLine pipeline (the mesh pipelines use mb::Vertex).
-struct LineVertex {
-    Vec3 position;
-    Color color;
-};
-static_assert(sizeof(LineVertex) == 28);
-
-// Vertex layout of the Sprite pipeline: a pixel position, a texture coordinate and a tint.
-struct SpriteVertex {
-    Vec2 position;
-    Vec2 uv;
-    Color color;
-};
-static_assert(sizeof(SpriteVertex) == 32);
-
-// Everything that selects a graphics pipeline. Per-draw data (matrices, colours,
-// texture) is not part of it, so a handful of pipelines cover a whole level.
+// Everything that selects a graphics pipeline: the backend-neutral render::RenderState plus the one
+// SDL GPU detail it needs, the colour target's format.
 struct PipelineKey {
+    render::RenderState state;
     SDL_GPUTextureFormat colorFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
-    bool blend = false;
-    BlendFactor srcBlend = BlendFactor::One;  // only meaningful when blend is set
-    BlendFactor dstBlend = BlendFactor::Zero;
-    CullMode cull = CullMode::Back;
-    bool depthWrite = true;
-    bool depthTest = true;
-    bool lines = false;  // the DebugLine pipeline; blend, cull and depth flags are fixed for it
-    bool sprites = false;  // the Sprite pipeline: alpha blending, no culling, no depth
-    bool effects = false;  // the Effect pipeline (EffectVertex): no culling, no depth write; blend and depthTest as set
 
-    // Resolves BlendMode::AlphaBlend and Additive to their factors, so materials that blend the same way
-    // share one pipeline however they were described.
-    static PipelineKey forMaterial(SDL_GPUTextureFormat colorFormat, const MaterialParams& material);
-    static PipelineKey forLines(SDL_GPUTextureFormat colorFormat);
-    static PipelineKey forSprites(SDL_GPUTextureFormat colorFormat);
-    // `blend` is an EffectBatch's: Additive, or alpha blending for any other.
-    static PipelineKey forEffects(SDL_GPUTextureFormat colorFormat, BlendMode blend, bool depthTest);
+    static PipelineKey forMaterial(SDL_GPUTextureFormat colorFormat, const MaterialParams& material) {
+        return {render::RenderState::forMaterial(material), colorFormat};
+    }
+    static PipelineKey forLines(SDL_GPUTextureFormat colorFormat) {
+        return {render::RenderState::forLines(), colorFormat};
+    }
+    static PipelineKey forSprites(SDL_GPUTextureFormat colorFormat) {
+        return {render::RenderState::forSprites(), colorFormat};
+    }
+    static PipelineKey forEffects(SDL_GPUTextureFormat colorFormat, BlendMode blend, bool depthTest) {
+        return {render::RenderState::forEffects(blend, depthTest), colorFormat};
+    }
 
     // Unique per distinct key; also used to sort draws so equal pipelines sit together.
-    std::uint64_t pack() const;
+    std::uint64_t pack() const { return (static_cast<std::uint64_t>(colorFormat) << 32) | state.pack(); }
 };
 
 // Owns the compiled shaders and creates graphics pipelines lazily, one per key.
