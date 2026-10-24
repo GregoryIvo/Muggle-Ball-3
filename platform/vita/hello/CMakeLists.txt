@@ -8,7 +8,8 @@ target_link_libraries(mb3_vita_hello PRIVATE
   ScePower_stub SceAppUtil_stub SceIofilemgr_stub)
 # No explicit pthread: the toolchain's -pthread (which Jolt carries) links the whole archive, and a second
 # -lpthread would define every symbol twice.
+# Its own title ID (not the game's), so both can be installed on the console at once (docs/VITA_PLAN.md M5b).
 mb3_vita_vpk(mb3_vita_hello
-  TITLE_ID ${MB3_VITA_TITLE_ID}
-  NAME "${MB3_VITA_APP_NAME}"
+  TITLE_ID MUGB00009
+  NAME "MB3 Hello"
   VERSION ${MB3_VITA_APP_VERSION})

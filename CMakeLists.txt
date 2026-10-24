@@ -57,8 +57,13 @@ if(MB3_PLATFORM_VITA)
   if(MB3_VITA_BUILD_ENGINE)
     add_subdirectory(engine)
     add_subdirectory(game)
+    # app/ builds mb_app (not the desktop MuggleBall3 exe: its CMakeLists.txt returns early under
+    # MB3_PLATFORM_VITA) for the Vita's own entry point below to link.
+    add_subdirectory(app)
     # The M4a device render test (docs/VITA.md "GL back end"): needs mb_engine, so it comes after it.
     add_subdirectory(platform/vita/render_test)
+    # The game's own VPK (M5b): needs mb_app, so it comes after app/.
+    add_subdirectory(platform/vita/game)
   endif()
 else()
   add_subdirectory(engine)

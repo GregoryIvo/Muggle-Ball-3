@@ -1,5 +1,19 @@
-add_executable(MuggleBall3 main.cpp FormViewer.cpp FrontEnd.cpp FrontEndAudio.cpp Game.cpp GameAudio.cpp PlayerInput.cpp PlaySession.cpp)
-target_link_libraries(MuggleBall3 PRIVATE mb_engine mb_game)
+# The game as an application, independent of the harness around it: the front end, its sound, the player's
+# input and the level session, plus runGame() itself (Game.cpp). Built once here and linked by both the
+# desktop MuggleBall3 below (with main.cpp's developer harness and FormViewer.cpp) and the Vita's own, much
+# thinner entry point (platform/vita/game), so neither lists these sources a second time.
+add_library(mb_app STATIC FrontEnd.cpp FrontEndAudio.cpp GameAudio.cpp PlayerInput.cpp PlaySession.cpp Game.cpp)
+target_include_directories(mb_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(mb_app PUBLIC mb_engine mb_game)
+
+# The Vita's entry point (platform/vita/game) links mb_app directly and skips this desktop harness: main.cpp
+# is 767 lines of developer tooling (the level viewer, screenshots, sound tests) that the console does not need.
+if(MB3_PLATFORM_VITA)
+  return()
+endif()
+
+add_executable(MuggleBall3 main.cpp FormViewer.cpp)
+target_link_libraries(MuggleBall3 PRIVATE mb_app)
 
 if(APPLE)
   set(MB3_PLIST_ICON_ENTRY "")
