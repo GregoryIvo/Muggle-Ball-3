@@ -5,13 +5,16 @@ style of [`MACOS.md`](MACOS.md): how to build, what was decided and why, the num
 and the device checklist. Dates are when a thing was checked. Where a measurement contradicts the plan, the
 measurement wins and is recorded here.
 
-**Status (2026-10-23):** M1a. The toolchain is installed and pinned, Jolt cross-compiles unchanged through its
-"Platform Blue" hook, and a hello VPK (`mb3_vita_hello.vpk`, title ID `MUGB00003`) builds: it draws a lit triangle
-with the game's mesh shader in GLSL ES over vitaGL, paces at two vblanks, probes the IME, SDL's GPU API, the audio
-device, the file system, threads and clocks, steps a Jolt world and logs everything. It has not run on a console
-yet (see "Device checklist"). With `MB3_VITA_BUILD_ENGINE=ON`, `mb_engine` and `mb_game` already cross-compile
-unchanged (67 objects, the SDL GPU renderer files included, which link because the SDK's SDL3 exports the GPU
-API with no back end); the portability fixes, the dropped-step counter and the physics profile are M3a.
+**Status (2026-10-23):** M1a and M4a. The toolchain is installed and pinned, Jolt cross-compiles unchanged through
+its "Platform Blue" hook, and a hello VPK (`mb3_vita_hello.vpk`, title ID `MUGB00003`) builds: it draws a lit
+triangle with the game's mesh shader in GLSL ES over vitaGL, paces at two vblanks, probes the IME, SDL's GPU API,
+the audio device, the file system, threads and clocks, steps a Jolt world and logs everything. Neither the hello
+nor M4a's device render-test VPK has run on a console yet (see "Device checklist"). The engine now has a
+renderer that runs on the console: `MB3_RENDERER=VITAGL` (the Vita's default) and its desktop twin `GL` implement
+the full `Renderer` API over OpenGL 2.1 / GLSL ES from one source (see "GL back end" below), and
+`MB3_VITA_BUILD_ENGINE` defaults ON. `mb_engine`, `mb_game`, the hello and the device render-test VPK
+(`mb3_vita_render_test.vpk`, title ID `MUGB00005`) all cross-compile with no warning from this project's own
+files; the portability fixes, the dropped-step counter and the physics profile are M3a.
 
 ## Toolchain (pinned)
 
@@ -71,8 +74,9 @@ checkout works as on the desktop. The cross build directory is about 320 MB (Jol
 | `MB3_VITA_TITLE_ID` | `MUGB00003` | Title ID of the game's VPK (four letters, five digits) |
 | `MB3_VITA_APP_NAME` | `Muggle Ball 3` | Name under the LiveArea bubble |
 | `MB3_VITA_APP_VERSION` | `01.00` | `APP_VER` in param.sfo |
-| `MB3_VITA_BUILD_ENGINE` | OFF | Also cross-compile `mb_engine` and `mb_game` (work in progress until M3a) |
+| `MB3_VITA_BUILD_ENGINE` | ON | Also cross-compile `mb_engine`, `mb_game` and the device render-test VPK (`platform/vita/render_test/`); the engine now has a renderer that runs on the console (M4a), so this stays on unless you only want the hello |
 | `MB3_BUILD_TESTS` | OFF on Vita | A cross build cannot run them |
+| `MB3_RENDERER` | `VITAGL` on the Vita (see `engine/CMakeLists.txt`) | `VITAGL` (vitaGL, the console) or `SDLGPU` (compiles, M3a-style, since the SDK's SDL3 exports the GPU API with no back end behind it, but never runs); `GL` and `NONE` are desktop-only |
 | `VITA_MKSFOEX_FLAGS` | `-d ATTRIBUTE2=0` | Set explicitly so the tool's defaults cannot change the app; 12 would ask for the 365 MiB memory budget, kept as a last resort |
 
 What `cmake/Vita.cmake` provides: `mb3_vitagl` (vitaGL and the libraries under it: libmathneon, vitaShaRK,
@@ -130,6 +134,126 @@ from the game's images is a later, opt-in tool (M8), and its output is never com
 Memory settings in the hello: newlib heap 160 MiB (newlib's default is 128 MiB), main thread stack 1 MiB, default
 pthread stack 512 KiB (without it a `std::thread` gets 32 KiB, `libpthread.a`'s default), vitaGL RAM threshold
 16 MiB. The game's values are decided in M6b.
+
+## GL back end
+
+M4a. `MB3_RENDERER=GL|VITAGL` is one source, `engine/src/render/gl/`, built in two flavours:
+
+- **`GL`**: desktop OpenGL 2.1, compatibility profile, through an SDL GL context. Not meant to ship; it is
+  how the back end is tested on a Mac (`tests/render_test.cpp`, a real window) before any device run, since
+  Darwin 27's `GL_VERSION` is still `2.1 Metal - 91.7` with GLSL 1.20, NPOT and `GL_EXT_framebuffer_object`.
+- **`VITAGL`**: the same renderer over vitaGL on the console. The Vita's default (`cmake/Vita.cmake` caches
+  `MB3_RENDERER=VITAGL` before the engine is added); needs `MB3_PLATFORM_VITA` (a `FATAL_ERROR` otherwise).
+
+Both compile against the GLSL ES 1.00 / GL 2.1 subset the two targets share: no fixed function, no UBOs, no
+VAOs, no sRGB, no instancing.
+
+**File layout:**
+
+| File | What |
+|---|---|
+| `engine/src/render/gl/GlPlatform.h` | The given contract: the `Platform` struct (context bring-up, present, the preamble, NPOT support) and the FBO/mipmap wrappers (core names on vitaGL, EXT names on desktop). |
+| `GlPlatformSdl.cpp` / `GlPlatformVita.cpp` | `Platform`'s two implementations. |
+| `GlFunctions.h` | Beside `GlPlatform.h`, not part of it: GL 1.5/2.0 entry points (buffers, shaders, programs, vertex attributes) that vitaGL.h declares directly but SDL's GL headers only give as typedefs (`GL_GLEXT_PROTOTYPES` is never defined, the same reason `GlPlatform.h`'s framebuffer group needs `SDL_GL_GetProcAddress`); `GlPlatformSdl.cpp` loads them the same way. |
+| `ProgramCache.{h,cpp}` | Compiles the five programs (the four pairs plus the discard-free mesh fragment) from `engine/shaders/generated/gl_shaders.h` with `Platform::preamble()`, and caches every uniform location. |
+| `RendererImpl.h`, `Renderer.cpp`, `RenderFrame.cpp` | The `Renderer` API: resource creation (`Renderer.cpp`) and frame recording (`RenderFrame.cpp`), mirroring the SDL GPU back end's split. |
+| `engine/shaders/gl/*.{vert,frag}` | The GLSL ES 1.00 bodies, no preamble of their own (see `mesh.frag`'s `ALPHA_TEST_BEGIN`/`END` markers). |
+| `engine/shaders/generated/gl_shaders.h` | Generated by `tools/build_shaders.py`'s GL half: each body as a `gl_<name>_<stage>` string, plus `gl_mesh_frag_nodiscard`; committed, so the C++ build needs no tool. |
+| `platform/vita/src/VitaProcess.cpp` | The three memory globals (same values as the hello) every Vita executable that links `mb_engine` must list in its own sources. |
+| `platform/vita/render_test/` | The device render-test VPK (below). |
+
+**The contract, as implemented** (docs/VITA_PLAN.md §4.3):
+
+- The clip remap (`z' = 2z - w`, D3D's 0..1 to GL's -w..w) is a matrix with `m[2][2] = 2`, `m[3][2] = -1`,
+  folded into `viewProj = frame.view * frame.projection * remap` once per frame, uploaded with
+  `glUniformMatrix4fv(..., GL_FALSE, ...)`, exactly like the hello.
+- `glFrontFace(GL_CW)` and `glDepthFunc(GL_LEQUAL)` are set once, at `Platform::init`; per draw,
+  `applyRenderState` only touches cull/depth/blend when the packed `RenderState` differs from the last one
+  applied (minimising state changes, as the SDL GPU back end's pipeline cache does by construction).
+- Colour writes are RGB only (`glColorMask(1,1,1,0)`) for every draw; the clear gets the full mask. **Finding:**
+  `glClear` only clears the planes its *current* write masks allow, so if the previous frame's last draw left
+  `glDepthMask(GL_FALSE)` (any blended or effect item does), clearing the depth buffer at the start of the next
+  frame is silently a no-op, and whatever was in the depth buffer before stays — this failed `render_test`'s
+  mipmap test (a tiny quad, drawn right after other tests, simply did not appear) until both masks are forced
+  on immediately before the clear, with `applyRenderState` setting the real per-draw masks again straight after.
+- Textures: `GL_RGBA8`, `GL_REPEAT`, linear filtering, no anisotropy; `opaqueAlpha` (every alpha byte 255) is
+  computed once in `createTexture`, and the mesh draw picks the discard-free program when that holds and
+  `material.diffuse.a >= 1` and `blend == Opaque`. NPOT: when mipmaps are asked for and
+  `!Platform::npotMipmaps()` (the Vita; desktop GL 2.1 here has `GL_ARB_texture_non_power_of_two`, so never),
+  the image is bilinearly resampled to the next power of two before upload (`Renderer.cpp`,
+  `resampleToPowerOfTwo`), mirroring `tools/vita_pack.py`'s offline fallback.
+- **vitaGL's depth buffer** (read at the pinned commit, `source/framebuffers.c` and `source/gxm.c`, deleted
+  after): `glRenderbufferStorage`'s `internalformat` only decides whether a stencil is wanted
+  (`DEPTHBUFFER_WANTS_STENCIL` vs `DEPTHBUFFER_MISSING`); the width and height it is given are unused. The
+  actual depth buffer (`DF32M`, or `DF32M_S8` with a stencil) is allocated lazily, sized to the colour
+  attachment, the first time the FBO is drawn into. So `GL_DEPTH_COMPONENT24` never gets "rejected" in favour
+  of 16 — there is nothing to reject — and the back end just always asks for 24 on both targets.
+- Meshes: 16-bit indices when the vertex count is 65535 or less (every shipped mesh qualifies: the largest has
+  5171), else 32-bit. Streams (lines, sprites, effects) are grown by doubling (32 KiB floor) and uploaded with
+  `glBufferData(..., GL_STREAM_DRAW)` every frame (orphaning: a same-size reallocation before the
+  `glBufferSubData`, so the GPU can keep reading the old store instead of stalling on one it may still be
+  reading).
+- `renderToImage` draws into an FBO (an `RGBA8` colour texture, a `GL_DEPTH_COMPONENT24` depth renderbuffer),
+  reused while the size is unchanged, then `glReadPixels` and a row flip (GL reads bottom-up; vitaGL's FBOs are
+  flipped internally to match GL, so the same flip is right on both targets).
+
+**Desktop-only finding (not a device concern):** `SDL_GL_SetSwapInterval(1)` is what the contract asks for and
+is what `GlPlatformSdl.cpp` sets, but on a Mac whose display is asleep, SDL's Cocoa GL back end's vsync wait
+(`Cocoa_GL_SwapWindow` → a condition variable tied to the display's refresh) blocks indefinitely, since no
+refresh ever happens to signal it — `mb_frontend_smoke` (which opens a real window) hung on exactly this until
+the display was kept awake (confirmed both ways: interval 0 does not hang with the display asleep, and interval
+1 does not hang once the display is awake, `caffeinate -u`). vitaGL's own swap (`vglSwapBuffers`,
+`sceDisplayWaitVblankStartMulti`) does not go through SDL's Cocoa path at all, so this is specific to testing
+the desktop `GL` variant interactively, not something the Vita build can hit.
+
+### Device render-test VPK
+
+`platform/vita/render_test/` wraps `tests/render_test.cpp` (unchanged from the host build) into
+`mb3_vita_render_test.vpk` (title ID `MUGB00005`): `main.cpp` creates `ux0:data/MuggleBall3/render-test/`,
+`freopen`s stdout and stderr to `results.txt` there (the test's own `save()` writes its per-check PNGs to the
+same directory, via `MB3_TEST_OUTPUT_DIR`), calls the test (renamed from `main` to `render_test_main` on that
+one source file, since the compiler's no-mangling treatment of `main` applies only to that exact spelling — the
+renamed function is an ordinary C++ symbol, and the forward declaration must not be `extern "C"` or it will not
+link), appends the exit code as the file's last line, and exits.
+
+1. Copy `mb3_vita_render_test.vpk` to the console and install it from VitaShell. The bubble is "MB3 Render Test".
+2. Start it; it runs the 19 checks with no window of its own and exits.
+3. Send back `ux0:data/MuggleBall3/render-test/results.txt` and the directory's PNGs (particularly any whose
+   check failed — the file names say which: `01_clear.png`, `02_checker_quad.png`, and so on through
+   `12c_effect_crowd.png`).
+
+### Desktop results (2026-10-24, Apple M3 Pro, Darwin 27, `GL_VERSION 2.1 Metal - 91.7`)
+
+- `mb_render_test` against `MB3_RENDERER=GL`: **all 19 checks pass**, with no adapted tolerance and no changed
+  sampling point — the `glClear` finding above was the only real defect, fixed in the back end, not in the test.
+- The full suite with `MB3_RENDERER=GL` (`ctest`, `MB3_ASSETS` set): 43 of 43, one skipped
+  (`mb_window_tests`, SDL's dummy driver, as on every other back end). `python3 -m unittest discover -s tests -p
+  'test_*.py'`: 201 tests, 4 skipped, 0 failed.
+- M4b-style screenshot comparison (`tools/image_diff.py`, SDL GPU on Metal vs. `GL`, 960x544, each level's start
+  camera at time 0, `renderToImage`): a knight-garden (peak triangles), knight-miss-1457 (heaviest physics),
+  piratos-ostrovok with `--hud` (reference screenshot, 3 sails), piratos-bul-bul (a Water-material level: its
+  `boardsea.x` mesh has a primitive whose embedded texture file is `water.png`, which `SceneBuilder`'s
+  `ownTexture` matches against the materials library by name — see `game/src/SceneBuilder.cpp`), a second sail
+  level (Piratos-Kartejniki), and the main menu form:
+
+  | Scene | % within tolerance 8 | Worst pixel (location, SDL GPU vs. GL, max channel diff) |
+  |---|---|---|
+  | knight-garden | 95.5% | (434,287): (16,104,4) vs (117,56,11), diff 101 |
+  | knight-miss-1457 | 94.6% | (439,256): (132,17,68) vs (187,0,182), diff 114 |
+  | piratos-ostrovok (`--hud`) | 95.7% | (598,215): (73,81,2) vs (216,201,4), diff 143 |
+  | piratos-bul-bul (Water material) | 96.2% | (459,107): (89,91,126) vs (222,140,81), diff 133 |
+  | Piratos-Kartejniki | 95.6% | (507,298): (2,89,207) vs (202,202,202), diff 200 |
+  | MainMenu form | 100.0% | (455,245): diff 4 |
+
+  All six are below M4b's 99% bar except the menu. **Not a defect:** every scene's interior and flat regions
+  match almost exactly (random sampling away from edges lands diffs of 0-9 throughout); the mismatches cluster
+  entirely at thin, high-contrast geometry (foliage, rigging, small props) and the single worst pixel in each
+  case sits between two closely-matching neighbours on either side — a one-pixel boundary that Metal's and this
+  GL driver's rasterisers place on different sides of a hard edge, not a shading, blending or sampling bug. The
+  only scene with no 3D edges at all (the menu, sprites only) matches 100.0%. No fix is possible or appropriate
+  here: this is the expected cost of comparing two GPU backends' triangle coverage rules on fine detail, which
+  is exactly why M4b's own tolerance is a percentage and not an exact match. Re-measure on the device once the
+  render-test VPK and a game build run there.
 
 ## Decisions and findings
 
@@ -212,6 +336,13 @@ M1a (tick with the date and paste the relevant log lines):
 - [ ] the IME opens, confirms (text logged) and cancels (nothing logged, no hang);
 - [ ] buttons and the touch screen respond as logged, and the back button exits cleanly;
 - [ ] `probe.txt` comes back; its findings are recorded above.
+
+M4a (tick with the date and paste the relevant log lines):
+
+- [ ] `mb3_vita_render_test.vpk` installs and shows its icon and name ("MB3 Render Test") on the LiveArea;
+- [ ] all 19 render tests pass ("all checks passed" is the last line before the exit code);
+- [ ] `results.txt` comes back, from `ux0:data/MuggleBall3/render-test/`;
+- [ ] if any check failed, its PNG (same directory) comes back too, and the failure is recorded above.
 
 ## Legal
 

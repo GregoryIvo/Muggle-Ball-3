@@ -11,6 +11,13 @@ included here.
 - PlayStation Vita port, milestone M1a: the VitaSDK cross build (`cmake/Vita.cmake`),
   Jolt through its Platform Blue hook, a hello VPK that probes the console, a
   placeholder LiveArea set and `docs/VITA.md`. The desktop build is unchanged.
+- PlayStation Vita port, milestone M4a: a GL back end (`engine/src/render/gl/`,
+  `MB3_RENDERER=GL|VITAGL`) implementing the full `Renderer` API over OpenGL 2.1
+  (desktop, through SDL, for testing) and vitaGL (the console), from one source;
+  the Vita cross build now defaults to it (`MB3_VITA_BUILD_ENGINE` is ON) and
+  builds a device render-test VPK (`platform/vita/render_test/`, title ID
+  `MUGB00005`). `tools/build_shaders.py` gained a GL half and `tools/image_diff.py`
+  compares screenshots between back ends.
 
 ### Changed
 - Renderer split into a backend-neutral part (`engine/src/render/RenderCommon.*`:

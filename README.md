@@ -45,7 +45,7 @@ barrels and the turn of the projectiles are played).
 | `platform/macos/` | App bundle metadata |
 | `platform/vita/` | PlayStation Vita: the hello that probes the console, Jolt's platform header, what newlib lacks, and the placeholder LiveArea set (see [`docs/VITA.md`](docs/VITA.md)) |
 | `scripts/` | `package_macos.sh`: universal build, ad-hoc signing, Developer ID signing and notarization |
-| `tools/` | Asset pipeline: `convert_assets.py` runs the converters for levels (`mb3level.py`), meshes (`x2glb.py`), materials, sounds and music (`sounds.py`), textures, the menus, strings and fonts (`ui.py`) and the level list (`campaign.py`), object and particle definitions (`objects.py`), and on macOS the app icon (`make_icon.py`); also the MoleBox dumper, the shader compiler and the Vita LiveArea placeholder (`vita_livearea.py`) |
+| `tools/` | Asset pipeline: `convert_assets.py` runs the converters for levels (`mb3level.py`), meshes (`x2glb.py`), materials, sounds and music (`sounds.py`), textures, the menus, strings and fonts (`ui.py`) and the level list (`campaign.py`), object and particle definitions (`objects.py`), and on macOS the app icon (`make_icon.py`); also the MoleBox dumper, the shader compiler (`build_shaders.py`, SDL GPU and GL), the Vita LiveArea placeholder (`vita_livearea.py`) and a PNG screenshot comparison (`image_diff.py`) |
 | `docs/` | Architecture, level format, converted asset formats (`ASSET_FORMATS.md`), levels in the physics world (`PHYSICS.md`), sound and music (`AUDIO.md`), macOS packaging (`MACOS.md`), the PlayStation Vita port (`VITA.md`, its plan `VITA_PLAN.md`), save files (`SAVES.md`), what the object definitions say about gameplay (`OBJECTS.md`), the rules of play and the footage behind them (`GAMEPLAY.md`), how the data was recovered |
 | `tests/` | C++ and Python tests; the ones that read the game data are skipped unless `MB3_ASSETS` is set |
 
@@ -65,6 +65,10 @@ fetched. Use `-G Xcode` instead of Ninja to get an Xcode project. This build use
 Homebrew's SDL3, so it only runs on a Mac that has it, for its architecture only.
 Adding `-DMB3_RENDERER=NONE` builds the renderer as a stub with no GPU API: the
 `Renderer` constructor throws, and `mb_render_test` and the other GPU tests skip.
+Adding `-DMB3_RENDERER=GL` builds the same renderer API against desktop OpenGL 2.1
+through SDL instead of the SDL3 GPU API: the same back end `VITAGL` uses on the
+Vita, so `mb_render_test` and a window exercise it here before any device run
+(see [`docs/VITA.md`](docs/VITA.md), "GL back end").
 
 ### macOS app, universal binary, packaging
 
