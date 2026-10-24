@@ -8,8 +8,6 @@
 #include <memory>
 #include <span>
 
-struct SDL_GPUDevice;
-
 namespace mb {
 
 class Window;
@@ -142,9 +140,9 @@ struct EffectBatch {
     bool colourOnly = false;
 };
 
-// The SDL3 GPU API underneath picks Metal on macOS and Vulkan or Direct3D 12
-// elsewhere, so nothing above this layer is platform-specific. Shaders are
-// GLSL compiled ahead of time (tools/build_shaders.py) to SPIR-V and MSL.
+// The back end is chosen when the program is built (MB3_RENDERER): the SDL3 GPU API on desktop (Metal on
+// macOS, Vulkan or Direct3D 12 elsewhere), whose GLSL shaders are compiled ahead of time by
+// tools/build_shaders.py; other back ends live beside it in engine/src/render/.
 class Renderer {
 public:
     // Headless: a GPU device with no window, for renderToImage() (screenshots, tests).

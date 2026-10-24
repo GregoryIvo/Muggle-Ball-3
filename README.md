@@ -39,7 +39,7 @@ barrels and the turn of the projectiles are played).
 
 | Path | What it is |
 |---|---|
-| `engine/` | Platform-neutral runtime: window and input, GPU renderer and shaders, model and image loading, physics (`PhysicsWorld` over Jolt), audio (Ogg Vorbis decoding, mixer, device), logging, paths |
+| `engine/` | Platform-neutral runtime: window and input, GPU renderer and shaders (back end chosen by `MB3_RENDERER`: `engine/src/render/sdlgpu/` for the SDL3 GPU API, `engine/src/render/none/` a stub for builds with no GPU API, shared code in `engine/src/render/RenderCommon.*`), model and image loading, physics (`PhysicsWorld` over Jolt), audio (Ogg Vorbis decoding, mixer, device), logging, paths |
 | `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, level physics (`PhysicsScene`), the rules of play (`GameSession`, `BallReach`, the autopilot `Autopilot`), the level's special objects (`SpecialObjects`), the prizes (`Prizes`, the session's `SessionPrizes.cpp`), the weapons and the strikes of the prizes (`Weapons`), the sails (`Cloth`, `ClothPlan`), objects that follow paths (`PathPlayer`), the particle systems (`ParticleDef`, `ParticleSystem`, `ParticleDraw`), what a session looks and sounds like (`PlayScene`, `ObjectEffects`, `BrickEffects`, `PrizeScene`, `PrizeHud`, `Billboard`, `BatBarrels`, `WeaponScene`, `WeaponEffects`, `ClothDraw`, `PlaySounds`), camera, sound library, save data; the 2D UI (bitmap fonts, string table, menu forms, the menu screens and their flow, the HUD) |
 | `app/` | Executable entry point: the game's front end and its play session (`PlaySession`), the level viewer (with physics and music) and the menu form viewer |
 | `platform/macos/` | App bundle metadata (the only per-platform code so far) |
@@ -62,6 +62,8 @@ SDL3 and nlohmann/json come from Homebrew if installed (`brew install sdl3
 nlohmann-json`) and are fetched by CMake otherwise; stb and cgltf are always
 fetched. Use `-G Xcode` instead of Ninja to get an Xcode project. This build uses
 Homebrew's SDL3, so it only runs on a Mac that has it, for its architecture only.
+Adding `-DMB3_RENDERER=NONE` builds the renderer as a stub with no GPU API: the
+`Renderer` constructor throws, and `mb_render_test` and the other GPU tests skip.
 
 ### macOS app, universal binary, packaging
 

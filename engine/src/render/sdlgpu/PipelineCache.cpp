@@ -83,97 +83,23 @@ SDL_GPUBlendFactor toSdl(BlendFactor factor) {
     return SDL_GPU_BLENDFACTOR_ONE;
 }
 
-SDL_GPUColorTargetBlendState blendState(const PipelineKey& key) {
-    SDL_GPUColorTargetBlendState state{};
+SDL_GPUColorTargetBlendState blendState(const render::RenderState& state) {
+    SDL_GPUColorTargetBlendState blend{};
     // The alpha channel is never written: it keeps the clear value, so screenshots
     // stay opaque whatever the textures' alpha was.
-    state.enable_color_write_mask = true;
-    state.color_write_mask = SDL_GPU_COLORCOMPONENT_R | SDL_GPU_COLORCOMPONENT_G | SDL_GPU_COLORCOMPONENT_B;
-    state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-    state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
-    state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
-    state.color_blend_op = SDL_GPU_BLENDOP_ADD;
-    state.enable_blend = key.blend;
-    state.src_color_blendfactor = key.blend ? toSdl(key.srcBlend) : SDL_GPU_BLENDFACTOR_ONE;
-    state.dst_color_blendfactor = key.blend ? toSdl(key.dstBlend) : SDL_GPU_BLENDFACTOR_ZERO;
-    return state;
+    blend.enable_color_write_mask = true;
+    blend.color_write_mask = SDL_GPU_COLORCOMPONENT_R | SDL_GPU_COLORCOMPONENT_G | SDL_GPU_COLORCOMPONENT_B;
+    blend.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+    blend.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
+    blend.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+    blend.color_blend_op = SDL_GPU_BLENDOP_ADD;
+    blend.enable_blend = state.blend;
+    blend.src_color_blendfactor = state.blend ? toSdl(state.srcBlend) : SDL_GPU_BLENDFACTOR_ONE;
+    blend.dst_color_blendfactor = state.blend ? toSdl(state.dstBlend) : SDL_GPU_BLENDFACTOR_ZERO;
+    return blend;
 }
 
 }  // namespace
-
-PipelineKey PipelineKey::forMaterial(SDL_GPUTextureFormat colorFormat, const MaterialParams& material) {
-    PipelineKey key;
-    key.colorFormat = colorFormat;
-    key.cull = material.cull;
-    key.depthWrite = material.depthWrite;
-    key.depthTest = material.depthTest;
-    switch (material.blend) {
-        case BlendMode::Opaque:
-            break;
-        case BlendMode::AlphaBlend:
-            key.blend = true;
-            key.srcBlend = BlendFactor::SrcAlpha;
-            key.dstBlend = BlendFactor::InvSrcAlpha;
-            break;
-        case BlendMode::Additive:
-            key.blend = true;
-            key.srcBlend = BlendFactor::SrcAlpha;
-            key.dstBlend = BlendFactor::One;
-            break;
-        case BlendMode::Custom:
-            key.blend = true;
-            key.srcBlend = material.srcBlend;
-            key.dstBlend = material.dstBlend;
-            break;
-    }
-    return key;
-}
-
-PipelineKey PipelineKey::forSprites(SDL_GPUTextureFormat colorFormat) {
-    PipelineKey key;
-    key.colorFormat = colorFormat;
-    key.blend = true;
-    key.srcBlend = BlendFactor::SrcAlpha;
-    key.dstBlend = BlendFactor::InvSrcAlpha;
-    key.cull = CullMode::None;
-    key.depthWrite = false;
-    key.depthTest = false;
-    key.sprites = true;
-    return key;
-}
-
-PipelineKey PipelineKey::forEffects(SDL_GPUTextureFormat colorFormat, BlendMode blend, bool depthTest) {
-    PipelineKey key;
-    key.colorFormat = colorFormat;
-    key.blend = true;
-    key.srcBlend = BlendFactor::SrcAlpha;
-    key.dstBlend = blend == BlendMode::Additive ? BlendFactor::One : BlendFactor::InvSrcAlpha;
-    key.cull = CullMode::None;
-    key.depthWrite = false;
-    key.depthTest = depthTest;
-    key.effects = true;
-    return key;
-}
-
-PipelineKey PipelineKey::forLines(SDL_GPUTextureFormat colorFormat) {
-    PipelineKey key;
-    key.colorFormat = colorFormat;
-    key.cull = CullMode::None;
-    key.depthWrite = false;
-    key.lines = true;
-    return key;
-}
-
-std::uint64_t PipelineKey::pack() const {
-    // The blend factors are D3DBLEND numbers, 1 to 10, which fit four bits.
-    const std::uint64_t factors =
-        blend ? (static_cast<std::uint64_t>(srcBlend) << 4) | static_cast<std::uint64_t>(dstBlend) : 0;
-    return (static_cast<std::uint64_t>(colorFormat) << 16) | (static_cast<std::uint64_t>(effects) << 15) |
-           (static_cast<std::uint64_t>(sprites) << 14) |
-           (static_cast<std::uint64_t>(lines) << 13) |
-           (static_cast<std::uint64_t>(depthTest) << 12) | (static_cast<std::uint64_t>(depthWrite) << 11) |
-           (static_cast<std::uint64_t>(cull) << 9) | (static_cast<std::uint64_t>(blend) << 8) | factors;
-}
 
 PipelineCache::PipelineCache(SDL_GPUDevice* device, SDL_GPUTextureFormat depthFormat)
     : device_(device), depthFormat_(depthFormat) {
@@ -251,25 +177,26 @@ SDL_GPUGraphicsPipeline* PipelineCache::create(const PipelineKey& key) {
     SDL_GPUShader* vertexShader = meshVertex_;
     SDL_GPUShader* fragmentShader = meshFragment_;
     Uint32 attributeCount = 3;
-    if (key.lines) {
-        buffer.pitch = sizeof(LineVertex);
-        attributes[0] = {0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(LineVertex, position)};
-        attributes[1] = {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(LineVertex, color)};
+    const render::RenderState& state = key.state;
+    if (state.program == render::Program::Line) {
+        buffer.pitch = sizeof(render::LineVertex);
+        attributes[0] = {0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(render::LineVertex, position)};
+        attributes[1] = {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(render::LineVertex, color)};
         vertexShader = lineVertex_;
         fragmentShader = lineFragment_;
         attributeCount = 2;
-    } else if (key.effects) {
+    } else if (state.program == render::Program::Effect) {
         buffer.pitch = sizeof(EffectVertex);
         attributes[0] = {0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(EffectVertex, position)};
         attributes[1] = {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(EffectVertex, uv)};
         attributes[2] = {2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(EffectVertex, color)};
         vertexShader = effectVertex_;
         fragmentShader = effectFragment_;
-    } else if (key.sprites) {
-        buffer.pitch = sizeof(SpriteVertex);
-        attributes[0] = {0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(SpriteVertex, position)};
-        attributes[1] = {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(SpriteVertex, uv)};
-        attributes[2] = {2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(SpriteVertex, color)};
+    } else if (state.program == render::Program::Sprite) {
+        buffer.pitch = sizeof(render::SpriteVertex);
+        attributes[0] = {0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(render::SpriteVertex, position)};
+        attributes[1] = {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(render::SpriteVertex, uv)};
+        attributes[2] = {2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(render::SpriteVertex, color)};
         vertexShader = spriteVertex_;
         fragmentShader = spriteFragment_;
     } else {
@@ -281,7 +208,7 @@ SDL_GPUGraphicsPipeline* PipelineCache::create(const PipelineKey& key) {
 
     SDL_GPUColorTargetDescription colorTarget{};
     colorTarget.format = key.colorFormat;
-    colorTarget.blend_state = blendState(key);
+    colorTarget.blend_state = blendState(state);
 
     SDL_GPUGraphicsPipelineCreateInfo info{};
     info.vertex_shader = vertexShader;
@@ -290,15 +217,16 @@ SDL_GPUGraphicsPipeline* PipelineCache::create(const PipelineKey& key) {
     info.vertex_input_state.num_vertex_buffers = 1;
     info.vertex_input_state.vertex_attributes = attributes;
     info.vertex_input_state.num_vertex_attributes = attributeCount;
-    info.primitive_type = key.lines ? SDL_GPU_PRIMITIVETYPE_LINELIST : SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    info.primitive_type =
+        state.program == render::Program::Line ? SDL_GPU_PRIMITIVETYPE_LINELIST : SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
     info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-    info.rasterizer_state.cull_mode = toSdl(key.cull);
+    info.rasterizer_state.cull_mode = toSdl(state.cull);
     info.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
     info.rasterizer_state.enable_depth_clip = true;
     info.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
     info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;  // Direct3D's default
-    info.depth_stencil_state.enable_depth_test = key.depthTest;
-    info.depth_stencil_state.enable_depth_write = key.depthTest && key.depthWrite;
+    info.depth_stencil_state.enable_depth_test = state.depthTest;
+    info.depth_stencil_state.enable_depth_write = state.depthTest && state.depthWrite;
     info.target_info.color_target_descriptions = &colorTarget;
     info.target_info.num_color_targets = 1;
     info.target_info.depth_stencil_format = depthFormat_;

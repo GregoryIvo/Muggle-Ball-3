@@ -5,6 +5,15 @@ Notable changes to Muggle Ball 3. The format roughly follows
 runtime is new code and the game's assets are supplied by the player, never
 included here.
 
+## Unreleased
+
+### Changed
+- Renderer split into a backend-neutral part (`engine/src/render/RenderCommon.*`:
+  draw collection and sorting, line/sprite/effect vertex building, the render-state
+  key) and a back end chosen at build time by the new `MB3_RENDERER` option
+  (`SDLGPU`, the SDL3 GPU API, default; `NONE`, a stub for builds with no GPU API).
+  No behaviour change.
+
 ## [0.1.0] - 2026-10-23
 
 First tagged release. The game is playable on macOS from your own copy of

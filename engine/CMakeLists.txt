@@ -1,11 +1,30 @@
+# Graphics back end, chosen when the program is built. SDLGPU has no Vita back end (SDL GPU is desktop
+# and console-only), so a build with no GPU API picks NONE: the Renderer constructor throws, and the
+# render/none stub satisfies the rest of mb_engine's interface.
+set(MB3_RENDERER "SDLGPU" CACHE STRING
+    "Graphics back end: SDLGPU (the SDL3 GPU API: Metal, Vulkan, Direct3D 12) or NONE (a stub whose Renderer constructor throws, for builds without a GPU API)")
+set_property(CACHE MB3_RENDERER PROPERTY STRINGS SDLGPU NONE)
+
+if(MB3_RENDERER STREQUAL "SDLGPU")
+  set(MB3_RENDERER_SOURCES
+    src/render/sdlgpu/Renderer.cpp
+    src/render/sdlgpu/PipelineCache.cpp
+    src/render/sdlgpu/RenderFrame.cpp)
+  set(MB3_RENDERER_DEFINE MB3_RENDERER_SDLGPU=1)
+elseif(MB3_RENDERER STREQUAL "NONE")
+  set(MB3_RENDERER_SOURCES src/render/none/Renderer.cpp)
+  set(MB3_RENDERER_DEFINE MB3_RENDERER_NONE=1)
+else()
+  message(FATAL_ERROR "Unknown MB3_RENDERER: ${MB3_RENDERER} (expected SDLGPU or NONE)")
+endif()
+
 add_library(mb_engine
   src/Log.cpp
   src/Paths.cpp
   src/Files.cpp
   src/Window.cpp
-  src/Renderer.cpp
-  src/PipelineCache.cpp
-  src/RenderFrame.cpp
+  src/render/RenderCommon.cpp
+  ${MB3_RENDERER_SOURCES}
   src/Image.cpp
   src/Model.cpp
   src/Physics.cpp
@@ -22,3 +41,4 @@ target_include_directories(mb_engine PUBLIC include PRIVATE shaders/generated)
 target_link_libraries(mb_engine
   PUBLIC SDL3::SDL3
   PRIVATE stb cgltf nlohmann_json::nlohmann_json Jolt)
+target_compile_definitions(mb_engine PUBLIC ${MB3_RENDERER_DEFINE})
