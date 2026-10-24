@@ -6,8 +6,6 @@
 
 #include <SDL3/SDL.h>
 
-#include <algorithm>
-#include <bit>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
@@ -189,7 +187,7 @@ SDL_GPUTexture* Renderer::Impl::uploadTexture(const Image& image, bool mipmaps) 
     }
     const Uint32 width = static_cast<Uint32>(image.width);
     const Uint32 height = static_cast<Uint32>(image.height);
-    const Uint32 levels = mipmaps ? std::bit_width(std::max(width, height)) : 1;
+    const Uint32 levels = mipmaps ? render::mipLevelCount(width, height) : 1;
 
     SDL_GPUTextureCreateInfo info{};
     info.type = SDL_GPU_TEXTURETYPE_2D;

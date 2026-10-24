@@ -39,13 +39,14 @@ barrels and the turn of the projectiles are played).
 
 | Path | What it is |
 |---|---|
-| `engine/` | Platform-neutral runtime: window and input, GPU renderer and shaders, model and image loading, physics (`PhysicsWorld` over Jolt), audio (Ogg Vorbis decoding, mixer, device), logging, paths |
+| `engine/` | Platform-neutral runtime: window and input, GPU renderer and shaders (back end chosen by `MB3_RENDERER`: `engine/src/render/sdlgpu/` for the SDL3 GPU API, `engine/src/render/none/` a stub for builds with no GPU API, shared code in `engine/src/render/RenderCommon.*`), model and image loading, physics (`PhysicsWorld` over Jolt), audio (Ogg Vorbis decoding, mixer, device), logging, paths |
 | `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, level physics (`PhysicsScene`), the rules of play (`GameSession`, `BallReach`, the autopilot `Autopilot`), the level's special objects (`SpecialObjects`), the prizes (`Prizes`, the session's `SessionPrizes.cpp`), the weapons and the strikes of the prizes (`Weapons`), the sails (`Cloth`, `ClothPlan`), objects that follow paths (`PathPlayer`), the particle systems (`ParticleDef`, `ParticleSystem`, `ParticleDraw`), what a session looks and sounds like (`PlayScene`, `ObjectEffects`, `BrickEffects`, `PrizeScene`, `PrizeHud`, `Billboard`, `BatBarrels`, `WeaponScene`, `WeaponEffects`, `ClothDraw`, `PlaySounds`), camera, sound library, save data; the 2D UI (bitmap fonts, string table, menu forms, the menu screens and their flow, the HUD) |
 | `app/` | Executable entry point: the game's front end and its play session (`PlaySession`), the level viewer (with physics and music) and the menu form viewer |
-| `platform/macos/` | App bundle metadata (the only per-platform code so far) |
+| `platform/macos/` | App bundle metadata |
+| `platform/vita/` | PlayStation Vita: the hello that probes the console, Jolt's platform header, what newlib lacks, and the placeholder LiveArea set (see [`docs/VITA.md`](docs/VITA.md)) |
 | `scripts/` | `package_macos.sh`: universal build, ad-hoc signing, Developer ID signing and notarization |
-| `tools/` | Asset pipeline: `convert_assets.py` runs the converters for levels (`mb3level.py`), meshes (`x2glb.py`), materials, sounds and music (`sounds.py`), textures, the menus, strings and fonts (`ui.py`) and the level list (`campaign.py`), object and particle definitions (`objects.py`), and on macOS the app icon (`make_icon.py`); also the MoleBox dumper and the shader compiler |
-| `docs/` | Architecture, level format, converted asset formats (`ASSET_FORMATS.md`), levels in the physics world (`PHYSICS.md`), sound and music (`AUDIO.md`), macOS packaging (`MACOS.md`), save files (`SAVES.md`), what the object definitions say about gameplay (`OBJECTS.md`), the rules of play and the footage behind them (`GAMEPLAY.md`), how the data was recovered |
+| `tools/` | Asset pipeline: `convert_assets.py` runs the converters for levels (`mb3level.py`), meshes (`x2glb.py`), materials, sounds and music (`sounds.py`), textures, the menus, strings and fonts (`ui.py`) and the level list (`campaign.py`), object and particle definitions (`objects.py`), and on macOS the app icon (`make_icon.py`); also the MoleBox dumper, the shader compiler (`build_shaders.py`, SDL GPU and GL), the Vita LiveArea placeholder (`vita_livearea.py`) and a PNG screenshot comparison (`image_diff.py`) |
+| `docs/` | Architecture, level format, converted asset formats (`ASSET_FORMATS.md`), levels in the physics world (`PHYSICS.md`), sound and music (`AUDIO.md`), macOS packaging (`MACOS.md`), the PlayStation Vita port (`VITA.md`, its plan `VITA_PLAN.md`), save files (`SAVES.md`), what the object definitions say about gameplay (`OBJECTS.md`), the rules of play and the footage behind them (`GAMEPLAY.md`), how the data was recovered |
 | `tests/` | C++ and Python tests; the ones that read the game data are skipped unless `MB3_ASSETS` is set |
 
 ## Build (macOS)
@@ -62,6 +63,12 @@ SDL3 and nlohmann/json come from Homebrew if installed (`brew install sdl3
 nlohmann-json`) and are fetched by CMake otherwise; stb and cgltf are always
 fetched. Use `-G Xcode` instead of Ninja to get an Xcode project. This build uses
 Homebrew's SDL3, so it only runs on a Mac that has it, for its architecture only.
+Adding `-DMB3_RENDERER=NONE` builds the renderer as a stub with no GPU API: the
+`Renderer` constructor throws, and `mb_render_test` and the other GPU tests skip.
+Adding `-DMB3_RENDERER=GL` builds the same renderer API against desktop OpenGL 2.1
+through SDL instead of the SDL3 GPU API: the same back end `VITAGL` uses on the
+Vita, so `mb_render_test` and a window exercise it here before any device run
+(see [`docs/VITA.md`](docs/VITA.md), "GL back end").
 
 ### macOS app, universal binary, packaging
 
@@ -81,6 +88,13 @@ The compiled shaders are committed (`engine/shaders/generated/`), so building
 needs no shader tools. After editing a shader, run `python3 tools/build_shaders.py`
 to regenerate them; that is the only thing that needs `glslangValidator` and
 `spirv-cross` (`brew install glslang spirv-cross`).
+
+### PlayStation Vita (in progress)
+
+A homebrew port to the PS Vita and PSTV is under way; [`docs/VITA.md`](docs/VITA.md) has the toolchain, the
+build, what was measured and the device checklist, and [`docs/VITA_PLAN.md`](docs/VITA_PLAN.md) the plan. With
+VitaSDK installed, `cmake -DCMAKE_TOOLCHAIN_FILE=$VITASDK/share/vita.toolchain.cmake` cross-builds what exists
+so far (a hello VPK); the desktop build is not affected.
 
 ## Game data
 

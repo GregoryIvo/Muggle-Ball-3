@@ -52,6 +52,9 @@ Window::Window(const std::string& title, int width, int height, bool startFullsc
     height = std::max(height, kMinWindowHeight);
     window_ = SDL_CreateWindow(title.c_str(), width, height,
                                SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
+#if defined(MB3_RENDERER_GL)
+                                   SDL_WINDOW_OPENGL |  // the GL back end draws through an SDL GL context
+#endif
                                    (startFullscreen ? SDL_WINDOW_FULLSCREEN : 0));
     if (!window_) {
         throw std::runtime_error(std::string("SDL_CreateWindow failed: ") + SDL_GetError());

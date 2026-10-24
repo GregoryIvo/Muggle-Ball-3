@@ -5,6 +5,27 @@ Notable changes to Muggle Ball 3. The format roughly follows
 runtime is new code and the game's assets are supplied by the player, never
 included here.
 
+## Unreleased
+
+### Added
+- PlayStation Vita port, milestone M1a: the VitaSDK cross build (`cmake/Vita.cmake`),
+  Jolt through its Platform Blue hook, a hello VPK that probes the console, a
+  placeholder LiveArea set and `docs/VITA.md`. The desktop build is unchanged.
+- PlayStation Vita port, milestone M4a: a GL back end (`engine/src/render/gl/`,
+  `MB3_RENDERER=GL|VITAGL`) implementing the full `Renderer` API over OpenGL 2.1
+  (desktop, through SDL, for testing) and vitaGL (the console), from one source;
+  the Vita cross build now defaults to it (`MB3_VITA_BUILD_ENGINE` is ON) and
+  builds a device render-test VPK (`platform/vita/render_test/`, title ID
+  `MUGB00005`). `tools/build_shaders.py` gained a GL half and `tools/image_diff.py`
+  compares screenshots between back ends.
+
+### Changed
+- Renderer split into a backend-neutral part (`engine/src/render/RenderCommon.*`:
+  draw collection and sorting, line/sprite/effect vertex building, the render-state
+  key) and a back end chosen at build time by the new `MB3_RENDERER` option
+  (`SDLGPU`, the SDL3 GPU API, default; `NONE`, a stub for builds with no GPU API).
+  No behaviour change.
+
 ## [0.1.0] - 2026-10-23
 
 First tagged release. The game is playable on macOS from your own copy of

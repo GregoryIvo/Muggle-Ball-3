@@ -21,7 +21,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
             libxi-dev libxss-dev libxtst-dev libwayland-dev libxkbcommon-dev libegl1-mesa-dev \
-            libasound2-dev libpulse-dev libudev-dev
+            libasound2-dev libpulse-dev libudev-dev libgl-dev
 
       - name: Install macOS build dependencies
         if: runner.os == 'macOS'
@@ -35,6 +35,14 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+      # Compile-only check of the GL back end (engine/src/render/gl/): a Linux runner has no GPU device,
+      # so this does not configure MB3_BUILD_TESTS' render test to run, only to link.
+      - name: Configure and build the GL back end
+        if: runner.os == 'Linux'
+        run: |
+          cmake -S . -B build-gl -G Ninja -DCMAKE_BUILD_TYPE=Release -DMB3_RENDERER=GL
+          cmake --build build-gl --target mb_engine mb_render_test
 
       - name: Converter tests
         run: python3 -m unittest discover -s tests -p 'test_*.py' -v
