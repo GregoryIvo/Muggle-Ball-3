@@ -19,12 +19,33 @@ included here.
   `MUGB00005`). `tools/build_shaders.py` gained a GL half and `tools/image_diff.py`
   compares screenshots between back ends.
 
+- PlayStation Vita port, milestone M3a: `mb_engine` and `mb_game` cross-compile for the
+  Vita by default now (`MB3_VITA_BUILD_ENGINE` defaults ON); portability fixes found no
+  behaviour to change on the desktop (`STBI_NO_THREAD_LOCALS`, `error_code` filesystem
+  calls, a fallback in `writeFileAtomic` for a rename a regular file a file system
+  refuses, a missing log directory created on first use, `setLogFile` and
+  `sceClibPrintf` logging on `__vita__`). `PhysicsWorld` gained `droppedSteps()`,
+  `bodyCount()`, `activeBodyCount()` and `tempAllocatorPeakBytes()` (the step
+  allocator's own high-water mark, with a one-time log on its first heap spill);
+  `GameSession` gained its own `droppedSteps()`, the session's own accumulator plus the
+  world's. A named `PhysicsProfile` ("desktop", "vita", see
+  `game/include/mb/game/PhysicsProfile.h` and `docs/PHYSICS.md`) picks every level's
+  `PhysicsSettings`, sized from `mb_physics_smoke --measure`; selected with
+  `--physics-profile <name>` in `MuggleBall3` (the game and the level viewer alike),
+  `mb_physics_smoke`, `mb_gameplay_smoke` and `mb_cloth_smoke`.
+
 ### Changed
 - Renderer split into a backend-neutral part (`engine/src/render/RenderCommon.*`:
   draw collection and sorting, line/sprite/effect vertex building, the render-state
   key) and a back end chosen at build time by the new `MB3_RENDERER` option
   (`SDLGPU`, the SDL3 GPU API, default; `NONE`, a stub for builds with no GPU API).
   No behaviour change.
+- PlayStation Vita port, milestone M5a: `runGame` moved out of `app/main.cpp`'s developer harness
+  into `app/Game.{h,cpp}` as `runGame(const GameOptions&)`, taking `FrameStats` with it (`main.cpp`'s
+  own copy is gone; its level viewer now uses `mb_app::FrameStats`), so the Vita's own entry point
+  (M5b) can run the game without the harness. The save-data and window-size helpers still have a
+  separate copy in each file, since `main.cpp`'s viewer and screenshot modes still take the harness's
+  own `Options`, not `GameOptions`. No behaviour change on the desktop build.
 
 ## [0.1.0] - 2026-10-23
 

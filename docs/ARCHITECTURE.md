@@ -277,6 +277,12 @@ and its plane.
 `PlaySession` (`app/`) is the game's `LevelSession`: it builds a level's `GameSession` and its picture, feeds the rules the mouse and
 the click each frame, and turns what they report into what is seen and heard.
 
+`runGame` (`app/Game.cpp`, `GameOptions`) is the game itself, start to finish: the save data, the window at its saved size and
+fullscreen state, the renderer, the audio, `PlaySession` and `FrontEnd` together, the frame-time report, and the window state
+written back on the way out. `app/main.cpp` is a developer harness around it (the level viewer, screenshots, the form and sound
+tests, `--check`); it knows nothing `runGame` needs that `GameOptions` doesn't already carry, so the PlayStation Vita's own
+entry point calls `runGame` directly, with no harness (`docs/VITA_PLAN.md`, M5a/M5b).
+
 | Part | What it does |
 |---|---|
 | `GameSession` + `Autopilot` | The rules; with `--autoplay` the autopilot's input replaces the mouse's. `PlayerInput` (`app/`, the keys are SDL's) turns the mouse into the bat's target through `batTargetX` and the drawable size; a click (the button going down, not held) or Space launches. The click or key that ends the pause is not given to it: `GameFlow::Step::resumed` makes the front end call `LevelSession::resume()` instead of `update()` for that frame, which starts `PlayerInput` over. |

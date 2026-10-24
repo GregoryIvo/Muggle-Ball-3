@@ -41,7 +41,7 @@ barrels and the turn of the projectiles are played).
 |---|---|
 | `engine/` | Platform-neutral runtime: window and input, GPU renderer and shaders (back end chosen by `MB3_RENDERER`: `engine/src/render/sdlgpu/` for the SDL3 GPU API, `engine/src/render/none/` a stub for builds with no GPU API, shared code in `engine/src/render/RenderCommon.*`), model and image loading, physics (`PhysicsWorld` over Jolt), audio (Ogg Vorbis decoding, mixer, device), logging, paths |
 | `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, level physics (`PhysicsScene`), the rules of play (`GameSession`, `BallReach`, the autopilot `Autopilot`), the level's special objects (`SpecialObjects`), the prizes (`Prizes`, the session's `SessionPrizes.cpp`), the weapons and the strikes of the prizes (`Weapons`), the sails (`Cloth`, `ClothPlan`), objects that follow paths (`PathPlayer`), the particle systems (`ParticleDef`, `ParticleSystem`, `ParticleDraw`), what a session looks and sounds like (`PlayScene`, `ObjectEffects`, `BrickEffects`, `PrizeScene`, `PrizeHud`, `Billboard`, `BatBarrels`, `WeaponScene`, `WeaponEffects`, `ClothDraw`, `PlaySounds`), camera, sound library, save data; the 2D UI (bitmap fonts, string table, menu forms, the menu screens and their flow, the HUD) |
-| `app/` | Executable entry point: the game's front end and its play session (`PlaySession`), the level viewer (with physics and music) and the menu form viewer |
+| `app/` | Executable entry point: `main.cpp` is a developer harness (the level viewer with physics and music, screenshots, the menu form viewer) around the game itself, `runGame` (`Game.cpp`), built from the front end and its play session (`PlaySession`) |
 | `platform/macos/` | App bundle metadata |
 | `platform/vita/` | PlayStation Vita: the hello that probes the console, Jolt's platform header, what newlib lacks, and the placeholder LiveArea set (see [`docs/VITA.md`](docs/VITA.md)) |
 | `scripts/` | `package_macos.sh`: universal build, ad-hoc signing, Developer ID signing and notarization |
@@ -128,6 +128,7 @@ so far (a hello VPK); the desktop build is not affected.
    $MuggleBall3 --check assets/Data/Levels/piratos-po-krugy.json
    $MuggleBall3 --play-sound pirat_hit           # play a named sound (sounds.xml), wait, exit
    $MuggleBall3 --play-music Pirates --seconds 20  # one pass of Menu, Village, Pirates, Cowboys or Knights
+   $MuggleBall3 --autoplay --physics-profile vita   # played with the Vita's PhysicsSettings (docs/PHYSICS.md), to check it on the host
    $MuggleBall3 --form MainMenu                  # a menu form on its own (any file in assets/Data/Menu, any case)
    $MuggleBall3 --form Options --screenshot out.png [--size 1024x768] [--language Russian]
    ```
@@ -168,7 +169,9 @@ so far (a hello VPK); the desktop build is not affected.
    sets a particle effect of `Data/Particles` going at that time of play at a point (over the middle of the board without one; a beam's second end is the second point), to
    look at a file without waiting for the game to need it (`explosebig@5`, `Lightning@1,-8,1,0,8,1,10`; `docs/GAMEPLAY.md` 19.8). In the window
    the log reports the frame time every few seconds. `MB3_GPU_DEBUG=1` turns on the GPU back end's validation
-   layer. `--form` shows a menu form over the `background` form
+   layer. `--physics-profile <name>` (any command above; default `desktop`, or `vita` on a Vita build) picks
+   the `PhysicsSettings` every level is built with (`game/include/mb/game/PhysicsProfile.h`, `docs/PHYSICS.md`);
+   an unknown name lists the known ones and exits. `--form` shows a menu form over the `background` form
    (`--no-background` leaves it out), with sample high scores; in the window Left/Right
    switch form and the menus work as in the game (the log names the sounds they would
    play and the settings they would save), and a screenshot can show one widget hovered

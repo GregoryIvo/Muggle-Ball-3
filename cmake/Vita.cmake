@@ -4,6 +4,7 @@
 # port, docs/VITA_PLAN.md the plan behind it.
 
 set(MB3_PLATFORM_VITA ON)
+add_compile_definitions(MB3_PLATFORM_VITA=1)  # the code itself tests #ifdef MB3_PLATFORM_VITA (PhysicsProfile.cpp, StbImpl.cpp, Log.cpp)
 
 # vita_create_self and vita_create_vpk.
 include("${VITASDK}/share/vita.cmake")

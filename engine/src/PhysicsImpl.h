@@ -199,6 +199,7 @@ struct PhysicsWorld::Impl final : JPH::ContactListener, JPH::BodyActivationListe
 
     double accumulator = 0;
     std::size_t addedSinceOptimize = 0;
+    std::uint64_t droppedSteps = 0;  // whole fixed steps thrown away so far; see PhysicsWorld::step
 
     std::unordered_map<BodyId, KinematicTarget> kinematicTargets;
     std::vector<BodyId> kinematicMoving;  // moved by the last fixed step; stopped unless moved again

@@ -7,6 +7,7 @@
 #include "mb/game/GameCamera.h"
 #include "mb/game/Gameplay.h"
 #include "mb/game/ModelCache.h"
+#include "mb/game/PhysicsProfile.h"
 #include "mb/game/PlayScene.h"
 #include "mb/game/PlaySounds.h"
 #include "mb/game/PrizeHud.h"
@@ -51,6 +52,8 @@ struct PlayOptions {
     bool autoplay = false;  // the Autopilot plays: it moves the bat and launches (--autoplay)
     std::vector<PrizeCue> prizes;  // given to every level that is played
     std::vector<EffectCue> effects;  // likewise
+    // Every level's PhysicsSettings (--physics-profile; default the platform's own, mb::defaultPhysicsProfileName()).
+    mb::PhysicsProfile profile = *mb::physicsProfile(mb::defaultPhysicsProfileName());
 };
 
 // The game's level, for the front end: builds the scene and the rules of a level, plays it and draws it. The cursor is
@@ -63,6 +66,8 @@ public:
     // `save` is read for the player's bat; `audio` may be null (no sound). Everything must outlive the session.
     PlaySession(mb::Renderer& renderer, Assets& assets, const mb::SaveData& save, mb::GameAudio* audio,
                 const PlayOptions& options);
+    // Logs the physics summary of whatever level is still loaded, the same as start() does for the level it leaves.
+    ~PlaySession() override;
 
     bool start(std::string_view levelName, const mb::GameHud& hud, const Progress& progress) override;
     mb::LevelOutcome update(const mb::InputEvents& input, double seconds, mb::GameHud& hud) override;
@@ -84,6 +89,7 @@ public:
 
 private:
     void giveCues();
+    void logPhysicsSummary() const;  // the level in session_, if any: steps taken and dropped, peak awake, bodies
 
     mb::Renderer& renderer_;
     Assets& assets_;
@@ -98,6 +104,8 @@ private:
     mb::PrizeCaption caption_;
     std::vector<PrizeCue> cues_;  // not yet given
     std::vector<EffectCue> effectCues_;
+    std::string currentLevelName_;  // of session_, for logPhysicsSummary()
+    int peakAwakeBodies_ = 0;       // the most PhysicsWorld::activeBodyCount() seen this level, sampled every update()
 
     double age_ = 0;    // seconds since the level began
     double clock_ = 0;  // the frames' time, which runs on beyond the session's steps
