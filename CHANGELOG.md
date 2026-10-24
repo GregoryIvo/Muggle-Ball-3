@@ -5,6 +5,13 @@ Notable changes to Muggle Ball 3. The format roughly follows
 runtime is new code and the game's assets are supplied by the player, never
 included here.
 
+## Unreleased
+
+### Added
+- PlayStation Vita port, milestone M1a: the VitaSDK cross build (`cmake/Vita.cmake`),
+  Jolt through its Platform Blue hook, a hello VPK that probes the console, a
+  placeholder LiveArea set and `docs/VITA.md`. The desktop build is unchanged.
+
 ## [0.1.0] - 2026-10-23
 
 First tagged release. The game is playable on macOS from your own copy of
