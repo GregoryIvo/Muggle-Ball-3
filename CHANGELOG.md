@@ -26,6 +26,12 @@ included here.
   `--physics-profile <name>` in `MuggleBall3` (the game and the level viewer alike),
   `mb_physics_smoke`, `mb_gameplay_smoke` and `mb_cloth_smoke`.
 
+### Changed
+- PlayStation Vita port, milestone M5a: `runGame` and the helpers it depends on (the save data, the
+  window size, `FrameStats`) moved out of `app/main.cpp`'s developer harness into `app/Game.{h,cpp}`
+  as `runGame(const GameOptions&)`, so the Vita's own entry point (M5b) can run the game without the
+  harness. No behaviour change on the desktop build.
+
 ## [0.1.0] - 2026-10-23
 
 First tagged release. The game is playable on macOS from your own copy of
