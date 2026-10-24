@@ -92,8 +92,13 @@ int main(int argc, char** argv) {
         }
 
         const auto onLevel = [&](const LevelResult& result) {
+            // The planned step count the same way PhysicsBench.cpp derives it (config->seconds / fixedStep,
+            // not a hardcoded 60 Hz), so this line's "/N" still matches what actually ran if a profile ever
+            // moves off 1/60 s (docs/VITA_PLAN.md section 5.5's 30 Hz fallback).
+            const mb::PhysicsSettings settings = settingsFor(*config, result.level);
+            const int stepsPlanned = static_cast<int>(std::llround(config->seconds / settings.fixedStep));
             std::printf("%s: %d/%d steps, ended by %s, mean %.3f ms p95 %.3f ms, %llu dropped\n", result.level.c_str(),
-                       result.steps, static_cast<int>(std::llround(config->seconds * 60.0)), result.endedBy.c_str(),
+                       result.steps, stepsPlanned, result.endedBy.c_str(),
                        result.stepMeanMs, result.stepP95Ms, static_cast<unsigned long long>(result.droppedSteps));
             const std::string line = csvLine(platform, *config, result);
             std::printf("%s\n", line.c_str());

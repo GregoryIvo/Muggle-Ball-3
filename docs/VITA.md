@@ -142,7 +142,12 @@ per-level ratio of the two replaces the plan's estimated speed factor (section 4
 
 **What it measures.** For each level it builds a `GameSession` (the Autopilot playing it, 99 hearts so a lost
 ball never ends the run early) and calls `session.update(fixedStep, input)` once per planned step, timing
-each call with `steady_clock`. That is **one physics step plus the rules** (the bat easing towards the
+each call with `steady_clock` on the Mac and the kernel's own process-time counter on the Vita
+(`PhysicsBench.cpp`'s `VitaProcessClock`, `sceKernelGetProcessTimeWide`): this SDK's libstdc++ has no
+`CLOCK_MONOTONIC`, so `steady_clock` there falls back to `gettimeofday`, a wall clock with no monotonicity
+guarantee — not what a step timer wants. `mb3_vita_bench` also logs `steady_clock`'s own period and a 50 ms
+delay measured against both clocks once at start-up, so `bench.log` validates that gap for itself rather than
+taking this paragraph's word for it. That is **one physics step plus the rules** (the bat easing towards the
 Autopilot's target, the ball's speed and angle correction, hit detection, bricks exploding, prizes) — not the
 bare `PhysicsScene::step()` that section 4.4's desktop numbers measured. The two are not directly comparable:
 section 4.4's per-level averages (knight-miss-1457 0.70 ms, and so on) are physics alone over a much longer
@@ -201,9 +206,14 @@ device CSV of the same JSON always agree on what they are comparing. The file is
 written only once (when it is new or empty), so an interrupted run keeps whatever it already measured.
 
 **`tools/bench_ratio.py`** joins a host and a device CSV by `(level, profile, velocitySteps, positionSteps,
-collisionSteps, threads)` and prints, per level, the host and device mean/p95 step times, the two ratios and
-the dropped steps, then the median and maximum ratio over every matched level — the measured scale factor —
-and flags any level whose device p95 is over the plan's 8 ms per-step budget, or whose device mean is over
+collisionSteps, threads)` and prints, per level, the host and device mean/p95 step times, the two ratios, how
+many steps each side actually ran and the dropped steps; a row whose steps or `endedBy` differ between the
+two sides (a different window of the same noisy Autopilot run) is flagged and left out of the medians below,
+rather than averaged in as if it were comparable. It then prints the median and maximum **mean-time** ratio
+over every remaining matched level — this is the measured scale factor that replaces the plan's 70x, which
+section 4.4 itself derives from mean step times, not p95 — with the p95-time ratio reported alongside it as
+the device's own tail (cache misses, the newlib allocator) on top of that mean, not folded into the headline.
+It also flags any level whose device p95 is over the plan's 8 ms per-step budget, or whose device mean is over
 half the 16 ms per-frame budget (also 8 ms, section 1):
 
 ```sh
@@ -266,8 +276,9 @@ user before M7").
 ### Device checklist (M3b)
 
 - [ ] the bench VPK installs and runs; the pass-1 CSV (`bench-physics.csv`) comes back;
-- [ ] the measured scale factor (`tools/bench_ratio.py` against the host CSV above) replaces the 70x estimate
-      in this document, and the per-level estimates in section 4.4 are recomputed against it;
+- [ ] the measured scale factor (`tools/bench_ratio.py` against the host CSV above; its mean-time ratio is
+      the number that replaces the 70x, since section 4.4 derives 70x from mean step times, not p95) replaces
+      the 70x estimate in this document, and the per-level estimates in section 4.4 are recomputed against it;
 - [ ] pass 2's combinations (above) are agreed with the user and, once run, their device CSVs come back too;
 - [ ] the frame-rate target and physics profile are agreed with the user before M7 starts.
 

@@ -118,6 +118,19 @@ void testWrongTypesAreErrors() {
         {"label not a string", R"({"levels": ["village-love"], "label": 7})"},
         {"not an object", R"(["village-love"])"},
         {"not JSON at all", R"(not json)"},
+        // Out-of-range values that would otherwise produce a plausible-looking CSV row (0 steps and
+        // all-zero times, or a silently truncated solver setting) instead of an obvious error.
+        {"seconds zero", R"({"levels": ["village-love"], "seconds": 0})"},
+        {"seconds negative", R"({"levels": ["village-love"], "seconds": -5})"},
+        {"seconds absurdly large", R"({"levels": ["village-love"], "seconds": 1e9})"},
+        {"velocitySteps zero", R"({"levels": ["village-love"], "velocitySteps": 0})"},
+        {"velocitySteps negative", R"({"levels": ["village-love"], "velocitySteps": -1})"},
+        {"positionSteps zero", R"({"levels": ["village-love"], "positionSteps": 0})"},
+        {"collisionSteps zero", R"({"levels": ["village-love"], "collisionSteps": 0})"},
+        {"threads below -1", R"({"levels": ["village-love"], "threads": -3})"},
+        // nlohmann's get<int>() on a value too big for int narrows it silently rather than erroring; the
+        // range check must catch it before that happens.
+        {"velocitySteps overflows int", R"({"levels": ["village-love"], "velocitySteps": 100000000000})"},
     };
     for (const auto& c : cases) {
         const fs::path path = writeFile(dir.path, "config.json", c.json);
@@ -126,6 +139,24 @@ void testWrongTypesAreErrors() {
         check(!config.has_value(), (std::string("rejected: ") + c.name).c_str());
         check(!error.empty(), (std::string("names an error: ") + c.name).c_str());
     }
+}
+
+void testBoundaryValuesAreAccepted() {
+    TempDir dir;
+    // threads' own convention (engine/include/mb/engine/Physics.h) makes -1 and 0 both meaningful, and 1 is
+    // the least a solver iteration count can be: none of these should be rejected by the range check above.
+    const fs::path path = writeFile(dir.path, "config.json", R"({
+        "levels": ["village-love"], "seconds": 0.001,
+        "velocitySteps": 1, "positionSteps": 1, "collisionSteps": 1, "threads": -1
+    })");
+    std::string error;
+    const std::optional<BenchConfig> config = loadBenchConfig(path, error);
+    check(config.has_value(), "the smallest sensible seconds and solver values are accepted");
+    check(error.empty(), "and leave no error");
+
+    const fs::path path2 = writeFile(dir.path, "config2.json", R"({"levels": ["village-love"], "threads": 0})");
+    std::string error2;
+    check(loadBenchConfig(path2, error2).has_value(), "threads 0 (\"run on the caller\") is accepted");
 }
 
 void testUnknownProfileNamesTheKnownOnes() {
@@ -296,6 +327,7 @@ int main() {
     testDefaults();
     testEveryKey();
     testWrongTypesAreErrors();
+    testBoundaryValuesAreAccepted();
     testUnknownProfileNamesTheKnownOnes();
     testMissingFileIsAnError();
     testSettingsForWithoutOverrides();
