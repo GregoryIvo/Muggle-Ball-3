@@ -127,6 +127,13 @@ class JpegSizeTest(unittest.TestCase):
         with self.assertRaises(V.HeaderError):
             V.jpeg_size(jpeg_fixture(0xC0, 10, 10)[:6])
 
+    def test_skips_fill_bytes_before_a_marker(self):
+        # ITU-T.81 B.1.1.2: any number of 0xFF fill bytes may precede a marker's code byte.
+        fixture = jpeg_fixture(0xC2, 100, 50)
+        soi, rest = fixture[:2], fixture[2:]
+        with_fill_bytes = soi + b"\xff\xff\xff" + rest
+        self.assertEqual(V.jpeg_size(with_fill_bytes), (100, 50))
+
 
 # --- Power-of-two math -------------------------------------------------------------------------------------
 
@@ -258,6 +265,72 @@ class BuildPackTest(unittest.TestCase):
         self.assertEqual(run.call_args.args[0][:2], ["sips", "-z"])
         self.assertEqual([e["method"] for e in report["resampledTextures"]], ["sips"])
 
+    @unittest.skipUnless(HAVE_PILLOW, "needs Pillow to actually resample")
+    def test_no_resample_then_resample_fixes_the_npot_texture(self):
+        # A --no-resample (or copy-fallback) run must not permanently poison later runs: a matching mtime
+        # alone is not "up to date" for a file this run should resample.
+        V.build_pack(self.assets, self.out, resample=False, log=self.log)
+        report = V.build_pack(self.assets, self.out, log=self.log)
+        dst = self.out / "Textures/world_npot.png"
+        self.assertEqual(V.png_size(dst.read_bytes()), (V.next_pot(100), V.next_pot(50)))
+        paths = {entry["path"] for entry in report["resampledTextures"]}
+        self.assertIn("Textures/world_npot.png", paths)
+        self.assertEqual(report["unresampledNpotTextures"], [])
+
+    @unittest.skipUnless(HAVE_PILLOW, "needs Pillow to actually resample")
+    def test_copy_fallback_then_normal_run_fixes_the_npot_texture(self):
+        # Same bug, via the other door: a run where neither Pillow nor sips was available falls back to
+        # a verbatim copy but still stamps dst's mtime to match src's.
+        with mock.patch.object(V, "_pillow_image_module", return_value=None), \
+             mock.patch.object(V.shutil, "which", return_value=None):
+            V.build_pack(self.assets, self.out, log=self.log)
+        report = V.build_pack(self.assets, self.out, log=self.log)
+        dst = self.out / "Textures/world_npot.png"
+        self.assertEqual(V.png_size(dst.read_bytes()), (V.next_pot(100), V.next_pot(50)))
+        paths = {entry["path"] for entry in report["resampledTextures"]}
+        self.assertIn("Textures/world_npot.png", paths)
+        self.assertEqual(report["unresampledNpotTextures"], [])
+
+    @unittest.skipUnless(HAVE_PILLOW, "exercises Pillow's own decode failure")
+    def test_resample_failure_falls_back_to_copy_and_is_logged(self):
+        # An intact IHDR but a body Pillow cannot decode must not abort the whole run.
+        truncated = png_fixture(100, 50)[:40]
+        write(self.assets / "Textures/trunc_npot.png", truncated)
+        report = V.build_pack(self.assets, self.out, log=self.log)
+        dst = self.out / "Textures/trunc_npot.png"
+        self.assertEqual(dst.read_bytes(), truncated)
+        self.assertTrue(any("could not resample" in line and "trunc_npot.png" in line
+                             for line in self.logged), self.logged)
+        paths = {entry["path"] for entry in report["unresampledNpotTextures"]}
+        self.assertIn("Textures/trunc_npot.png", paths)
+
+    def test_sips_failure_falls_back_to_copy_and_is_logged(self):
+        def failing_sips(cmd, check, capture_output):
+            raise V.subprocess.CalledProcessError(1, cmd)
+
+        with mock.patch.object(V, "_pillow_image_module", return_value=None), \
+             mock.patch.object(V.shutil, "which", return_value="/usr/bin/sips"), \
+             mock.patch.object(V.subprocess, "run", side_effect=failing_sips):
+            report = V.build_pack(self.assets, self.out, log=self.log)
+        self.assertEqual((self.assets / "Textures/world_npot.png").read_bytes(),
+                         (self.out / "Textures/world_npot.png").read_bytes())
+        self.assertTrue(any("could not resample" in line for line in self.logged), self.logged)
+        paths = {entry["path"] for entry in report["unresampledNpotTextures"]}
+        self.assertIn("Textures/world_npot.png", paths)
+
+    def test_unreadable_texture_header_is_reported_not_silent(self):
+        write(self.assets / "Textures/garbage.png", V.PNG_SIGNATURE + b"\x00" * 6)
+        report = V.build_pack(self.assets, self.out, log=self.log)
+        dst = self.out / "Textures/garbage.png"
+        self.assertTrue(dst.exists())
+        self.assertEqual(dst.read_bytes(), V.PNG_SIGNATURE + b"\x00" * 6)
+        self.assertEqual(report["unreadableTextures"], ["Textures/garbage.png"])
+        self.assertTrue(any("unreadable" in line and "garbage.png" in line for line in self.logged),
+                         self.logged)
+        # Never counted as an unresampled NPOT texture either -- its size is simply unknown.
+        paths = {entry["path"] for entry in report["unresampledNpotTextures"]}
+        self.assertNotIn("Textures/garbage.png", paths)
+
     def test_second_run_copies_nothing(self):
         V.build_pack(self.assets, self.out, log=self.log)
         report = V.build_pack(self.assets, self.out, log=self.log)
@@ -276,6 +349,17 @@ class BuildPackTest(unittest.TestCase):
         self.assertFalse(self.out.exists())
         self.assertEqual(report["totalFiles"], len(self.expected))
         self.assertEqual(report["filesCopied"], len(self.expected))
+        # A dry run must not claim every NPOT candidate "would be left unresampled" when a real run
+        # (resample=True, the default) would in fact resample all of them.
+        paths = {entry["path"] for entry in report["resampledTextures"]}
+        self.assertIn("Textures/world_npot.png", paths)
+        self.assertEqual(report["unresampledNpotTextures"], [])
+
+    def test_dry_run_with_no_resample_still_reports_npot_textures_as_unresampled(self):
+        report = V.build_pack(self.assets, self.out, resample=False, dry_run=True, log=self.log)
+        self.assertEqual(report["resampledTextures"], [])
+        paths = {entry["path"] for entry in report["unresampledNpotTextures"]}
+        self.assertIn("Textures/world_npot.png", paths)
 
     def test_dry_run_does_not_delete_a_stale_file(self):
         V.build_pack(self.assets, self.out, log=self.log)
@@ -313,6 +397,60 @@ class RefusalTest(unittest.TestCase):
             with self.assertRaises(V.PackError):
                 V.build_pack(assets, V.REPO_ROOT / "this_should_never_be_created")
             self.assertFalse((V.REPO_ROOT / "this_should_never_be_created").exists())
+
+    def test_out_is_parent_of_assets_leaves_the_source_untouched(self):
+        # remove_stale must never run against a folder it did not build: --out one level too high
+        # would otherwise see every source file as "stale" and delete it.
+        with tempfile.TemporaryDirectory() as tmp:
+            assets = pathlib.Path(tmp) / "assets"
+            expected = make_tree(assets)
+            write(pathlib.Path(tmp) / "unrelated.txt", b"not part of the pack")
+            with self.assertRaises(V.PackError):
+                V.build_pack(assets, pathlib.Path(tmp))
+            found = {p.relative_to(assets).as_posix() for p in assets.rglob("*") if p.is_file()}
+            self.assertTrue(expected <= found)
+            self.assertTrue((pathlib.Path(tmp) / "unrelated.txt").exists())
+
+    def test_out_inside_assets_is_refused(self):
+        # Otherwise a run re-ingests its own previous pack as more "runtime files" on every call.
+        with tempfile.TemporaryDirectory() as tmp:
+            assets = pathlib.Path(tmp) / "assets"
+            make_tree(assets)
+            with self.assertRaises(V.PackError):
+                V.build_pack(assets, assets / "Textures")
+
+    def test_out_with_unrelated_content_and_no_manifest_is_refused(self):
+        # This tool may only ever prune a folder it recognizes as its own (carrying vita_pack.json);
+        # otherwise a wrong --out (a memory card path one level too high, say) would delete someone
+        # else's files.
+        with tempfile.TemporaryDirectory() as tmp:
+            assets = pathlib.Path(tmp) / "assets"
+            make_tree(assets)
+            out = pathlib.Path(tmp) / "out"
+            write(out / "thesis.docx", b"not ours")
+            write(out / "saves/slot1.sav", b"not ours either")
+            with self.assertRaises(V.PackError):
+                V.build_pack(assets, out)
+            self.assertTrue((out / "thesis.docx").exists())
+            self.assertTrue((out / "saves/slot1.sav").exists())
+
+    def test_out_may_be_a_folder_this_tool_already_built(self):
+        # The manifest itself is what makes a non-empty --out trustworthy to prune.
+        with tempfile.TemporaryDirectory() as tmp:
+            assets = pathlib.Path(tmp) / "assets"
+            make_tree(assets)
+            out = pathlib.Path(tmp) / "out"
+            V.build_pack(assets, out)
+            V.build_pack(assets, out)  # must not raise
+
+    def test_out_existing_regular_file_is_a_pack_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            assets = pathlib.Path(tmp) / "assets"
+            make_tree(assets)
+            out_file = pathlib.Path(tmp) / "out"
+            write(out_file, b"not a folder")
+            with self.assertRaises(V.PackError):
+                V.build_pack(assets, out_file)
 
 
 if __name__ == "__main__":

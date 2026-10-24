@@ -6,9 +6,11 @@ Usage:
 
 --assets  the converted asset folder (default: $MB3_ASSETS, else ./assets; the output of
           tools/convert_assets.py)
---out     where to write the pack; created if missing. Refused if it is --assets itself or sits inside
-          this repository (docs/VITA_PLAN.md 5.6: the pack is copied to ux0:data/MuggleBall3/assets or
-          bundled read-only at app0:/assets, never committed)
+--out     where to write the pack; created if missing. Refused if it is --assets itself, sits inside
+          --assets or has --assets inside it, sits inside this repository (docs/VITA_PLAN.md 5.6: the
+          pack is copied to ux0:data/MuggleBall3/assets or bundled read-only at app0:/assets, never
+          committed), is an existing file rather than a folder, or already has unrelated content in it
+          (this tool only ever prunes a folder carrying its own vita_pack.json manifest)
 --no-resample  copy every file as it is, even non-power-of-two mipmapped textures
 --dry-run      print what would happen; write nothing (not even --out itself)
 --quiet        only print the final summary line
@@ -65,17 +67,36 @@ Textures/Oreols/ and Textures/Particles/, which the particle and prize-pickup ef
 ModelCache.cpp, not UiAssets.cpp -- is a resampling candidate when its width or height is not a power of
 two.
 
-Dimensions are read from the file's own header (PNG IHDR; JPEG SOF0/SOF2, or any other SOFn marker) with
-the standard library, never by decoding the image. Resampling (stretch to the next power of two in each
-dimension, never pad -- the UVs are normalised, so nothing else about how a texture is used changes) is
-tried with Pillow (LANCZOS; JPEG quality 95, PNG as PNG) if it is importable, else with the macOS `sips`
-command-line tool if it is on PATH, else the file is left as it was copied and listed in the manifest as
-unresampled, so a device-side fallback (generating mips by hand for that one texture, or simply not
-mipmapping it) knows which textures still need it.
+One exception, confirmed harmless in the shipped data rather than guessed: Data/Materials/materials.json
+has a System-group material "Lazer.png" with textures ["lazer"], which TextureIndex::find() resolves to
+Textures/Icons/Lazer.png (76x76, NPOT) because no root-level lazer.* exists -- a mipmapped (cache.texture)
+material living inside the "always UI" Icons/ folder. Nothing reaches it at runtime: Weapons.cpp's laser
+uses the "bat_lazer" material (textures ["Metall-Raketka-Red"]) and the "Laser" particle
+(Particles/ParticleLaser1.png, which this tool does resample); no Data/Levels object and no glb extras
+name "Lazer.png"; the only JSON naming it is the never-read template Data/Objects/Bullets/lazer.json. So
+treating Icons/ as entirely UI stays correct for the shipped data. If a future change ever makes a level,
+glb or particle reach that material, the folder shortcut stops being accurate and the resample set should
+instead be derived from the materials/particles/glb names that actually get drawn.
 
-Already-up-to-date files (same size and mtime as --out's copy; a resampled file's mtime is set to match
-its source even though its size necessarily differs) are skipped, so a second run is quick, and any file
---out has that --assets no longer does is removed, so the pack mirrors the source exactly.
+Dimensions are read from the file's own header (PNG IHDR; JPEG SOF0/SOF2, or any other SOFn marker) with
+the standard library, never by decoding the image. A Textures/ file whose header this parser cannot read
+is still copied, but listed in the manifest's unreadableTextures (never silently dropped from every
+report, since the manifest's whole purpose is being the device-side fallback list). Resampling (stretch
+to the next power of two in each dimension, never pad -- the UVs are normalised, so nothing else about
+how a texture is used changes) is tried with Pillow (LANCZOS; JPEG quality 95, PNG as PNG) if it is
+importable, else with the macOS `sips` command-line tool if it is on PATH, else the file is left as it
+was copied and listed in the manifest as unresampled, so a device-side fallback (generating mips by hand
+for that one texture, or simply not mipmapping it) knows which textures still need it. A resample attempt
+that raises (a header that lied about the body, or a failing `sips`) is caught per file: the file is
+copied as is, logged, and listed as unresampled too -- one bad texture never aborts the whole pack.
+
+Already-up-to-date files are skipped, so a second run is quick: same mtime as --out's copy, and -- for a
+file this run would resample -- --out's own header already reports the resampled size (not just a
+matching mtime, which a prior --no-resample run or a copy/sips/Pillow-unavailable fallback could share
+with a file that still needs resampling), or, for every other file, the same size as the source. Any
+file --out has that --assets no longer does is removed, so the pack mirrors the source exactly -- except
+when --out is not empty and was not itself built by this tool (no vita_pack.json inside it), in which
+case the whole run is refused rather than risk deleting someone else's files.
 """
 import argparse
 import json
@@ -124,6 +145,11 @@ def jpeg_size(data):
     while offset + 2 <= len(data):
         if data[offset] != 0xFF:
             raise HeaderError("malformed JPEG marker")
+        # ITU-T.81 B.1.1.2: any number of 0xFF fill bytes may precede a marker's code byte.
+        while offset + 1 < len(data) and data[offset + 1] == 0xFF:
+            offset += 1
+        if offset + 1 >= len(data):
+            raise HeaderError("truncated JPEG marker")
         marker = data[offset + 1]
         if marker in _MARKERS_WITHOUT_PAYLOAD:
             offset += 2
@@ -294,16 +320,21 @@ def _is_inside(path, root):
         return False
 
 
-def is_up_to_date(src_stat, dst, resized):
+def is_up_to_date(src_stat, dst, rel, target):
     """Whether dst already holds src's content: same whole-second mtime (some filesystems keep no finer
-    resolution), and -- unless this file is resampled, whose size necessarily differs from its source --
-    the same size too."""
+    resolution) and, for a file this run would resample (target is the (width, height) it should end up
+    at), dst's own header already reports exactly that size -- a matching mtime alone is not enough,
+    since a prior --no-resample run, or a run where neither Pillow nor sips was available, sets dst's
+    mtime to the source's while leaving dst's content non-power-of-two. For every other file (target is
+    None), the same size as the source is enough."""
     if not dst.exists():
         return False
     dst_stat = dst.stat()
     if int(src_stat.st_mtime) != int(dst_stat.st_mtime):
         return False
-    return resized or src_stat.st_size == dst_stat.st_size
+    if target is not None:
+        return read_texture_size(dst, rel) == target
+    return src_stat.st_size == dst_stat.st_size
 
 
 def _prune_empty_dirs(root):
@@ -335,28 +366,34 @@ def remove_stale(out_dir, keep_relpaths, dry_run, log):
 
 
 def _resize_target(rel, src, ui_keys):
-    """(width, height) to resample `rel` to, or None if it is not a Textures/ file, is UI art, is already
-    power-of-two, or its header could not be read."""
+    """(target, unreadable) for `rel`: target is the (width, height) to resample it to, or None if it is
+    not a Textures/ file, is UI art (whose header is never even read -- it is left alone regardless of
+    its size), or is already power-of-two; unreadable is True when `rel` IS a Textures/, non-UI file
+    whose header this parser could not read, which the caller must report (the file is still copied, just
+    as it is, and is never a resize candidate -- see read_texture_size)."""
     if not rel.startswith("Textures/"):
-        return None
+        return None, False
+    if is_ui_texture(rel[len("Textures/"):], ui_keys):
+        return None, False
     dims = read_texture_size(src, rel)
     if dims is None:
-        return None
+        return None, True
     target = (next_pot(dims[0]), next_pot(dims[1]))
-    if target == dims or is_ui_texture(rel[len("Textures/"):], ui_keys):
-        return None
-    return target
+    return (None, False) if target == dims else (target, False)
 
 
-def npot_texture_report(files, ui_keys, out_dir, dry_run):
+def npot_texture_report(files, ui_keys, out_dir, dry_run, resample):
     """[(relpath, (width, height))] of every mipmapped texture that is still not power-of-two in the pack
     as it stands right now (ground truth: whatever is actually on disk, or, in --dry-run where nothing
-    was written, whatever --assets has)."""
+    was written, whatever --assets has) -- except in --dry-run with resample on, where a real run would
+    resample every candidate, so none is reported as left unresampled."""
     report = []
     for rel in sorted(files):
         src = files[rel]
-        target = _resize_target(rel, src, ui_keys)
+        target, _unreadable = _resize_target(rel, src, ui_keys)
         if target is None:
+            continue
+        if dry_run and resample:
             continue
         dst = out_dir / rel
         current = read_texture_size(dst, rel) if (not dry_run and dst.exists()) else read_texture_size(src, rel)
@@ -372,10 +409,23 @@ def build_pack(assets_dir, out_dir, resample=True, dry_run=False, log=lambda mes
     out_dir = pathlib.Path(out_dir)
     if not assets_dir.is_dir():
         raise PackError(f"no such assets folder: {assets_dir}")
-    if out_dir.resolve() == assets_dir.resolve():
+    assets_resolved = assets_dir.resolve()
+    out_resolved = out_dir.resolve()
+    if out_resolved == assets_resolved:
         raise PackError("--out must not be the same folder as --assets")
-    if _is_inside(out_dir.resolve(), REPO_ROOT):
+    if _is_inside(out_resolved, REPO_ROOT):
         raise PackError(f"--out must not be inside the repository ({REPO_ROOT}); pick a path outside it")
+    if _is_inside(out_resolved, assets_resolved):
+        raise PackError(f"--out must not be inside --assets ({assets_dir}); pick a separate folder")
+    if _is_inside(assets_resolved, out_resolved):
+        raise PackError(f"--out must not contain --assets ({assets_dir}); pick a separate folder, not "
+                         "one that --assets already sits inside")
+    if out_resolved.exists() and not out_resolved.is_dir():
+        raise PackError(f"--out is not a folder: {out_dir}")
+    if (out_resolved.is_dir() and any(out_resolved.iterdir())
+            and not (out_resolved / MANIFEST_NAME).is_file()):
+        raise PackError(f"--out exists and was not made by this tool (no {MANIFEST_NAME} in it); "
+                         "pick an empty folder, or one this tool already built the pack into")
 
     files = runtime_files(assets_dir)
     ui_keys = ui_texture_keys(assets_dir / "Data" / "Menu")
@@ -386,23 +436,31 @@ def build_pack(assets_dir, out_dir, resample=True, dry_run=False, log=lambda mes
 
     copied_files = copied_bytes = skipped_files = 0
     resampled = []
+    unreadable_textures = []
 
     for rel in sorted(files):
         src = files[rel]
         dst = out_dir / rel
         src_stat = src.stat()
-        target = _resize_target(rel, src, ui_keys)
+        target, unreadable = _resize_target(rel, src, ui_keys)
+        if unreadable:
+            unreadable_textures.append(rel)
+            log(f"unreadable image header, copied as is: {rel}")
         will_resample = target is not None and resample
 
-        if is_up_to_date(src_stat, dst, resized=will_resample):
+        if is_up_to_date(src_stat, dst, rel, target if will_resample else None):
             skipped_files += 1
             continue
 
         if dry_run:
             if target is not None:
                 dims = read_texture_size(src, rel)
-                log(f"would resample: {rel} {dims[0]}x{dims[1]} -> {target[0]}x{target[1]}"
-                    if resample else f"would copy (NPOT, --no-resample): {rel}")
+                if resample:
+                    resampled.append({"path": rel, "originalSize": list(dims), "newSize": list(target),
+                                       "method": "planned"})
+                    log(f"would resample: {rel} {dims[0]}x{dims[1]} -> {target[0]}x{target[1]}")
+                else:
+                    log(f"would copy (NPOT, --no-resample): {rel}")
             else:
                 log(f"would copy: {rel}")
             copied_files += 1
@@ -412,21 +470,28 @@ def build_pack(assets_dir, out_dir, resample=True, dry_run=False, log=lambda mes
         dst.parent.mkdir(parents=True, exist_ok=True)
         if will_resample:
             dims = read_texture_size(src, rel)
-            method = resample_texture(src, dst, *target)
-            if method == "copy":
-                log(f"leaving as copied (no Pillow and no sips): {rel} is {dims[0]}x{dims[1]}, "
-                    f"not a power of two")
+            try:
+                method = resample_texture(src, dst, *target)
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                if dst.exists():
+                    dst.unlink()
+                shutil.copy2(src, dst)
+                log(f"could not resample ({error}): {rel} stays {dims[0]}x{dims[1]}, not a power of two")
             else:
-                resampled.append({"path": rel, "originalSize": list(dims), "newSize": list(target),
-                                   "method": method})
-                log(f"resample: {rel} {dims[0]}x{dims[1]} -> {target[0]}x{target[1]} ({method})")
+                if method == "copy":
+                    log(f"leaving as copied (no Pillow and no sips): {rel} is {dims[0]}x{dims[1]}, "
+                        f"not a power of two")
+                else:
+                    resampled.append({"path": rel, "originalSize": list(dims), "newSize": list(target),
+                                       "method": method})
+                    log(f"resample: {rel} {dims[0]}x{dims[1]} -> {target[0]}x{target[1]} ({method})")
         else:
             shutil.copy2(src, dst)
         os.utime(dst, (src_stat.st_mtime, src_stat.st_mtime))
         copied_files += 1
         copied_bytes += dst.stat().st_size
 
-    unresampled = npot_texture_report(files, ui_keys, out_dir, dry_run)
+    unresampled = npot_texture_report(files, ui_keys, out_dir, dry_run, resample)
     total_bytes = sum((out_dir / rel).stat().st_size if (not dry_run and (out_dir / rel).exists())
                        else src.stat().st_size
                        for rel, src in files.items())
@@ -438,6 +503,7 @@ def build_pack(assets_dir, out_dir, resample=True, dry_run=False, log=lambda mes
         "filesCopied": copied_files,
         "bytesCopied": copied_bytes,
         "skippedFiles": skipped_files,
+        "unreadableTextures": sorted(unreadable_textures),
         "removedFiles": removed,
         "resampledTextures": resampled,
         "unresampledNpotTextures": [{"path": rel, "size": list(size)} for rel, size in unresampled],
@@ -471,7 +537,8 @@ def main():
     megabytes = report["totalBytes"] / 1_000_000
     print(f"vita_pack: {report['totalFiles']} files, {megabytes:.1f} MB; {report['filesCopied']} copied, "
           f"{report['skippedFiles']} skipped, {len(report['resampledTextures'])} resampled, "
-          f"{len(report['unresampledNpotTextures'])} NPOT texture(s) left unresampled")
+          f"{len(report['unresampledNpotTextures'])} NPOT texture(s) left unresampled, "
+          f"{len(report['unreadableTextures'])} texture(s) with an unreadable header")
 
 
 if __name__ == "__main__":
