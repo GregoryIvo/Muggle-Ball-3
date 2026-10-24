@@ -166,17 +166,27 @@ def jpeg_size(data):
     raise HeaderError("no SOF marker found")
 
 
+# The biggest texture side the Vita's GPU takes. A header claiming more is a broken file, not a texture:
+# resampling it would ask Pillow or sips for an absurd image (Pillow refuses with its decompression-bomb
+# error, which is not an OSError), so such a file is treated as unreadable and copied as it is.
+MAX_TEXTURE_SIDE = 4096
+
+
 def read_texture_size(path, relpath):
-    """(width, height) of a texture file, or None if its header cannot be read (reported by the caller,
-    not fatal: the file is still copied, just never a resampling candidate)."""
+    """(width, height) of a texture file, or None if its header cannot be read or claims a size no Vita
+    texture can have (reported by the caller, not fatal: the file is still copied, just never a resampling
+    candidate)."""
     try:
         data = path.read_bytes()
     except OSError:
         return None
     try:
-        return png_size(data) if relpath.lower().endswith(".png") else jpeg_size(data)
+        width, height = png_size(data) if relpath.lower().endswith(".png") else jpeg_size(data)
     except HeaderError:
         return None
+    if not (0 < width <= MAX_TEXTURE_SIDE and 0 < height <= MAX_TEXTURE_SIDE):
+        return None
+    return width, height
 
 
 # --- Power-of-two math -----------------------------------------------------------------------------------
@@ -472,7 +482,10 @@ def build_pack(assets_dir, out_dir, resample=True, dry_run=False, log=lambda mes
             dims = read_texture_size(src, rel)
             try:
                 method = resample_texture(src, dst, *target)
-            except (OSError, ValueError, subprocess.SubprocessError) as error:
+            except Exception as error:  # noqa: BLE001 -- one bad texture must never abort the pack
+                # Pillow raises its own classes for a corrupt body (DecompressionBombError derives from
+                # Exception, not OSError), sips reports through SubprocessError, and a huge image can end
+                # in MemoryError; whatever it was, the file is copied as it is and reported.
                 if dst.exists():
                     dst.unlink()
                 shutil.copy2(src, dst)

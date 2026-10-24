@@ -7,6 +7,7 @@ import struct
 import sys
 import tempfile
 import unittest
+import zlib
 from unittest import mock
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -330,6 +331,20 @@ class BuildPackTest(unittest.TestCase):
         # Never counted as an unresampled NPOT texture either -- its size is simply unknown.
         paths = {entry["path"] for entry in report["unresampledNpotTextures"]}
         self.assertNotIn("Textures/garbage.png", paths)
+
+    def test_absurd_header_is_reported_and_the_pack_completes(self):
+        # A valid PNG whose IHDR claims 20000x20000: resampling it would be a decompression bomb for Pillow
+        # (an exception that is not an OSError), so the size is treated as unreadable and the file copied.
+        data = bytearray(png_fixture(10, 5))
+        ihdr = data.index(b"IHDR")
+        data[ihdr + 4:ihdr + 12] = struct.pack(">II", 20000, 20000)
+        crc = zlib.crc32(bytes(data[ihdr:ihdr + 17])) & 0xFFFFFFFF
+        data[ihdr + 17:ihdr + 21] = struct.pack(">I", crc)
+        write(self.assets / "Textures/liar.png", bytes(data))
+        report = V.build_pack(self.assets, self.out, log=self.log)
+        self.assertEqual((self.out / "Textures/liar.png").read_bytes(), bytes(data))
+        self.assertIn("Textures/liar.png", report["unreadableTextures"])
+        self.assertTrue((self.out / "vita_pack.json").exists())
 
     def test_second_run_copies_nothing(self):
         V.build_pack(self.assets, self.out, log=self.log)
