@@ -146,6 +146,11 @@ add_executable(mb_physics_scene_tests test_physics_scene.cpp)
 target_link_libraries(mb_physics_scene_tests PRIVATE mb_game)
 add_test(NAME mb_physics_scene_tests COMMAND mb_physics_scene_tests)
 
+# The named physics profiles (desktop, vita) and their per-level overrides. CPU only, no game data needed.
+add_executable(mb_physics_profile_tests test_physics_profile.cpp)
+target_link_libraries(mb_physics_profile_tests PRIVATE mb_game)
+add_test(NAME mb_physics_profile_tests COMMAND mb_physics_profile_tests)
+
 # Runs all converted levels in the physics world when MB3_ASSETS points at the data; exits 77 (skipped) otherwise.
 add_executable(mb_physics_smoke physics_smoke.cpp)
 target_link_libraries(mb_physics_smoke PRIVATE mb_game)

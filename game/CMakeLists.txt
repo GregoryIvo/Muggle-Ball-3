@@ -12,6 +12,7 @@ add_library(mb_game
   src/ClothDraw.cpp
   src/PathPlayer.cpp
   src/PhysicsScene.cpp
+  src/PhysicsProfile.cpp
   src/BallReach.cpp
   src/Gameplay.cpp
   src/Prizes.cpp

@@ -4,6 +4,7 @@
 # port, docs/VITA_PLAN.md the plan behind it.
 
 set(MB3_PLATFORM_VITA ON)
+add_compile_definitions(MB3_PLATFORM_VITA=1)  # the code itself tests #ifdef MB3_PLATFORM_VITA (PhysicsProfile.cpp, StbImpl.cpp, Log.cpp)
 
 # vita_create_self and vita_create_vpk.
 include("${VITASDK}/share/vita.cmake")
@@ -11,7 +12,7 @@ include("${VITASDK}/share/vita.cmake")
 # Nothing can run tests in a cross build; the host builds keep them on.
 set(MB3_BUILD_TESTS OFF CACHE BOOL "Build unit tests (off on Vita: a cross build cannot run them)")
 
-option(MB3_VITA_BUILD_ENGINE "Vita: also cross-compile mb_engine and mb_game (work in progress until M3a)" OFF)
+option(MB3_VITA_BUILD_ENGINE "Vita: also cross-compile mb_engine and mb_game (the app's VPK follows in M5b)" ON)
 
 # Title IDs are four letters and five digits. The game and its hello share one; the device benchmarks
 # get their own so they can sit beside it on the LiveArea.
