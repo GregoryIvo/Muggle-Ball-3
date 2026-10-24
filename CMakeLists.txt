@@ -57,6 +57,8 @@ if(MB3_PLATFORM_VITA)
   if(MB3_VITA_BUILD_ENGINE)
     add_subdirectory(engine)
     add_subdirectory(game)
+    # The M4a device render test (docs/VITA.md "GL back end"): needs mb_engine, so it comes after it.
+    add_subdirectory(platform/vita/render_test)
   endif()
 else()
   add_subdirectory(engine)

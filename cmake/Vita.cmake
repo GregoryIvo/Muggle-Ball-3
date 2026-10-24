@@ -15,7 +15,12 @@ if(MB3_BUILD_TESTS)
   message(FATAL_ERROR "MB3_BUILD_TESTS is not available in a Vita cross build (the tests run on the host)")
 endif()
 
-option(MB3_VITA_BUILD_ENGINE "Vita: also cross-compile mb_engine and mb_game (work in progress until M3a)" OFF)
+option(MB3_VITA_BUILD_ENGINE "Vita: also cross-compile mb_engine and mb_game, with the vitaGL renderer" ON)
+
+# The engine's own default (SDLGPU) has no Vita back end: cached here, before engine/CMakeLists.txt's
+# set(... CACHE STRING) runs, so a Vita build gets vitaGL unless the command line overrides it. SDLGPU stays
+# selectable (it still compiles, M3a-style, since the SDK's SDL3 exports the GPU API with no back end behind it).
+set(MB3_RENDERER "VITAGL" CACHE STRING "Graphics back end (see engine/CMakeLists.txt); VITAGL on the Vita by default")
 
 # Title IDs are four letters and five digits. The game and its hello share one; the device benchmarks
 # get their own so they can sit beside it on the LiveArea.
