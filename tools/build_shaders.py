@@ -1,16 +1,30 @@
 #!/usr/bin/env python3
-"""Compile the GLSL 450 shaders in engine/shaders to SPIR-V and Metal source.
+"""Compile the shaders in engine/shaders to the generated headers the engine builds from.
 
-For every engine/shaders/<name>.vert and <name>.frag this runs glslangValidator
-(Vulkan semantics) to get SPIR-V, then spirv-cross to get MSL, and writes
-engine/shaders/generated/<name>_<stage>.h holding both, so the C++ build needs
-no shader tools. Re-run it (and commit the headers) after editing a shader:
+Two independent halves:
+
+- SDL GPU (engine/shaders/*.vert, *.frag, GLSL 450): for every shader this runs
+  glslangValidator (Vulkan semantics) to get SPIR-V, then spirv-cross to get MSL, and
+  writes engine/shaders/generated/<name>_<stage>.h holding both, so the C++ build needs
+  no shader tools.
+- GL (engine/shaders/gl/*.vert, *.frag, GLSL ES 1.00): for every shader this embeds the
+  body as-is (no preamble: the GL back end's Platform::preamble() prepends the right one
+  at runtime) as a string constant `gl_<name>_<stage>` in engine/shaders/generated/gl_shaders.h,
+  plus `gl_mesh_frag_nodiscard` (mesh.frag with the lines between the ALPHA_TEST markers
+  removed: the discard-free variant). If glslangValidator is on PATH, each body is also
+  validated under both the ES preamble ("#version 100" + precision for a fragment shader)
+  and the desktop preamble ("#version 120" plus empty lowp/mediump/highp defines); a
+  validation error fails the tool. Without glslangValidator the bodies are embedded anyway
+  (the C++ build must never need this tool; only regenerating the header does).
+
+Re-run it (and commit the headers) after editing a shader:
 
     python3 tools/build_shaders.py
 
-Needs glslangValidator and spirv-cross on PATH (brew install glslang spirv-cross).
+Needs glslangValidator and spirv-cross on PATH for the SDL GPU half (brew install glslang
+spirv-cross); glslangValidator is optional for the GL half.
 
-The shaders follow SDL3 GPU's binding rules, which both back ends rely on:
+The SDL GPU shaders follow its binding rules, which the back end relies on:
   SPIR-V   vertex: uniform buffers in set 1; fragment: sampled textures in set 2,
            uniform buffers in set 3 (binding = slot within that set)
   MSL      [[buffer(n)]] / [[texture(n)]] / [[sampler(n)]] with n = the SPIR-V
@@ -27,6 +41,15 @@ import sys
 import tempfile
 
 STAGES = ("vert", "frag")
+
+# The preambles engine/src/render/gl/GlPlatform.h documents for Platform::preamble(); validation runs the
+# GL shader bodies (which carry no preamble of their own) under both so a change that only one accepts is caught.
+GL_ES_PREAMBLE = {"vert": "#version 100\n", "frag": "#version 100\nprecision mediump float;\n"}
+GL_DESKTOP_PREAMBLE = "#version 120\n#define lowp\n#define mediump\n#define highp\n"
+
+# tools/build_shaders.py makes the discard-free mesh.frag variant by deleting the lines between these markers.
+ALPHA_TEST_BEGIN = "// ALPHA_TEST_BEGIN"
+ALPHA_TEST_END = "// ALPHA_TEST_END"
 
 # SDL3's Metal back end runs on macOS 10.14 and later; MSL 2.1 is that release's
 # version and the shaders need nothing newer, so it works on every supported macOS.
@@ -94,6 +117,83 @@ def cpp_raw_string(text):
     return "\n".join(f'    R"MSL({c})MSL"' for c in chunks)
 
 
+def strip_alpha_test(body):
+    """mesh.frag with the lines between the ALPHA_TEST markers (inclusive) removed: the discard-free variant
+    the back end picks when a texture has no alpha below 255 and the material's alpha is 1."""
+    out = []
+    skipping = False
+    found_begin = found_end = False
+    for line in body.splitlines(keepends=True):
+        if ALPHA_TEST_BEGIN in line:
+            skipping, found_begin = True, True
+            continue
+        if ALPHA_TEST_END in line:
+            skipping, found_end = False, True
+            continue
+        if not skipping:
+            out.append(line)
+    if not (found_begin and found_end):
+        sys.exit(f"mesh.frag: no {ALPHA_TEST_BEGIN} / {ALPHA_TEST_END} markers found")
+    return "".join(out)
+
+
+def validate_gl(glslang, name, stage, body):
+    """glslangValidator under both targets' preambles; a no-op if glslangValidator is not on PATH (the GL
+    bodies still get embedded: the C++ build must never need this tool)."""
+    if not glslang:
+        return
+    for label, preamble in (("ES", GL_ES_PREAMBLE[stage]), ("desktop", GL_DESKTOP_PREAMBLE)):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = pathlib.Path(tmp) / f"check.{stage}"
+            source.write_text(preamble + body)
+            result = subprocess.run([glslang, "-S", stage, str(source)], capture_output=True, text=True)
+            if result.returncode != 0:
+                sys.exit(f"{name}.{stage} ({label} preamble) failed to validate:\n{result.stdout}{result.stderr}")
+
+
+def gl_cpp_string(name, text):
+    if ")GLSL\"" in text:
+        sys.exit(f"{name}: generated GLSL contains the raw string terminator")
+    return f'R"GLSL(\n{text})GLSL"'
+
+
+def gl_header_text(entries):
+    body = "\n".join(f"inline constexpr char {ident}[] =\n    {gl_cpp_string(ident, text)};\n"
+                     for ident, text in entries)
+    return f"""// Generated by tools/build_shaders.py from engine/shaders/gl/*.vert and *.frag. Do not edit.
+#pragma once
+
+namespace mb::shaders {{
+
+{body}
+}}  // namespace mb::shaders
+"""
+
+
+def process_gl(shaders_dir, glslang):
+    """Every engine/shaders/gl/<name>.<stage>, embedded verbatim (no preamble: the back end's
+    Platform::preamble() supplies it at runtime), plus the discard-free mesh fragment variant."""
+    gl_dir = shaders_dir / "gl"
+    sources = sorted(p for stage in STAGES for p in gl_dir.glob(f"*.{stage}"))
+    if not sources:
+        sys.exit(f"no shaders in {gl_dir}")
+    entries = []
+    mesh_frag = None
+    for source in sources:
+        name, stage = source.stem, source.suffix[1:]
+        text = source.read_text()
+        validate_gl(glslang, name, stage, text)
+        entries.append((f"gl_{name}_{stage}", text))
+        if name == "mesh" and stage == "frag":
+            mesh_frag = text
+    if mesh_frag is None:
+        sys.exit(f"{gl_dir}/mesh.frag not found (the discard-free variant needs it)")
+    nodiscard = strip_alpha_test(mesh_frag)
+    validate_gl(glslang, "mesh", "frag", nodiscard)
+    entries.append(("gl_mesh_frag_nodiscard", nodiscard))
+    return entries
+
+
 def header_text(name, stage, source_name, words, msl, entry):
     ident = f"{name}_{stage}"
     return f"""// Generated by tools/build_shaders.py from engine/shaders/{source_name}. Do not edit.
@@ -140,6 +240,13 @@ def main():
             target = args.out / f"{name}_{stage}.h"
             target.write_bytes(header_text(name, stage, source.name, words, msl, entry).encode())
             print(f"{source.name}: {len(words) * 4} bytes SPIR-V, {len(msl)} chars MSL -> {target}")
+
+    # The GL half: independent of the SDL GPU one above, and of glslangValidator being on PATH (shutil.which,
+    # not find_tool, which would exit if it is missing).
+    gl_entries = process_gl(args.shaders, shutil.which("glslangValidator"))
+    gl_target = args.out / "gl_shaders.h"
+    gl_target.write_bytes(gl_header_text(gl_entries).encode())
+    print(f"GL: {len(gl_entries)} shader(s) -> {gl_target}")
 
 
 if __name__ == "__main__":
