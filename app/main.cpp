@@ -386,45 +386,6 @@ void windowSize(const Options& options, const mb::SaveData& save, int& width, in
     height = options.sizeGiven ? options.height : save.settings.windowHeight;
 }
 
-// Average time per frame (and how much of it `work` took: the physics, the update of the rules), logged every few seconds
-// and when the window closes.
-class FrameStats {
-public:
-    explicit FrameStats(const char* work) : work_(work) {}
-
-    void work(double ms) { workMs_ += ms; }
-
-    void frame() {
-        const Clock::time_point now = Clock::now();
-        if (last_ != Clock::time_point{}) {
-            totalMs_ += std::chrono::duration<double, std::milli>(now - last_).count();
-            ++frames_;
-        }
-        last_ = now;
-        if (totalMs_ >= kReportMs) {
-            report();
-        }
-    }
-
-    void report() {
-        if (frames_ > 0) {
-            mb::logInfo("average frame time {:.2f} ms ({:.0f} fps) over {} frames, {} {:.2f} ms", totalMs_ / frames_,
-                        1000.0 * frames_ / totalMs_, frames_, work_, workMs_ / frames_);
-        }
-        totalMs_ = 0;
-        workMs_ = 0;
-        frames_ = 0;
-    }
-
-private:
-    static constexpr double kReportMs = 5000;
-    const char* work_;
-    Clock::time_point last_{};
-    double totalMs_ = 0;
-    double workMs_ = 0;
-    int frames_ = 0;
-};
-
 int runWindow(const Options& options) {
     // Resolve the assets and the level first, so a bad argument fails before a window flashes up.
     Assets assets;
@@ -454,7 +415,7 @@ int runWindow(const Options& options) {
     mb_app::HudOverlay hud(renderer, options.hud);
     bool shapes = options.shapes;
     bool paused = false;
-    FrameStats stats("physics");
+    mb_app::FrameStats stats("physics");
     std::mt19937 random{std::random_device{}()};
     std::uniform_real_distribution<float> sideways(-5.0f, 5.0f);  // degrees off straight ahead
     Clock::time_point lastFrame = Clock::now();
