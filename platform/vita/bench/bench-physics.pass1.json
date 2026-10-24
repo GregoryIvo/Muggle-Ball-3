@@ -1,0 +1,16 @@
+{
+  "notes": "docs/VITA_PLAN.md M3b, pass 1: today's solver settings on the 15 levels the plan names, 20 simulated seconds each, one thread. Copy to ux0:data/MuggleBall3/bench-physics.json.",
+  "label": "pass1",
+  "profile": "vita",
+  "seconds": 20,
+  "velocitySteps": 100,
+  "positionSteps": 1,
+  "collisionSteps": 1,
+  "threads": 0,
+  "levels": [
+    "knight-miss-1457", "village-tennis", "piratos-dom-na-vode", "knight-eggs", "village-dinner",
+    "piratos-dva-doma", "village-logovo-vedmi", "knight-shashki", "knight-v-yablochko", "piratos-gorillas",
+    "village-na-melnice", "village-rinok", "Village-Dvorik",
+    "knight-garden", "village-love"
+  ]
+}

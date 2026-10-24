@@ -25,6 +25,29 @@ included here.
   `PhysicsSettings`, sized from `mb_physics_smoke --measure`; selected with
   `--physics-profile <name>` in `MuggleBall3` (the game and the level viewer alike),
   `mb_physics_smoke`, `mb_gameplay_smoke` and `mb_cloth_smoke`.
+- PlayStation Vita port, milestone M3b: the physics benchmark (`app/bench/PhysicsBench.{h,cpp}`), shared by a
+  desktop executable (`mb_physics_bench`) and a Vita VPK (`mb3_vita_bench.vpk`, title ID `MUGB00004`). It
+  plays a configured set of levels with the Autopilot in fixed steps, timing each `GameSession::update()`
+  call, and appends one CSV line per level, so a host run and a device run of the same `bench-physics.json`
+  line up and their ratio becomes the measured speed of the console, replacing the plan's 45-110x (70x
+  central) estimate once a device CSV exists. `tools/bench_ratio.py` joins the two CSVs and reports the
+  ratios and the plan's per-step budget. See `docs/VITA.md`, "Physics benchmark", for the Mac's pass-1
+  numbers and the 45-minute wall-time estimate.
+- PlayStation Vita port, M3b review fixes: the bench now drains `GameSession::takeEvents()` every step, like
+  `autoplay()` and the game, and derives its planned step count from the profile's own `fixedStep` instead of
+  assuming 60 Hz. It times each step with the kernel's own process-time counter on the Vita
+  (`steady_clock` there resolves to `gettimeofday`, not `CLOCK_MONOTONIC`, under this SDK's libstdc++) and
+  logs that gap once at start-up. A level only counts as done, and only reaches a caller's `onLevel`, once
+  its CSV line is actually written, with a fast open-and-close check of the output path before any level
+  runs; `bench-physics.json` now rejects a non-positive, absurdly large, or overflowing `seconds`/solver
+  value instead of producing a plausible-looking row from one. `LevelResult` gained `stopRequested`, tracked
+  separately from `endedBy`, so a stop request that lands on a level's own natural end is neither
+  mislabelled as an early "stopped" run nor silently lost. `mb3_vita_bench` pre-checks its levels against the
+  catalogue so a missing one cannot desync the on-screen "level i/N". `tools/bench_ratio.py`'s headline ratio
+  is now the mean-time median (section 4.4 derives its 70x from mean step times, not p95); it also flags and
+  excludes a level whose host and device rows cover a different number of steps or a different `endedBy`,
+  and keeps the most complete run, with a warning, when a level's join key repeats within one CSV (an
+  interrupted run followed by a full re-run).
 
 ## [0.1.0] - 2026-10-23
 
