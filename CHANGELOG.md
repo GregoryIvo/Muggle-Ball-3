@@ -7,6 +7,11 @@ included here.
 
 ## Unreleased
 
+### Added
+- PlayStation Vita port, milestone M1a: the VitaSDK cross build (`cmake/Vita.cmake`),
+  Jolt through its Platform Blue hook, a hello VPK that probes the console, a
+  placeholder LiveArea set and `docs/VITA.md`. The desktop build is unchanged.
+
 ### Changed
 - Renderer split into a backend-neutral part (`engine/src/render/RenderCommon.*`:
   draw collection and sorting, line/sprite/effect vertex building, the render-state
