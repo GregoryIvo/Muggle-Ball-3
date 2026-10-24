@@ -5,9 +5,10 @@ style of [`MACOS.md`](MACOS.md): how to build, what was decided and why, the num
 and the device checklist. Dates are when a thing was checked. Where a measurement contradicts the plan, the
 measurement wins and is recorded here.
 
-**Status (2026-10-24):** M1a, M3a, M4a and M5a are built; nothing has run on a console yet (see "Device
+**Status (2026-10-24):** M1a, M3a, M4a, M5a and M5b are built; nothing has run on a console yet (see "Device
 checklist"). The toolchain is installed and pinned and Jolt cross-compiles unchanged through its "Platform Blue"
-hook. A hello VPK (`mb3_vita_hello.vpk`, title ID `MUGB00003`) draws a lit triangle with the game's mesh shader in
+hook. A hello VPK (`mb3_vita_hello.vpk`, title ID `MUGB00009`, so it can sit on the LiveArea beside the game) draws
+a lit triangle with the game's mesh shader in
 GLSL ES over vitaGL, paces at two vblanks, probes the IME, SDL's GPU API, the audio device, the file system, threads
 and clocks, steps a Jolt world and logs everything. `mb_engine` and `mb_game` cross-compile with the portability
 fixes, the dropped-step counter (`PhysicsWorld::droppedSteps()`, `GameSession::droppedSteps()`) and the "vita"
@@ -15,7 +16,17 @@ fixes, the dropped-step counter (`PhysicsWorld::droppedSteps()`, `GameSession::d
 `MB3_RENDERER=VITAGL` (the Vita's default) and its desktop twin `GL` implement the full `Renderer` API over
 OpenGL 2.1 / GLSL ES from one source (see "GL back end"), and the device render-test VPK
 (`mb3_vita_render_test.vpk`, title ID `MUGB00005`) cross-compiles with no warning from this project's own files.
-The game's entry point is `runGame` in `app/Game.cpp` (M5a); the app's own VPK is M5b.
+The game's entry point is `runGame` in `app/Game.cpp` (M5a). **M5b (this milestone)** is the front end that makes
+the whole game playable with buttons and the stick alone, or with the front touch screen alone: `ConsoleInput`
+(`engine/include/mb/engine/ConsoleInput.h`, platform-neutral so its rules are unit-tested on the host,
+`tests/test_console_input.cpp`) turns the joystick's 16 buttons, its stick and the front touch screen into the
+same `InputEvents` the mouse and keyboard already fill; `Window.cpp` (`MB3_PLATFORM_VITA`) feeds it from SDL and
+reads the system's enter-button setting; a small drawn crosshair stands in for the (non-existent) mouse cursor in
+the menus; the Options screen drops the window-size list and the Fullscreen box (one fixed 960x544 display, no
+window to resize); and `platform/vita/game/` is the console's own entry point, producing `MuggleBall3.vpk` (title
+ID `MUGB00003`, "Muggle Ball 3", no game data: `unzip -l` shows only `eboot.bin`, `param.sfo` and the LiveArea
+set). It cross-compiles with no warning from this project's own files, and `arm-vita-eabi-nm` shows the three
+memory globals as `D` symbols and zero undefined symbols.
 
 ## Toolchain (pinned)
 
@@ -116,7 +127,8 @@ from the game's images is a later, opt-in tool (M8), and its output is never com
 ## Installing and running the hello
 
 1. Copy `mb3_vita_hello.vpk` to the console (VitaShell's FTP or USB) and install it from VitaShell. The bubble
-   is named "Muggle Ball 3".
+   is named "MB3 Hello" (title ID `MUGB00009`), separate from the game's own `MuggleBall3.vpk` (`MUGB00003`,
+   "Muggle Ball 3"), so both install and sit on the LiveArea at once.
 2. Start it. It sets the clocks to 444/222/222/166 MHz, draws a slowly turning orange triangle on a dark blue
    background, and writes:
    - `ux0:data/MuggleBall3/log.txt`: versions, clocks, the enter-button setting, vitaGL's memory pools, the shader
@@ -435,6 +447,135 @@ right next to the `MB3_PLATFORM_VITA` CMake variable it has always set.
   `village-ogorod` and `village-park` — the same failure the desktop profile already has at 20 s, pre-existing
   and out of scope here, not a Vita-profile regression.)
 
+### M5b: the Vita front end (2026-10-24)
+
+`ConsoleInput` (`engine/include/mb/engine/ConsoleInput.h`/`.cpp`) is the platform-neutral piece docs/VITA_PLAN.md
+5.8 describes: it owns a virtual cursor and turns the joystick's 16 positional buttons (confirm, back, Start, the
+d-pad), the left stick and the front touch screen into the same `InputEvents` the mouse and keyboard already
+fill, so `game/` needs no Vita-specific code at all. It is compiled everywhere (so `tests/test_console_input.cpp`
+covers every rule on the host with no window, SDL events or device) but only *instantiated* on the Vita;
+`Window.cpp` (`MB3_PLATFORM_VITA`) is the only caller. Deviations from the header's comments, each small:
+
+- **mouseX/Y and a plugged-in USB mouse.** The header says `Window.cpp` sets `input.mouseX/Y` from the cursor;
+  in fact `ConsoleInput::frame()` sets them directly (one less place to get it wrong), and `Window.cpp` simply
+  does not call `SDL_GetMouseState` on the Vita, instead of setting the same value twice. One real consequence:
+  a USB mouse on a PSTV still produces clicks and drags (its `PointerSample`s go into `input.pointer` exactly as
+  on desktop), but its absolute position does not drive the virtual cursor — only the stick, the d-pad and touch
+  do. Buttons and touch are the device checklist's actual target; a mouse is a bonus "still works" path the plan
+  never asked to be pixel-accurate.
+- **`input.leftButton` vs. the pointer samples' `leftDown`.** `leftButton` (the whole-frame flag) is
+  `confirmHeld_ || touchHeld_` unconditionally, including while text input is on — the header's rule for it says
+  exactly that, so a field editing the name still reports confirm as "held". Individual `PointerSample::leftDown`
+  values are different: `press()`/`release()` write an explicit true/false (mirroring `Window.cpp`'s own
+  mouse-button events, which never feed `mouseDX`/`leftDragDX`), so a confirm press while text input is on sends
+  `SDLK_RETURN` and no press sample at all, and the "release the pointer" edge case (confirm held, then text
+  input turns on) emits an explicit release even though `leftButton` itself would still read true.
+- **A touch "landing" sample.** A finger touching down always moves the cursor there first (so a later motion is
+  continuous, and `cursorX()`/`cursorY()` are right immediately), whether or not it turns out to be a menu press
+  or a play-mode tap. A play-mode tap is therefore three `PointerSample`s (the landing move, then the tap's press
+  and release at the lift point), not two: `test_console_input.cpp`'s
+  `testPlayModeTapPressesAndReleasesAtTheLandingPoint` checks that order precisely, rather than assuming two.
+- **Start-while-paused** still sends Escape (quits to the main menu on a second press), as the header says to do
+  until this milestone settles it with the user — see "Open questions" below.
+
+**The virtual cursor.** The menus need a visible pointer wherever the system doesn't offer one. No cursor-shaped
+asset survived conversion: `MB3cursor.ani` is not converted, and a grep of `Data/Menu/*.json` for anything
+cursor- or pointer-like, and of `Textures/Forms` and `Textures/Icons` for a wired-in pointer image, found
+nothing (`Textures/Forms/Arrow.png`, `Big-Point.png` and `Small-point.png` exist but are not referenced by any
+menu form, so their actual appearance and intended use are unknown — using them blind risked a worse result than
+the documented fallback). `FrontEnd.cpp` therefore draws the plan's fallback: a small crosshair built from tinted
+`Sprite`s (texture 0 draws a plain colour, as the fade-to-black cover already does), a dark ~5 px outline under a
+light 1 px cross about 16 px across, appended after the menu's own sprites so it is always on top. It shows
+whenever the mode is not `Playing` (the menus, Loading, and the pause screen), at `input.mouseX/Y`.
+
+**The Options screen.** `menu_.setVideoModes({})` already hid the window-size list (there is nothing to resize to
+besides the one 960x544 display); `Menu::setFullscreenAvailable(false)` is the new, parallel way to hide the
+Fullscreen check box, the same way (`UiWidget::visible = false`), called from `FrontEnd` under
+`MB3_PLATFORM_VITA`. `tests/test_menu.cpp` mirrors the existing "no video modes" test for it.
+
+**The entry point and the VPK.** `platform/vita/game/main.cpp` sets the clocks (444/222/222/166 MHz, logged),
+opens the log at `ux0:data/MuggleBall3/log.txt`, logs the SDL version and `mb::assetRoot()` (vitaGL has no
+version number of its own to log; its `GL_VERSION`/`GL_RENDERER`/GLSL string, the pinned commit of which is
+above, comes from the renderer's own start-up a moment later), logs a clear line if neither `app0:/assets` nor
+`ux0:data/MuggleBall3/assets` has `Data/Levels`, then calls `mb_app::runGame(mb_app::GameOptions{})` in a
+try/catch and exits with `sceKernelExitProcess`. `app/CMakeLists.txt` now builds the six sources `runGame`
+needs (`FrontEnd`, `FrontEndAudio`, `GameAudio`, `PlayerInput`, `PlaySession`, `Game.cpp` itself) as a static
+library, `mb_app`, so the desktop `MuggleBall3` (with `main.cpp`'s harness and `FormViewer.cpp`) and the Vita's
+own executable both link it instead of each listing the same six files. `cmake/Vita.cmake`'s `mb3_vita_vpk`
+needed no change: naming the Vita executable target `MuggleBall3` is what makes its VPK
+`MuggleBall3.vpk` — the name the CI job and the plan upload.
+
+Cross-build result (2026-10-24, host `build-vita`, deleted afterward per the disk rule): `mb_engine`, `mb_game`,
+`mb_app`, the hello, the render test and `MuggleBall3.vpk` all build with **zero warnings and zero errors** from
+this project's own files (every "note:" GCC prints is its standard "parameter passing changed" ABI note, from
+`<format>`, `nlohmann::json` and `std::stable_sort`'s iterator types in SDK and dependency headers, not from
+anything this milestone wrote). `unzip -l MuggleBall3.vpk`: `param.sfo` (`TITLE_ID MUGB00003`, `TITLE`/`STITLE`
+"Muggle Ball 3"), `eboot.bin`, the five LiveArea files — no data file. `arm-vita-eabi-nm MuggleBall3` shows
+`_newlib_heap_size_user`, `sceUserMainThreadStackSize` and `_pthread_stack_default_user` as `D` symbols and
+**zero** lines with ` U ` (no undefined symbols). The hello's own VPK now carries title ID `MUGB00009` ("MB3
+Hello") instead of the game's `MUGB00003`, so both install and sit on the LiveArea at once.
+
+## Controls
+
+- **Confirm** is Cross, or Circle when the system's own enter-button setting says so (read once at start-up with
+  `sceAppUtilSystemParamGetInt`, exactly as the hello does): the left mouse button at the drawn cursor, held for
+  as long as it is held. It clicks menu widgets, drags sliders, launches the ball (the press edge, same rule as
+  a mouse click or Space) and resumes from the pause screen. While a text field has the keyboard, it sends Enter
+  instead (the on-screen field's own Enter, not the IME's — the IME sends its own Return when confirmed).
+- **Back** is the other of the two buttons: Escape. It pauses a level, goes back a menu screen, and quits to the
+  main menu when pressed again while paused.
+- **Start** is Escape too. Because pressing it twice while paused abandons the level (quits to the main menu),
+  rather than, say, resuming play, **this needs the user's confirmation** — see "Open questions" below; nothing
+  device-side depends on the answer, since both readings are a single `SDLK_ESCAPE`, and changing which one
+  "wins" only needs `GameFlow.cpp`'s pause handling, not `ConsoleInput`.
+- **The left stick and the d-pad** move a small drawn crosshair (there is no system cursor): the stick scaled
+  from a dead zone so full deflection reaches 900 px/s, the d-pad always at that speed; in play, the crosshair
+  is the bat's target exactly as the mouse cursor is on desktop (`batTargetX`).
+- **The front touch screen in the menus**: a tap is a click where the finger is; dragging a finger drags
+  whatever is under it (a slider). **In play**: a finger moving only sets the bat's target, so a hand landing on
+  the screen never launches the ball; a short tap — released within 0.2 s, moved less than about 12 px — both
+  presses and releases at the finger, which is what launches. A drag, or a touch held too long, never presses.
+  The rear touch pad is disabled (`SDL_HINT_VITA_ENABLE_BACK_TOUCH=0`), so a palm there does nothing.
+- **No touch screen (PSTV)**: every screen works with the buttons and the stick alone — there is nothing in the
+  menus, the pause screen or play that touch does and the stick/d-pad/confirm cannot also do.
+- **Name entry** opens the system's IME (`sceImeDialog`, through `SDL_StartTextInput`) the first time the high
+  score or Game Over form's text field gets the keyboard. The dialog is one-shot: it opens empty, and once it
+  closes (confirmed, which also sends an automatic Return, or cancelled) nothing SDL does reopens it on its own.
+  **To reopen it** — after a cancel, or to retype the name — press confirm again while the field still has the
+  keyboard and no IME is currently shown; `Window.cpp` notices and does `SDL_StopTextInput` then
+  `SDL_StartTextInput`. Characters the bitmap font's glyph table does not have are silently dropped, as on
+  desktop.
+- **The PS button, sleep and wake**: SDL sends no background/foreground events on the Vita, so this plays out
+  through `sceAppMgrReceiveSystemEvent` instead — on `SCE_APPMGR_SYSTEMEVENT_ON_RESUME` while a level is playing
+  (the cursor hidden), `Window.cpp` pushes one `SDLK_ESCAPE`, which pauses the level exactly as if the player had
+  pressed Back; the frame's dt is separately clamped to 0.1 s, so the clock jump the sleep caused does not drive
+  a burst of dropped physics steps. See the device checklist for what the real hardware does here.
+
+## Installing the game
+
+1. Copy `MuggleBall3.vpk` to the console (VitaShell's FTP or USB) and install it from VitaShell. The bubble is
+   named "Muggle Ball 3" (title ID `MUGB00003`); `mb3_vita_hello.vpk` (`MUGB00009`, "MB3 Hello") can be installed
+   alongside it.
+2. The VPK carries no game data (a code-only build, docs/VITA_PLAN.md 5.6): copy the converted asset pack —
+   `tools/vita_pack.py`'s output from your own copy of the game — to `ux0:data/MuggleBall3/assets` on the
+   console (VitaShell's FTP or USB). `mb::assetRoot()` looks there (after `app0:/assets`, which only a personal
+   `MB3_VITA_BUNDLE_ASSETS` build has); the game logs a clear line at start-up if it finds `Data/Levels` in
+   neither place.
+3. The log (`ux0:data/MuggleBall3/log.txt`) and the save files (settings, progress, high scores) live under
+   `ux0:data/MuggleBall3/`, next to the asset pack above (`SDL_GetPrefPath("", "MuggleBall3")`).
+4. Send back `log.txt`, and anything from the device checklist below that needs a description, a photo or a
+   video (the touch-only and buttons-only runs especially).
+
+## Open questions for the user
+
+- **Start while paused.** It currently sends Escape, the same as Back, so pressing it a second time while
+  paused quits to the main menu (abandoning the level) rather than resuming play. Is that the behaviour you
+  want, or should Start resume instead (leaving Back as the only way to quit from the pause screen)?
+- **UI scale at 960x544.** The menus and the HUD are laid out and drawn exactly as they are on desktop
+  (`UiLayout::fit`), just at a smaller target; nothing has been measured yet for whether text, button hit
+  targets or the drawn cursor read comfortably from a Vita's or a PSTV's typical viewing distance. Flag anything
+  that looks too small (or too large) once you have it on hardware, and this can be tuned in a later pass.
+
 ## Known limits and open questions
 
 - Nothing has run on a console yet; everything under "Device checklist" is open.
@@ -468,6 +609,25 @@ M4a (tick with the date and paste the relevant log lines):
       GLSL translator treats that as fp16, a `mediump` UV has only about half a texel of precision at a
       texture coordinate near 1.0, which REPEAT and NPOT tiling (handoff §4.3) reach constantly; fixed to
       `highp` in the three fragment shaders' `vUv`, but worth confirming on the real GPU translator.
+
+M5b (tick with the date and a short note once tried on hardware or in Vita3K):
+
+- [ ] two levels played with touch only (no buttons, no stick): the bat follows a dragging finger, a tap
+      launches the ball, nothing else does;
+- [ ] two levels played with buttons and the stick only (no touch, as on a PSTV): the stick or d-pad moves the
+      bat, confirm launches;
+- [ ] touching to move the bat during play never launches the ball by itself (only a tap, or confirm, does);
+- [ ] everything above, and the menus, work the same with the system's enter button set to Circle instead of
+      Cross (so back/confirm are swapped);
+- [ ] pause (Back or Start while playing), resume (confirm, a menu touch, or the stick/d-pad moving), and quit to
+      the main menu (Back or Start again while paused) all work from both buttons and touch;
+- [ ] high-score name entry: the IME opens, typing and confirming enters the name; cancelling, then pressing
+      confirm again on the name field, reopens the IME; an empty name still enters as "Player";
+- [ ] Options' changes (volumes, Smart Camera, Freeze Sky, Shadows, Mirrors) persist across a quit and restart
+      (there is no window size or Fullscreen box to check: confirm they are indeed hidden);
+- [ ] the PS button, sleep and wake mid-level: the game pauses (per "Controls" above) and nothing hangs or loses
+      the save;
+- [ ] the drawn crosshair is visible and reads clearly against the lightest and darkest menu backgrounds.
 
 ## Legal
 

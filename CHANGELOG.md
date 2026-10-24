@@ -46,6 +46,19 @@ included here.
   (M5b) can run the game without the harness. The save-data and window-size helpers still have a
   separate copy in each file, since `main.cpp`'s viewer and screenshot modes still take the harness's
   own `Options`, not `GameOptions`. No behaviour change on the desktop build.
+- PlayStation Vita port, milestone M5b: the front end that makes the whole game playable with buttons
+  and the stick alone, or the front touch screen alone. `ConsoleInput`
+  (`engine/include/mb/engine/ConsoleInput.h`/`.cpp`, platform-neutral, unit-tested on the host in
+  `tests/test_console_input.cpp`) turns the joystick, its stick and the front touch screen into the
+  same `InputEvents` the mouse and keyboard already fill; `Window.cpp` reads the system's enter-button
+  setting and feeds it from SDL on the Vita. `FrontEnd` draws a small crosshair cursor in the menus
+  (there is no system one), and `Menu::setFullscreenAvailable(false)` hides the Fullscreen check box
+  the way `setVideoModes({})` already hid the window-size list. `app/CMakeLists.txt` now builds
+  `FrontEnd`, `FrontEndAudio`, `GameAudio`, `PlayerInput`, `PlaySession` and `Game.cpp` once as a
+  static library, `mb_app`, shared by the desktop `MuggleBall3` and the Vita's own
+  `platform/vita/game/`, which produces the game's data-free `MuggleBall3.vpk` (title ID
+  `MUGB00003`); the hello moved to its own title ID, `MUGB00009`, so both install at once. No
+  behaviour change on the desktop build (verified byte-identical screenshots).
 
 ## [0.1.0] - 2026-10-23
 

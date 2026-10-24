@@ -41,9 +41,9 @@ barrels and the turn of the projectiles are played).
 |---|---|
 | `engine/` | Platform-neutral runtime: window and input, GPU renderer and shaders (back end chosen by `MB3_RENDERER`: `engine/src/render/sdlgpu/` for the SDL3 GPU API, `engine/src/render/none/` a stub for builds with no GPU API, shared code in `engine/src/render/RenderCommon.*`), model and image loading, physics (`PhysicsWorld` over Jolt), audio (Ogg Vorbis decoding, mixer, device), logging, paths |
 | `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, level physics (`PhysicsScene`), the rules of play (`GameSession`, `BallReach`, the autopilot `Autopilot`), the level's special objects (`SpecialObjects`), the prizes (`Prizes`, the session's `SessionPrizes.cpp`), the weapons and the strikes of the prizes (`Weapons`), the sails (`Cloth`, `ClothPlan`), objects that follow paths (`PathPlayer`), the particle systems (`ParticleDef`, `ParticleSystem`, `ParticleDraw`), what a session looks and sounds like (`PlayScene`, `ObjectEffects`, `BrickEffects`, `PrizeScene`, `PrizeHud`, `Billboard`, `BatBarrels`, `WeaponScene`, `WeaponEffects`, `ClothDraw`, `PlaySounds`), camera, sound library, save data; the 2D UI (bitmap fonts, string table, menu forms, the menu screens and their flow, the HUD) |
-| `app/` | Executable entry point: `main.cpp` is a developer harness (the level viewer with physics and music, screenshots, the menu form viewer) around the game itself, `runGame` (`Game.cpp`), built from the front end and its play session (`PlaySession`) |
+| `app/` | Executable entry point: `main.cpp` is a developer harness (the level viewer with physics and music, screenshots, the menu form viewer) around the game itself, `runGame` (`Game.cpp`). `runGame`'s own sources (`Game.cpp`, `FrontEnd`, `FrontEndAudio`, `GameAudio`, `PlayerInput`, `PlaySession`) are the static library `mb_app`, linked by the desktop `MuggleBall3` and by the PlayStation Vita's own entry point (`platform/vita/game/`) alike |
 | `platform/macos/` | App bundle metadata |
-| `platform/vita/` | PlayStation Vita: the hello that probes the console, Jolt's platform header, what newlib lacks, and the placeholder LiveArea set (see [`docs/VITA.md`](docs/VITA.md)) |
+| `platform/vita/` | PlayStation Vita: the hello that probes the console, a device render test, the game's own entry point and VPK (`platform/vita/game/`), Jolt's platform header, what newlib lacks, and the placeholder LiveArea set (see [`docs/VITA.md`](docs/VITA.md)) |
 | `scripts/` | `package_macos.sh`: universal build, ad-hoc signing, Developer ID signing and notarization |
 | `tools/` | Asset pipeline: `convert_assets.py` runs the converters for levels (`mb3level.py`), meshes (`x2glb.py`), materials, sounds and music (`sounds.py`), textures, the menus, strings and fonts (`ui.py`) and the level list (`campaign.py`), object and particle definitions (`objects.py`), and on macOS the app icon (`make_icon.py`); also the MoleBox dumper, the shader compiler (`build_shaders.py`, SDL GPU and GL), the Vita LiveArea placeholder (`vita_livearea.py`) and a PNG screenshot comparison (`image_diff.py`) |
 | `docs/` | Architecture, level format, converted asset formats (`ASSET_FORMATS.md`), levels in the physics world (`PHYSICS.md`), sound and music (`AUDIO.md`), macOS packaging (`MACOS.md`), the PlayStation Vita port (`VITA.md`, its plan `VITA_PLAN.md`), save files (`SAVES.md`), what the object definitions say about gameplay (`OBJECTS.md`), the rules of play and the footage behind them (`GAMEPLAY.md`), how the data was recovered |
@@ -94,7 +94,9 @@ to regenerate them; that is the only thing that needs `glslangValidator` and
 A homebrew port to the PS Vita and PSTV is under way; [`docs/VITA.md`](docs/VITA.md) has the toolchain, the
 build, what was measured and the device checklist, and [`docs/VITA_PLAN.md`](docs/VITA_PLAN.md) the plan. With
 VitaSDK installed, `cmake -DCMAKE_TOOLCHAIN_FILE=$VITASDK/share/vita.toolchain.cmake` cross-builds what exists
-so far (a hello VPK); the desktop build is not affected.
+so far: a hello VPK, a device render test, and the game itself, `MuggleBall3.vpk` (title ID `MUGB00003`, no
+game data — the asset pack is copied to the console separately, `docs/VITA.md` "Installing the game"); the
+desktop build is not affected.
 
 ## Game data
 
