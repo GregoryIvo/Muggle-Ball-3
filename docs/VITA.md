@@ -29,7 +29,8 @@ Install (what was done on the Mac, 2026-10-23; the SDK lives beside the repo, ou
 ```sh
 git clone https://github.com/vitasdk/vdpm && cd vdpm
 VITASDK=/Users/greg/Documents/MagicBall3/vitasdk ./bootstrap-vitasdk.sh --install-dir /Users/greg/Documents/MagicBall3/vitasdk
-export VITASDK=/Users/greg/Documents/MagicBall3/vitasdk PATH=$VITASDK/bin:$PATH
+export VITASDK=/Users/greg/Documents/MagicBall3/vitasdk
+export PATH="$VITASDK/bin:$PATH"   # two statements: in one, $VITASDK would still be its old value
 VDPM_NONINTERACTIVE=1 vdpm install sdl3 vitaShaRK libmathneon SceShaccCgExt taihen
 git clone https://github.com/Rinnegatamante/vitaGL && cd vitaGL && git checkout 76f43e6fbe1513cee44118da7ff2c16728c4fed2
 make -j8 NO_DEBUG=1 HAVE_SHADER_CACHE=1 NO_SPLASHSCREEN=1 install
@@ -50,7 +51,8 @@ Sony's `libshacccg.suprx`, which the console must have at `ur0:data/libshacccg.s
 ## Building
 
 ```sh
-export VITASDK=/Users/greg/Documents/MagicBall3/vitasdk PATH=$VITASDK/bin:$PATH
+export VITASDK=/Users/greg/Documents/MagicBall3/vitasdk
+export PATH="$VITASDK/bin:$PATH"
 cmake -S . -B build-vita -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=$VITASDK/share/vita.toolchain.cmake
 cmake --build build-vita
@@ -101,7 +103,9 @@ an executable must not add `-lpthread` itself or every pthread symbol is defined
 `platform/vita/sce_sys/` holds a placeholder set (icon0 128x128, pic0 960x544, bg 840x500, startup 280x158,
 `template.xml`) made by `tools/vita_livearea.py` from text and plain colours with the standard library: 8-bit
 indexed PNGs (colour type 3), which is what the LiveArea needs (RGBA PNGs can fail to install or show a blank
-bubble). `tests/test_vita_livearea.py` checks the committed files' sizes and colour type. A personal set made
+bubble). The file layout and the image sizes are those of vitasdk's `pretty_livearea` sample; the XML is the
+minimal background-plus-gate layout (`style="a1"`), not the sample's framed one. `tests/test_vita_livearea.py`
+checks the committed files' sizes and colour type, and that short titles still fit. A personal set made
 from the game's images is a later, opt-in tool (M8), and its output is never committed, like the macOS icon.
 
 ## Installing and running the hello
@@ -119,11 +123,13 @@ from the game's images is a later, opt-in tool (M8), and its output is never com
      `SDL_CreateGPUDevice`, which is expected to fail).
 3. Controls: the system's enter button (Cross, or Circle when the system says so) confirms; the other one exits.
    Triangle opens the IME (type something and confirm, or cancel); Start toggles the swap interval between 2 and 1
-   (the statistics are written and reset); Select writes the statistics and the memory pools now.
+   (the statistics are written and reset); Select writes the statistics and the memory pools now; the d-pad is
+   logged.
 4. Send back `log.txt` and `probe.txt` (and a photo if the triangle looks wrong).
 
-Memory settings in the hello: newlib heap 160 MiB, main thread stack 1 MiB, default pthread stack 512 KiB
-(without it a `std::thread` gets 4 KiB), vitaGL RAM threshold 16 MiB. The game's values are decided in M6b.
+Memory settings in the hello: newlib heap 160 MiB (newlib's default is 128 MiB), main thread stack 1 MiB, default
+pthread stack 512 KiB (without it a `std::thread` gets 32 KiB, `libpthread.a`'s default), vitaGL RAM threshold
+16 MiB. The game's values are decided in M6b.
 
 ## Decisions and findings
 
@@ -137,17 +143,24 @@ Host-side checks, 2026-10-23, against the pinned toolchain:
 - **`posix_memalign`:** not in `libc.a` (`memalign`, `aligned_alloc`, `getentropy`, `mallinfo`, `sysconf` are);
   shimmed, see "Jolt". Also not declared in strict ISO mode.
 - **`SDL_CreateGPUDevice` is exported** by the SDK's `libSDL3.a` (the GPU API's dispatcher is compiled with no
-  back end behind it: SDL has `d3d12`, `metal`, `vulkan` and `xr` only). So the engine's SDL GPU renderer
+  back end behind it: SDL 3.4.16 has `d3d12`, `metal` and `vulkan` only). So the engine's SDL GPU renderer
   *links* on Vita and fails at run time; M3a can cross-compile `mb_engine` unchanged, and the vitaGL back end
   (M4a) replaces it through the renderer seam (M2).
 - **SDL3 on Vita** (its `main` branch, read 2026-10-23): the video driver touches no GXM, so vitaGL can own the
-  display while SDL does events, joystick, touch and audio. SDL never calls `sceCommonDialogUpdate`: the app
+  display while SDL does events, joystick, touch and audio (its video driver imports only `sceImeDialog*` and
+  `sceKernelPowerTick`; the GXM imports in `libSDL3.a` belong to SDL's own 2D `SDL_Renderer` back end, which must
+  never be created beside vitaGL). SDL's video driver and event pump never call `sceCommonDialogUpdate`: the app
   presents with `vglSwapBuffers(GL_TRUE)` while `SDL_ScreenKeyboardShown` is true. The IME is the one-shot
-  `sceImeDialog` (the whole string in one `TEXT_INPUT`, then Return if confirmed; a cancel sends nothing). Audio
+  `sceImeDialog`: when it closes, SDL 3.4.16 sends whatever is in its buffer as one `TEXT_INPUT`, and a Return
+  only if it was confirmed, so a cancel after typing may still deliver text (the plan's reading of SDL's `main`
+  said a cancel sends nothing; the device run decides). SDL shows the IME only when it sees no physical keyboard,
+  unless `SDL_HINT_ENABLE_SCREEN_KEYBOARD` is "1", which the hello sets. Audio
   is S16 only; below 48 kHz SDL opens the BGM port at the asked rate, unresampled. `SDL_GetPrefPath("",
-  "MuggleBall3")` is `ux0:/data/MuggleBall3/`; the base path is `app0:/`. The joystick is positional (0
-  Triangle, 1 Circle, 2 Cross, 3 Square, 4 L1, 5 R1, 6 Select, 7 Start; the d-pad is hat 0), SDL reads no
-  enter-button setting, and whether a gamepad mapping exists is logged by the hello.
+  "MuggleBall3")` is `ux0:/data/MuggleBall3/`; the base path is `app0:/`. The joystick is positional with 16
+  buttons and no hat (checked in the SDK's SDL 3.4.16 source and in its built-in "PSVita Controller" mapping):
+  0 Triangle, 1 Circle, 2 Cross, 3 Square, 4 L1, 5 R1, 6 d-pad down, 7 left, 8 up, 9 right, 10 Select, 11 Start,
+  12 to 15 L2, R2, L3, R3 (a PSTV controller only). SDL reads no enter-button setting. Whether SDL has a gamepad
+  mapping for it is logged by the hello (the mapping string is in the library, so it should).
 - **Swap interval:** `eglSwapInterval(EGL_NO_DISPLAY, 2)` sets vitaGL's `vsync_interval`, and its display-queue
   callback calls `sceDisplayWaitVblankStartMulti(vsync_interval)` (read in `source/egl.c` and `source/gxm.c` at
   the pinned commit). The hello uses it and records the presented intervals from `sceDisplayGetVcount`.
@@ -167,6 +180,11 @@ Host-side checks, 2026-10-23, against the pinned toolchain:
   so NPOT mip chains differ from the desktop's: the plan's resampling of NPOT mipmapped textures (M6a,
   `tools/vita_pack.py`) stands. `GL_REPEAT` is forwarded to GXM for any texture; whether the hardware honours it
   on linear NPOT textures is a device check (M4a's render tests).
+- **`std::thread::hardware_concurrency()` is 0** with this toolchain: libstdc++ asks `sysconf(_SC_NPROCESSORS_ONLN)`
+  and newlib's `sysconf` has no such name. The engine's `makeJobSystem` clamps `hardware_concurrency() - 1` into
+  0..3, so its default of -1 worker threads is the single-threaded job system there, which is what the Vita
+  profile wants anyway. Jolt's own `JobSystemThreadPool` given -1 threads would wrap the count and crash: always
+  give it a number.
 - **vitaGL has no shutdown call**; the process exit releases GXM.
 - **The engine and the game compile for the Vita as they are** (2026-10-23, `MB3_VITA_BUILD_ENGINE=ON`): no
   source change was needed for GCC 15.2 and newlib, and no file is built with fast-math. What they do at run

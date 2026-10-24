@@ -131,16 +131,25 @@ def draw_text(pixels, width, text, x0, y0, scale, index):
                     for dy in range(scale):
                         for dx in range(scale):
                             x, y = gx + col * scale + dx, y0 + row * scale + dy
-                            if 0 <= x < width:
+                            if 0 <= x < width and 0 <= y * width + x < len(pixels):
                                 pixels[y * width + x] = index
 
 
-def largest_scale(text, width, height, margin):
-    """The biggest glyph scale whose text fits within the margins, at least 1."""
+def block_height(scale, subtitle):
+    """The title at `scale` plus, if there is a subtitle, the gap and the subtitle at half the scale."""
+    height = GLYPH_HEIGHT * scale
+    if subtitle:
+        sub_scale = max(1, scale // 2)
+        height += sub_scale * 2 + GLYPH_HEIGHT * sub_scale
+    return height
+
+
+def largest_scale(text, subtitle, width, height, margin):
+    """The biggest glyph scale at which the title and its subtitle fit within the margins, at least 1."""
     scale = 1
     while True:
-        w, h = text_size(text, scale + 1)
-        if w > width - 2 * margin or h > height - 2 * margin:
+        w, _ = text_size(text, scale + 1)
+        if w > width - 2 * margin or block_height(scale + 1, subtitle) > height - 2 * margin:
             return scale
         scale += 1
 
@@ -154,13 +163,12 @@ def make_image(width, height, title, subtitle):
             if x < frame or y < frame or x >= width - frame or y >= height - frame:
                 pixels[y * width + x] = ACCENT
     margin = max(frame * 2, min(width, height) // 10)
-    scale = largest_scale(title, width, height, margin)
+    scale = largest_scale(title, subtitle, width, height, margin)
     tw, th = text_size(title, scale)
     sub_scale = max(1, scale // 2) if subtitle else 0
     sw, sh = text_size(subtitle, sub_scale) if subtitle else (0, 0)
     gap = sub_scale * 2
-    total = th + (gap + sh if subtitle else 0)
-    y = (height - total) // 2
+    y = max(0, (height - block_height(scale, subtitle)) // 2)
     draw_text(pixels, width, title, (width - tw) // 2, y, scale, FOREGROUND)
     if subtitle:
         draw_text(pixels, width, subtitle, (width - sw) // 2, y + th + gap, sub_scale, ACCENT)
@@ -175,7 +183,7 @@ def make_set(out, title, subtitle, background, foreground, accent):
         pixels = make_image(width, height, text, "" if width <= 128 else subtitle)
         write_indexed_png(out / name, width, height, pixels, palette)
     (out / "livearea" / "contents").mkdir(parents=True, exist_ok=True)
-    (out / "livearea" / "contents" / "template.xml").write_text(TEMPLATE_XML, encoding="utf-8")
+    (out / "livearea" / "contents" / "template.xml").write_bytes(TEMPLATE_XML.encode("utf-8"))  # LF on every platform
 
 
 def main():

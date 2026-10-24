@@ -41,6 +41,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -57,8 +58,8 @@
 #include <vector>
 
 // Newlib's heap is one fixed block taken at start-up; threads' stacks come from outside it. Both sizes and the
-// default pthread stack are set here, before anything runs (the defaults are 128 MiB, 1 MiB... and 4 KiB for
-// a pthread, which would corrupt any worker thread). The game's values are decided in M6b.
+// default pthread stack are set here, before anything runs (the defaults are 128 MiB for the heap and 32 KiB for
+// a pthread, which Jolt's workers and the probe's thread would overflow). The game's values are decided in M6b.
 extern "C" {
 unsigned int _newlib_heap_size_user = 160 * 1024 * 1024;
 unsigned int sceUserMainThreadStackSize = 1024 * 1024;
@@ -79,14 +80,21 @@ constexpr const char* kProbePath = "ux0:data/MuggleBall3/probe.txt";
 constexpr const char* kShaderCompilerPaths[] = {"ur0:data/libshacccg.suprx", "ur0:data/external/libshacccg.suprx"};
 constexpr float kClearColor[3] = {0.05f, 0.05f, 0.1f};
 
-// SDL's Vita joystick is positional: these are its button indices (SDL/src/joystick/vita/SDL_sysjoystick.c).
-enum VitaButton : int { kTriangle = 0, kCircle = 1, kCross = 2, kSquare = 3, kL1 = 4, kR1 = 5, kSelect = 6, kStart = 7 };
+// SDL's Vita joystick is positional, with the d-pad as four buttons and no hat: these are the 16 indices of the
+// SDK's SDL 3.4.16 (src/joystick/vita/SDL_sysjoystick.c, ext_button_map; its built-in "PSVita Controller" gamepad
+// mapping says the same). L2, R2, L3 and R3 exist on a PSTV's controller only.
+enum VitaButton : int {
+    kTriangle = 0, kCircle = 1, kCross = 2, kSquare = 3, kL1 = 4, kR1 = 5,
+    kDpadDown = 6, kDpadLeft = 7, kDpadUp = 8, kDpadRight = 9, kSelect = 10, kStart = 11,
+    kL2 = 12, kR2 = 13, kL3 = 14, kR3 = 15,
+};
 
 // ---------------------------------------------------------------- logging
 
 FILE* g_log = nullptr;
 
-void logf(const char* fmt, ...) {
+void logLine(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+void logLine(const char* fmt, ...) {
     char line[1024];
     va_list args;
     va_start(args, fmt);
@@ -103,7 +111,7 @@ void openLog() {
     sceIoMkdir("ux0:data", 0777);
     sceIoMkdir(kDataDir, 0777);
     g_log = std::fopen(kLogPath, "w");
-    logf("Muggle Ball 3 Vita hello (M1a). SDL %d.%d.%d compiled, %d.%d.%d linked", SDL_MAJOR_VERSION, SDL_MINOR_VERSION,
+    logLine("Muggle Ball 3 Vita hello (M1a). SDL %d.%d.%d compiled, %d.%d.%d linked", SDL_MAJOR_VERSION, SDL_MINOR_VERSION,
          SDL_MICRO_VERSION, SDL_VERSIONNUM_MAJOR(SDL_GetVersion()), SDL_VERSIONNUM_MINOR(SDL_GetVersion()),
          SDL_VERSIONNUM_MICRO(SDL_GetVersion()));
 }
@@ -236,7 +244,7 @@ GLuint compileShader(GLenum type, const char* source, const char* name) {
     char info[1024] = {};
     GLsizei length = 0;
     glGetShaderInfoLog(shader, sizeof info - 1, &length, info);
-    logf("shader %s: compile status %d%s%s", name, ok, length ? ", log: " : "", length ? info : "");
+    logLine("shader %s: compile status %d%s%s", name, ok, length ? ", log: " : "", length ? info : "");
     return shader;
 }
 
@@ -265,7 +273,7 @@ MeshProgram buildMeshProgram() {
     GLint linked = GL_FALSE;
     glGetProgramiv(p.program, GL_LINK_STATUS, &linked);
     const std::uint64_t t1 = sceKernelGetProcessTimeWide();
-    logf("mesh program: link status %d, compile+link %.1f ms", linked, (t1 - t0) / 1000.0);
+    logLine("mesh program: link status %d, compile+link %.1f ms", linked, (t1 - t0) / 1000.0);
     p.inPosition = glGetAttribLocation(p.program, "inPosition");
     p.inNormal = glGetAttribLocation(p.program, "inNormal");
     p.inUv = glGetAttribLocation(p.program, "inUv");
@@ -280,7 +288,7 @@ MeshProgram buildMeshProgram() {
     p.lightDiffuse = glGetUniformLocation(p.program, "lightDiffuse");
     p.lightAmbient = glGetUniformLocation(p.program, "lightAmbient");
     p.flags = glGetUniformLocation(p.program, "flags");
-    logf("mesh program: attributes %d %d %d, uniforms viewProj %d world %d normal %d tex %d diffuse %d flags %d",
+    logLine("mesh program: attributes %d %d %d, uniforms viewProj %d world %d normal %d tex %d diffuse %d flags %d",
          p.inPosition, p.inNormal, p.inUv, p.viewProj, p.world, p.normalMatrix, p.baseTexture, p.diffuse, p.flags);
     p.ok = linked == GL_TRUE && p.inPosition >= 0 && p.viewProj >= 0;
     return p;
@@ -321,7 +329,8 @@ void run() {
         ObjectVsBroadPhase objectVsBroadPhase;
         ObjectPairs objectPairs;
         JPH::PhysicsSystem physics;
-        physics.Init(1024, 0, 4096, 2048, broadPhaseLayers, objectVsBroadPhase, objectPairs);
+        // One body mutex: nothing but this thread touches the world, which is also the Vita profile's setting.
+        physics.Init(1024, 1, 4096, 2048, broadPhaseLayers, objectVsBroadPhase, objectPairs);
         physics.SetGravity(JPH::Vec3(0, -9.8f, 0));
         JPH::BodyInterface& bodies = physics.GetBodyInterface();
 
@@ -353,7 +362,7 @@ void run() {
             sum += ms;
         }
         const JPH::RVec3 pos = bodies.GetPosition(first);
-        logf("jolt: 50 spheres on a floor, 300 steps of 1/60 s: mean %.3f ms, p50 %.3f, p95 %.3f, max %.3f; first sphere "
+        logLine("jolt: 50 spheres on a floor, 300 steps of 1/60 s: mean %.3f ms, p50 %.3f, p95 %.3f, max %.3f; first sphere "
              "at (%.2f, %.2f, %.2f), %u bodies active",
              sum / kSteps, stepMs[kSteps / 2], stepMs[kSteps * 95 / 100], stepMs.back(), double(pos.GetX()),
              double(pos.GetY()), double(pos.GetZ()), physics.GetNumActiveBodies(JPH::EBodyType::RigidBody));
@@ -369,20 +378,23 @@ void run() {
 
 struct Probe {
     std::string text;
-    void line(const char* fmt, ...) {
-        char buf[1024];
-        va_list args;
-        va_start(args, fmt);
-        std::vsnprintf(buf, sizeof buf, fmt, args);
-        va_end(args);
-        text += buf;
-        text += '\n';
-        sceClibPrintf("[probe] %s\n", buf);
-    }
+    void line(const char* fmt, ...) __attribute__((format(printf, 2, 3)));
 };
+
+void Probe::line(const char* fmt, ...) {
+    char buf[1024];
+    va_list args;
+    va_start(args, fmt);
+    std::vsnprintf(buf, sizeof buf, fmt, args);
+    va_end(args);
+    text += buf;
+    text += '\n';
+    sceClibPrintf("[probe] %s\n", buf);
+}
 
 void probeFilesystem(Probe& p) {
     std::error_code ec;
+    std::string err;
     // How std::filesystem parses the console's drive-letter-like paths; the code uses parent_path() and
     // create_directories() on them.
     for (const char* raw : {"ux0:data/MuggleBall3/settings.json", "ux0:/data/MuggleBall3/settings.json", "app0:/assets"}) {
@@ -391,26 +403,32 @@ void probeFilesystem(Probe& p) {
                path.root_name().string().c_str(), path.root_directory().string().c_str(), path.parent_path().string().c_str(),
                path.filename().string().c_str(), int(path.is_absolute()));
     }
+    // Explicit increment(ec): the range-for's operator++ throws on a read error, which would end the whole probe.
     int count = 0;
-    for (const auto& entry : fs::directory_iterator("app0:/", ec)) {
+    for (auto it = fs::directory_iterator("app0:/", ec); !ec && it != fs::directory_iterator(); it.increment(ec)) {
         if (count++ < 12) {
-            p.line("app0:/ entry: %s%s", entry.path().filename().string().c_str(), entry.is_directory(ec) ? "/" : "");
+            std::error_code typeError;
+            const bool isDir = it->is_directory(typeError);
+            p.line("app0:/ entry: %s%s", it->path().filename().string().c_str(), isDir ? "/" : "");
         }
     }
-    p.line("directory_iterator(app0:/): %d entries, error '%s'", count, ec.message().c_str());
+    err = ec.message();
+    p.line("directory_iterator(app0:/): %d entries, error '%s'", count, err.c_str());
     ec.clear();
     count = 0;
-    for (const auto& entry : fs::recursive_directory_iterator("app0:/sce_sys", ec)) {
-        (void)entry;
+    for (auto it = fs::recursive_directory_iterator("app0:/sce_sys", ec); !ec && it != fs::recursive_directory_iterator();
+         it.increment(ec)) {
         ++count;
     }
-    p.line("recursive_directory_iterator(app0:/sce_sys): %d entries, error '%s'", count, ec.message().c_str());
+    err = ec.message();
+    p.line("recursive_directory_iterator(app0:/sce_sys): %d entries, error '%s'", count, err.c_str());
 
     for (const char* dir : {"ux0:data/MuggleBall3/probe/a/b", "ux0:/data/MuggleBall3/probe2/a"}) {
         ec.clear();
         const bool made = fs::create_directories(dir, ec);
-        p.line("create_directories(%s): returned %d, error '%s', exists %d", dir, int(made), ec.message().c_str(),
-               int(fs::exists(dir, ec)));
+        err = ec.message();  // read before the next call clears or changes ec
+        const bool exists = fs::exists(dir, ec);
+        p.line("create_directories(%s): returned %d, error '%s', exists %d", dir, int(made), err.c_str(), int(exists));
     }
     const fs::path dir = "ux0:data/MuggleBall3/probe";
     const fs::path a = dir / "a.txt", b = dir / "b.txt";
@@ -427,8 +445,10 @@ void probeFilesystem(Probe& p) {
         std::ifstream in(b, std::ios::binary);
         std::getline(in, got);
     }
-    p.line("fs::rename over an existing file: error '%s', b.txt now '%s' (want 'new'), a.txt exists %d", ec.message().c_str(),
-           got.c_str(), int(fs::exists(a, ec)));
+    err = ec.message();
+    const bool aLeft = fs::exists(a, ec);
+    p.line("fs::rename over an existing file: error '%s', b.txt now '%s' (want 'new'), a.txt exists %d", err.c_str(), got.c_str(),
+           int(aLeft));
     write(a, "new2");
     const int renamed = std::rename(a.string().c_str(), b.string().c_str());
     p.line("::rename over an existing file: %d (errno %d)", renamed, renamed ? errno : 0);
@@ -436,17 +456,23 @@ void probeFilesystem(Probe& p) {
     const int sceRenamed = sceIoRename(a.string().c_str(), b.string().c_str());
     p.line("sceIoRename over an existing file: 0x%08x", unsigned(sceRenamed));
     ec.clear();
-    p.line("file_size(b.txt) %llu error '%s'", static_cast<unsigned long long>(fs::file_size(b, ec)), ec.message().c_str());
+    const auto size = static_cast<unsigned long long>(fs::file_size(b, ec));
+    err = ec.message();
+    p.line("file_size(b.txt) %llu error '%s'", size, err.c_str());
     ec.clear();
     const bool removed = fs::remove(b, ec);
-    p.line("fs::remove(b.txt): %d, error '%s', exists after %d", int(removed), ec.message().c_str(), int(fs::exists(b, ec)));
+    err = ec.message();
+    const bool bLeft = fs::exists(b, ec);
+    p.line("fs::remove(b.txt): %d, error '%s', exists after %d", int(removed), err.c_str(), int(bLeft));
     ec.clear();
     const fs::path cwd = fs::current_path(ec);
-    p.line("current_path: '%s', error '%s'", cwd.string().c_str(), ec.message().c_str());
+    err = ec.message();
+    p.line("current_path: '%s', error '%s'", cwd.string().c_str(), err.c_str());
     ec.clear();
     fs::remove_all("ux0:data/MuggleBall3/probe", ec);
     fs::remove_all("ux0:/data/MuggleBall3/probe2", ec);
-    p.line("remove_all: error '%s'", ec.message().c_str());
+    err = ec.message();
+    p.line("remove_all: error '%s'", err.c_str());
     for (const char* path : kShaderCompilerPaths) {
         SceIoStat stat{};
         const int rc = sceIoGetstat(path, &stat);
@@ -509,7 +535,8 @@ void probeRuntime(Probe& p) {
     const double steadyMs = std::chrono::duration<double, std::milli>(clock::now() - s0).count();
     p.line("50 ms delay: process time %.2f ms, steady_clock %.2f ms", kernelMs, steadyMs);
     const struct mallinfo mi = mallinfo();
-    p.line("mallinfo: arena %d, in use %d, free %d (heap size set to %u)", mi.arena, mi.uordblks, mi.fordblks, _newlib_heap_size_user);
+    p.line("mallinfo: arena %zu, in use %zu, free %zu (heap size set to %u)", static_cast<std::size_t>(mi.arena),
+           static_cast<std::size_t>(mi.uordblks), static_cast<std::size_t>(mi.fordblks), _newlib_heap_size_user);
     p.line("SDL_GetBasePath: '%s'", SDL_GetBasePath() ? SDL_GetBasePath() : "(null)");
     char* pref = SDL_GetPrefPath("", "MuggleBall3");
     p.line("SDL_GetPrefPath(\"\", \"MuggleBall3\"): '%s'", pref ? pref : "(null)");
@@ -551,6 +578,14 @@ void writeProbe(const Probe& p) {
     if (FILE* f = std::fopen(kProbePath, "w")) {
         std::fwrite(p.text.data(), 1, p.text.size(), f);
         std::fclose(f);
+        logLine("probe written to %s", kProbePath);
+    } else {
+        logLine("cannot write %s (errno %d)", kProbePath, errno);
+    }
+    // The log carries a copy, so one file holds all the evidence.
+    if (g_log) {
+        std::fprintf(g_log, "---- probe ----\n%s---- end of probe ----\n", p.text.c_str());
+        std::fflush(g_log);
     }
 }
 
@@ -570,7 +605,7 @@ struct FrameStats {
         lastVcount = vcount;
     }
 
-    void report(const char* when) {
+    void report(const char* when, int swapInterval) {
         if (workMs.empty()) {
             return;
         }
@@ -584,11 +619,11 @@ struct FrameStats {
         for (const std::uint32_t n : intervals) {
             frames += n;
         }
-        logf("%s: %zu frames; work time mean %.2f ms, p95 %.2f, max %.2f; presented intervals (vblanks): 1:%u 2:%u 3:%u 4:%u 5+:%u; at %d "
+        logLine("%s: %zu frames; work time mean %.2f ms, p95 %.2f, max %.2f; presented intervals (vblanks): 1:%u 2:%u 3:%u 4:%u 5+:%u; at %d "
              "vblanks: %.1f%%",
              when, workMs.size(), sum / sorted.size(), sorted[sorted.size() * 95 / 100], sorted.back(), intervals[1], intervals[2],
-             intervals[3], intervals[4], intervals[5] + intervals[6] + intervals[7] + intervals[8], kSwapInterval,
-             frames ? 100.0 * intervals[kSwapInterval] / frames : 0.0);
+             intervals[3], intervals[4], intervals[5] + intervals[6] + intervals[7] + intervals[8], swapInterval,
+             frames ? 100.0 * intervals[std::clamp(swapInterval, 0, 8)] / frames : 0.0);
     }
 };
 
@@ -603,10 +638,10 @@ ClockReport setClocks() {
     const int rcBus = scePowerSetBusClockFrequency(222);
     const int rcGpu = scePowerSetGpuClockFrequency(222);
     const int rcXbar = scePowerSetGpuXbarClockFrequency(166);
-    logf("clocks: set rc 0x%08x 0x%08x 0x%08x 0x%08x", unsigned(rcArm), unsigned(rcBus), unsigned(rcGpu), unsigned(rcXbar));
+    logLine("clocks: set rc 0x%08x 0x%08x 0x%08x 0x%08x", unsigned(rcArm), unsigned(rcBus), unsigned(rcGpu), unsigned(rcXbar));
     const ClockReport r{scePowerGetArmClockFrequency(), scePowerGetBusClockFrequency(), scePowerGetGpuClockFrequency(),
                         scePowerGetGpuXbarClockFrequency()};
-    logf("clocks: arm %d MHz, bus %d, gpu %d, xbar %d", r.arm, r.bus, r.gpu, r.xbar);
+    logLine("clocks: arm %d MHz, bus %d, gpu %d, xbar %d", r.arm, r.bus, r.gpu, r.xbar);
     return r;
 }
 
@@ -617,13 +652,13 @@ bool readEnterButtonIsCircle() {
     int enter = -1;
     const int rcGet = sceAppUtilSystemParamGetInt(SCE_SYSTEM_PARAM_ID_ENTER_BUTTON, &enter);
     const bool circle = enter == SCE_SYSTEM_PARAM_ENTER_BUTTON_CIRCLE;
-    logf("enter button: sceAppUtilInit 0x%08x, get 0x%08x, value %d -> %s confirms", unsigned(rcInit), unsigned(rcGet), enter,
+    logLine("enter button: sceAppUtilInit 0x%08x, get 0x%08x, value %d -> %s confirms", unsigned(rcInit), unsigned(rcGet), enter,
          circle ? "Circle" : "Cross");
     return circle;
 }
 
 void logMemory(const char* when) {
-    logf("%s: vitaGL free/total: VRAM %zu/%zu KiB, RAM %zu/%zu KiB, PHYCONT %zu/%zu KiB, CDLG %zu/%zu KiB", when,
+    logLine("%s: vitaGL free/total: VRAM %zu/%zu KiB, RAM %zu/%zu KiB, PHYCONT %zu/%zu KiB, CDLG %zu/%zu KiB", when,
          vglMemFree(VGL_MEM_VRAM) / 1024, vglMemTotal(VGL_MEM_VRAM) / 1024, vglMemFree(VGL_MEM_RAM) / 1024,
          vglMemTotal(VGL_MEM_RAM) / 1024, vglMemFree(VGL_MEM_PHYCONT) / 1024, vglMemTotal(VGL_MEM_PHYCONT) / 1024,
          vglMemFree(VGL_MEM_BUDGET) / 1024, vglMemTotal(VGL_MEM_BUDGET) / 1024);
@@ -632,55 +667,75 @@ void logMemory(const char* when) {
 int run() {
     openLog();
     setClocks();
-    logf("heap %u MiB, main stack %u KiB, pthread default stack %u KiB", _newlib_heap_size_user >> 20, sceUserMainThreadStackSize >> 10,
+    logLine("heap %u MiB, main stack %u KiB, pthread default stack %u KiB", _newlib_heap_size_user >> 20, sceUserMainThreadStackSize >> 10,
          _pthread_stack_default_user >> 10);
 
     // Touch is read as touch (never as a mouse, which would press the button wherever a finger lands) and the
     // rear pad is off, as the game will have it.
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
     SDL_SetHint(SDL_HINT_VITA_ENABLE_BACK_TOUCH, "0");
+    // SDL shows the IME for text input only if it sees no physical keyboard ("auto"); a PSTV with a USB keyboard
+    // would otherwise get nothing on Triangle.
+    SDL_SetHint(SDL_HINT_ENABLE_SCREEN_KEYBOARD, "1");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO)) {
-        logf("SDL_Init failed: %s", SDL_GetError());
+        logLine("SDL_Init failed: %s", SDL_GetError());
         return 1;
     }
-    logf("SDL video driver '%s', audio driver '%s'", SDL_GetCurrentVideoDriver(), SDL_GetCurrentAudioDriver());
+    logLine("SDL video driver '%s', audio driver '%s'", SDL_GetCurrentVideoDriver(), SDL_GetCurrentAudioDriver());
     const bool circleConfirms = readEnterButtonIsCircle();
     const int confirmButton = circleConfirms ? kCircle : kCross;
     const int backButton = circleConfirms ? kCross : kCircle;
 
     // vitaGL owns the display; SDL's window is for events only (its video driver touches no GXM).
     const std::uint64_t glStart = sceKernelGetProcessTimeWide();
-    vglInitExtended(0, kScreenWidth, kScreenHeight, kVitaGlRamThreshold, SCE_GXM_MULTISAMPLE_NONE);
-    logf("vglInitExtended(0, %d, %d, %d MiB, no MSAA): %.1f ms; GL_VERSION '%s', GL_RENDERER '%s', GLSL '%s'", kScreenWidth, kScreenHeight,
-         kVitaGlRamThreshold >> 20, (sceKernelGetProcessTimeWide() - glStart) / 1000.0, (const char*)glGetString(GL_VERSION),
-         (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_SHADING_LANGUAGE_VERSION));
+    // The return value is not success: vitaGL returns GL_TRUE only when it had to clamp the resolution (vgl.c,
+    // vglInitWithCustomSizes), GL_FALSE on a normal start. A failed start shows as null GL strings and GL errors.
+    const GLboolean clamped = vglInitExtended(0, kScreenWidth, kScreenHeight, kVitaGlRamThreshold, SCE_GXM_MULTISAMPLE_NONE);
+    const auto glString = [](GLenum name) {
+        const char* value = reinterpret_cast<const char*>(glGetString(name));
+        return value ? value : "(null)";
+    };
+    logLine("vglInitExtended(0, %d, %d, %d MiB, no MSAA): %.1f ms, returned %d (1 = resolution clamped); GL_VERSION '%s', GL_RENDERER '%s', "
+            "GLSL '%s'",
+            kScreenWidth, kScreenHeight, kVitaGlRamThreshold >> 20, (sceKernelGetProcessTimeWide() - glStart) / 1000.0, int(clamped),
+            glString(GL_VERSION), glString(GL_RENDERER), glString(GL_SHADING_LANGUAGE_VERSION));
     logMemory("after vglInit");
     eglSwapInterval(EGL_NO_DISPLAY, kSwapInterval);
 
     SDL_Window* window = SDL_CreateWindow("Muggle Ball 3", kScreenWidth, kScreenHeight, 0);
-    logf("SDL_CreateWindow: %s%s", window ? "ok" : "FAILED: ", window ? "" : SDL_GetError());
+    logLine("SDL_CreateWindow: %s%s", window ? "ok" : "FAILED: ", window ? "" : SDL_GetError());
     SDL_Joystick* joystick = nullptr;
     int joystickCount = 0;
     if (SDL_JoystickID* ids = SDL_GetJoysticks(&joystickCount)) {
         if (joystickCount > 0) {
             joystick = SDL_OpenJoystick(ids[0]);
-            logf("joystick 0: '%s', %d buttons, %d axes, %d hats; a gamepad mapping %s", joystick ? SDL_GetJoystickName(joystick) : "?",
+            logLine("joystick 0: '%s', %d buttons, %d axes, %d hats; a gamepad mapping %s", joystick ? SDL_GetJoystickName(joystick) : "?",
                  joystick ? SDL_GetNumJoystickButtons(joystick) : 0, joystick ? SDL_GetNumJoystickAxes(joystick) : 0,
                  joystick ? SDL_GetNumJoystickHats(joystick) : 0, SDL_IsGamepad(ids[0]) ? "exists" : "does NOT exist");
         }
         SDL_free(ids);
     }
-    logf("%d joystick(s), %d touch device(s)", joystickCount, [] { int n = 0; SDL_free(SDL_GetTouchDevices(&n)); return n; }());
+    logLine("%d joystick(s), %d touch device(s)", joystickCount, [] { int n = 0; SDL_free(SDL_GetTouchDevices(&n)); return n; }());
 
     Probe probe;
-    probeGpuApi(probe);
-    probeFilesystem(probe);
-    probeRuntime(probe);
-    probeAudio(probe);
+    const auto section = [&](const char* name, void (*fn)(Probe&)) {
+        try {
+            fn(probe);
+        } catch (const std::exception& e) {
+            probe.line("%s: exception %s", name, e.what());
+        }
+    };
+    section("gpu api", probeGpuApi);
+    section("filesystem", probeFilesystem);
+    section("runtime", probeRuntime);
+    section("audio", probeAudio);
     writeProbe(probe);
-    logf("probe written to %s", kProbePath);
 
-    jolt::run();
+    try {
+        jolt::run();
+    } catch (const std::exception& e) {
+        logLine("jolt: exception %s", e.what());
+    }
 
     // The scene: a camera at z = -3 looking at the origin, a lit triangle in the z = 0 plane facing it, clockwise
     // on screen, as the engine's render tests draw their quad.
@@ -704,7 +759,7 @@ int run() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    logf("buffers and texture: GL error 0x%x", glGetError());
+    logLine("buffers and texture: GL error 0x%x", glGetError());
 
     const Mat4 view = lookAtLH({0, 0, -3}, {0, 0, 0}, {0, 1, 0});
     const Mat4 projection = perspectiveFovLH(60.0f * 3.14159265f / 180.0f, float(kScreenWidth) / kScreenHeight, 1.0f, 500.0f);
@@ -727,9 +782,10 @@ int run() {
     int frames = 0;
     bool running = true;
     float spin = 0;
-    logf("entering the frame loop: %s confirms, %s exits, Triangle opens the IME, Start toggles the swap interval, Select writes the stats",
-         circleConfirms ? "Circle" : "Cross", circleConfirms ? "Cross" : "Circle");
     int swapInterval = kSwapInterval;
+    logLine("entering the frame loop: %s confirms, %s exits, Triangle opens the IME, Start toggles the swap interval, Select writes the "
+            "stats, the d-pad is logged",
+            circleConfirms ? "Circle" : "Cross", circleConfirms ? "Cross" : "Circle");
     while (running) {
         const std::uint64_t frameStart = sceKernelGetProcessTimeWide();
         SDL_Event event;
@@ -740,56 +796,57 @@ int run() {
                     break;
                 case SDL_EVENT_JOYSTICK_BUTTON_DOWN: {
                     const int button = event.jbutton.button;
-                    logf("button %d down", button);
+                    logLine("button %d down", button);
                     if (button == backButton) {
                         running = false;
                     } else if (button == confirmButton) {
-                        logf("confirm pressed");
+                        logLine("confirm pressed");
                     } else if (button == kTriangle) {
-                        logf("opening the IME: SDL_StartTextInput -> %d", int(SDL_StartTextInput(window)));
+                        logLine("opening the IME: SDL_StartTextInput -> %d", int(SDL_StartTextInput(window)));
                     } else if (button == kStart) {
                         swapInterval = swapInterval == 2 ? 1 : 2;
                         eglSwapInterval(EGL_NO_DISPLAY, swapInterval);
-                        stats.report("before changing the swap interval");
+                        stats.report("before changing the swap interval", swapInterval == 2 ? 1 : 2);
                         stats = FrameStats{};
-                        logf("swap interval now %d", swapInterval);
+                        logLine("swap interval now %d", swapInterval);
                     } else if (button == kSelect) {
-                        stats.report("on Select");
+                        stats.report("on Select", swapInterval);
                         logMemory("on Select");
+                    } else if (button >= kDpadDown && button <= kDpadRight) {
+                        logLine("d-pad %s", button == kDpadDown ? "down" : button == kDpadLeft ? "left" : button == kDpadUp ? "up" : "right");
                     }
                     break;
                 }
-                case SDL_EVENT_JOYSTICK_HAT_MOTION:
-                    logf("hat %d value 0x%x", event.jhat.hat, event.jhat.value);
-                    break;
                 case SDL_EVENT_TEXT_INPUT:
                     imeText += event.text.text;
-                    logf("TEXT_INPUT '%s'", event.text.text);
+                    logLine("TEXT_INPUT '%s'", event.text.text);
                     break;
                 case SDL_EVENT_KEY_DOWN:
-                    logf("KEY_DOWN scancode %d key %u", int(event.key.scancode), unsigned(event.key.key));
+                    logLine("KEY_DOWN scancode %d key %u", int(event.key.scancode), unsigned(event.key.key));
                     break;
                 case SDL_EVENT_FINGER_DOWN:
                 case SDL_EVENT_FINGER_UP:
                 case SDL_EVENT_FINGER_MOTION:
                     if (touchLogged < 30) {
                         ++touchLogged;
-                        logf("finger %s: touch %llu finger %llu at (%.3f, %.3f) pressure %.2f",
+                        logLine("finger %s: touch %llu finger %llu at (%.3f, %.3f) pressure %.2f",
                              event.type == SDL_EVENT_FINGER_DOWN ? "down" : event.type == SDL_EVENT_FINGER_UP ? "up" : "motion",
                              (unsigned long long)event.tfinger.touchID, (unsigned long long)event.tfinger.fingerID, event.tfinger.x,
                              event.tfinger.y, event.tfinger.pressure);
                     }
                     break;
                 case SDL_EVENT_MOUSE_BUTTON_DOWN:
-                    logf("MOUSE_BUTTON_DOWN (touch-to-mouse synthesis is supposed to be off)");
+                    logLine("MOUSE_BUTTON_DOWN (touch-to-mouse synthesis is supposed to be off)");
                     break;
                 default:
                     break;
             }
         }
+        // SDL 3.4.16's Vita driver sends the dialog's text whenever it closes and a Return only when it was confirmed,
+        // so a cancel after typing may still deliver text: the log shows both, the device run settles it.
         const bool imeShown = SDL_ScreenKeyboardShown(window);
         if (imeWasShown && !imeShown) {
-            logf("IME closed; text received: '%s' (%zu bytes)", imeText.c_str(), imeText.size());
+            logLine("IME closed; text received: '%s' (%zu bytes)", imeText.c_str(), imeText.size());
             imeText.clear();
             SDL_StopTextInput(window);
         }
@@ -835,7 +892,7 @@ int run() {
             glDisableVertexAttribArray(2);
         }
         if (frames == 0) {
-            logf("first frame: GL error 0x%x", glGetError());
+            logLine("first frame: GL error 0x%x", glGetError());
         }
 
         // Work time: frame start to the swap call (vitaGL presents from a display queue, so the wait for the
@@ -845,12 +902,12 @@ int run() {
         vglSwapBuffers(imeShown ? GL_TRUE : GL_FALSE);  // the common dialog must be updated while the IME is up
         stats.frame(workMs, vcount);
         if (++frames % 600 == 0) {
-            stats.report("every 600 frames");
+            stats.report("every 600 frames", swapInterval);
         }
     }
-    stats.report("at exit");
+    stats.report("at exit", swapInterval);
     logMemory("at exit");
-    logf("exiting on the back button after %d frames", frames);
+    logLine("exiting on the back button after %d frames", frames);
 
     glDeleteBuffers(1, &vbo);
     glDeleteTextures(1, &white);
@@ -871,9 +928,9 @@ int main(int, char**) {
     try {
         rc = run();
     } catch (const std::exception& e) {
-        logf("uncaught exception: %s", e.what());
+        logLine("uncaught exception: %s", e.what());
     }
-    logf("bye (%d)", rc);
+    logLine("bye (%d)", rc);
     if (g_log) {
         std::fclose(g_log);
     }

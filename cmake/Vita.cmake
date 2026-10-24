@@ -8,8 +8,12 @@ set(MB3_PLATFORM_VITA ON)
 # vita_create_self and vita_create_vpk.
 include("${VITASDK}/share/vita.cmake")
 
-# Nothing can run tests in a cross build; the host builds keep them on.
+# Nothing can run tests in a cross build; the host builds keep them on. A value forced on from the command line
+# would add targets that cannot link here, so it is an error rather than a silent override.
 set(MB3_BUILD_TESTS OFF CACHE BOOL "Build unit tests (off on Vita: a cross build cannot run them)")
+if(MB3_BUILD_TESTS)
+  message(FATAL_ERROR "MB3_BUILD_TESTS is not available in a Vita cross build (the tests run on the host)")
+endif()
 
 option(MB3_VITA_BUILD_ENGINE "Vita: also cross-compile mb_engine and mb_game (work in progress until M3a)" OFF)
 

@@ -69,6 +69,11 @@ class LiveAreaSet(unittest.TestCase):
         self.assertIn(vita_livearea.ACCENT, pixels, "the frame and subtitle were drawn")
         # Unknown characters fall back to a blank glyph rather than failing.
         vita_livearea.make_image(64, 64, "~#", "")
+        # Short titles grow until the subtitle, too, fits: nothing is drawn outside the image.
+        for name, (width, height) in vita_livearea.LIVEAREA_FILES.items():
+            for title in ("X", "AB", "MUGGLE BALL 3"):
+                pixels = vita_livearea.make_image(width, height, title, "PLACEHOLDER")
+                self.assertEqual(len(pixels), width * height, f"{name} {title}")
 
     def test_colour_parsing(self):
         self.assertEqual(vita_livearea.parse_colour("#0d0d1a"), (13, 13, 26))
