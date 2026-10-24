@@ -1,23 +1,27 @@
 // Runs the sails of every converted level in the physics world (needs the game data: skips with exit code 77 when MB3_ASSETS is
 // not set), no GPU.
 //
-//   mb_cloth_smoke [--seconds S] [--print] [level]
+//   mb_cloth_smoke [--seconds S] [--print] [--physics-profile name] [level]
 //        each level with cloth is built the way the game builds it and left alone for S seconds (default 10): every particle must
 //        stay finite and within 3 units of where it was saved, no spring may stretch past an eighth of its length, and every pinned
 //        particle must be where its holder has it. Then a ball is shot at the middle of each sail, and the sail's touch must
 //        be reported by the lead actor's id; a holder that is taken away lets its pins go, and a sail that is taken away
 //        leaves the world. The table has, per level, the sails, their particles and pins, the furthest a particle got from where
-//        it was saved, the most a spring stretched, and the time of a fixed step; the summary says what the pins are tied to (the mass
-//        of the holders: GAMEPLAY.md 20.1). --print lists the particles after the time.
+//        it was saved, the most a spring stretched, and the time of a fixed step, with a trailing line of the fixed steps taken and
+//        dropped (PhysicsWorld::droppedSteps, not a failure here) and the peak awake and total body counts; the summary says what
+//        the pins are tied to (the mass of the holders: GAMEPLAY.md 20.1) and totals the physics line. --print lists the particles
+//        after the time. --physics-profile (default "desktop", see mb/game/PhysicsProfile.h) picks every level's PhysicsSettings.
 
 #include "mb/game/LevelCatalog.h"
 #include "mb/game/LevelLoader.h"
 #include "mb/game/MaterialLibrary.h"
+#include "mb/game/PhysicsProfile.h"
 #include "mb/game/PhysicsScene.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -25,7 +29,9 @@
 #include <filesystem>
 #include <format>
 #include <limits>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -44,6 +50,12 @@ constexpr std::size_t kSails = 22, kParticles = 453, kPins = 84;
 // What the 84 pins are tied to: yards, masts and boats that weigh 1.07 to 67.99 (GAMEPLAY.md 20.1), not the 100,000 of a ship's hull: so it
 // is not a ratio of masses that rules a joint out (Jolt has no constraint that reaches a soft body's particle).
 constexpr float kLightestHolder = 1.0f, kHeaviestHolder = 70.0f;
+
+// --physics-profile; every PhysicsScene the smoke builds comes from it. A command line that passes the flag
+// overrides this in main(). Safe to build here at static-init time: physicsProfile() reaches
+// PhysicsProfile.cpp's table through a function-local static, which C++ builds the first time anything calls
+// it, whatever order translation units' globals are otherwise initialized in.
+PhysicsProfile gProfile = *physicsProfile("desktop");
 
 bool finite(Vec3 p) {
     return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z);
@@ -75,11 +87,16 @@ struct Report {
     float drift = 0, stretch = 0;
     float lightest = std::numeric_limits<float>::infinity(), heaviest = 0;  // the mass of what the dynamic holders are
     double stepMs = 0;
+    std::uint64_t fixedSteps = 0, droppedSteps = 0;  // PhysicsWorld::step()/droppedSteps(), over this report's run
+    int peakAwake = 0;  // the most bodies awake at once while the sails settled, sampled every tenth of a second
+    int bodyCount = 0;  // the world's bodies at the end
+    std::size_t tempAllocatorPeakBytes = 0;  // PhysicsWorld::tempAllocatorPeakBytes(), at the end of the run
 };
 
 // One level standing alone: false (with the reason) if a sail misbehaves.
-bool standAlone(const Level& level, const MaterialLibrary& materials, float seconds, bool print, Report& report, std::string& why) {
-    PhysicsScene scene(level, materials);
+bool standAlone(const Level& level, const MaterialLibrary& materials, float seconds, bool print, const PhysicsSettings& settings,
+                Report& report, std::string& why) {
+    PhysicsScene scene(level, materials, {}, settings);
     const ClothSet& cloths = scene.cloths();
     report.sails = cloths.size();
     if (scene.plan().unsupportedCloths > 0) {
@@ -108,8 +125,15 @@ bool standAlone(const Level& level, const MaterialLibrary& materials, float seco
     const int steps = static_cast<int>(std::lround(seconds / kStep));
     for (int s = 0; s < steps; ++s) {
         scene.step(kStep);
+        if (s % 6 == 5) {  // a tenth of a second is fine-grained enough for the peak this is after, see docs/PHYSICS.md
+            report.peakAwake = std::max(report.peakAwake, scene.world().activeBodyCount());
+        }
     }
     report.stepMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count() / steps;
+    report.fixedSteps = static_cast<std::uint64_t>(steps);
+    report.droppedSteps = scene.world().droppedSteps();
+    report.bodyCount = static_cast<int>(scene.world().bodyCount());
+    report.tempAllocatorPeakBytes = scene.world().tempAllocatorPeakBytes();
 
     for (std::size_t i = 0; i < cloths.size(); ++i) {
         const ClothPlan& cloth = cloths.plan(i);
@@ -161,8 +185,8 @@ bool standAlone(const Level& level, const MaterialLibrary& materials, float seco
 }
 
 // A ball put on the middle of each sail: the touch is reported, by the lead actor.
-bool ballTouches(const Level& level, const MaterialLibrary& materials, std::string& why) {
-    PhysicsScene scene(level, materials);
+bool ballTouches(const Level& level, const MaterialLibrary& materials, const PhysicsSettings& settings, std::string& why) {
+    PhysicsScene scene(level, materials, {}, settings);
     const ClothSet& cloths = scene.cloths();
     for (std::size_t i = 0; i < cloths.size(); ++i) {
         const ClothPlan& cloth = cloths.plan(i);
@@ -187,8 +211,8 @@ bool ballTouches(const Level& level, const MaterialLibrary& materials, std::stri
 }
 
 // Taking the holders away lets the pins go and the sail fall, and taking a sail away takes it out of the world.
-bool letsGoAndLeaves(const Level& level, const MaterialLibrary& materials, std::string& why) {
-    PhysicsScene scene(level, materials);
+bool letsGoAndLeaves(const Level& level, const MaterialLibrary& materials, const PhysicsSettings& settings, std::string& why) {
+    PhysicsScene scene(level, materials, {}, settings);
     const ClothSet& cloths = scene.cloths();
     if (cloths.size() == 0) {
         return true;
@@ -230,6 +254,9 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, float sec
     std::size_t sails = 0, particles = 0, pins = 0, levels = 0, onWorld = 0, onFixed = 0;
     double stepMs = 0;
     float drift = 0, stretch = 0, lightest = std::numeric_limits<float>::infinity(), heaviest = 0;
+    std::uint64_t totalFixedSteps = 0, totalDroppedSteps = 0;
+    int peakAwakeOfAll = 0, peakBodiesOfAll = 0, levelsWithDroppedSteps = 0;
+    std::size_t peakTempAllocatorBytesOfAll = 0;
     std::printf("%-26s %5s %9s %5s %7s %8s %8s\n", "level", "sails", "particles", "pins", "drift", "stretch", "ms/step");
     for (const LevelEntry& entry : catalog.levels()) {
         if (only && entry.name.find(only) == std::string::npos) {
@@ -241,11 +268,21 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, float sec
         }
         Report report;
         std::string why;
+        const PhysicsSettings settings = physicsSettingsFor(gProfile, entry.name);
         const std::string header = std::format("{:<26}", entry.name);
-        const bool ok = standAlone(level, materials, seconds, print, report, why) && ballTouches(level, materials, why) &&
-                        letsGoAndLeaves(level, materials, why);
+        const bool ok = standAlone(level, materials, seconds, print, settings, report, why) &&
+                        ballTouches(level, materials, settings, why) && letsGoAndLeaves(level, materials, settings, why);
         std::printf("%s %5zu %9zu %5zu %7.2f %8.3f %8.3f\n", header.c_str(), report.sails, report.particles, report.pins,
                     static_cast<double>(report.drift), static_cast<double>(report.stretch), report.stepMs);
+        std::printf("  physics: %llu steps (%llu dropped), peak %d awake, %d bodies, temp allocator peak %zu bytes\n",
+                    static_cast<unsigned long long>(report.fixedSteps), static_cast<unsigned long long>(report.droppedSteps),
+                    report.peakAwake, report.bodyCount, report.tempAllocatorPeakBytes);
+        totalFixedSteps += report.fixedSteps;
+        totalDroppedSteps += report.droppedSteps;
+        levelsWithDroppedSteps += report.droppedSteps > 0;
+        peakAwakeOfAll = std::max(peakAwakeOfAll, report.peakAwake);
+        peakBodiesOfAll = std::max(peakBodiesOfAll, report.bodyCount);
+        peakTempAllocatorBytesOfAll = std::max(peakTempAllocatorBytesOfAll, report.tempAllocatorPeakBytes);
         if (!ok) {
             std::printf("FAIL %s: %s\n", entry.name.c_str(), why.c_str());
             ++failed;
@@ -278,6 +315,12 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, float sec
                     kSails, kParticles, kPins, sails, particles, pins);
         ++failed;
     }
+    std::printf("physics profile \"%.*s\": %llu fixed steps over all levels, %llu dropped (in %d levels; the host can drop steps when "
+                "it stalls, which is not a failure here); peak %d bodies awake at once, %d bodies in the largest level; "
+                "temp allocator peak %zu bytes (of %zu MiB)\n",
+                static_cast<int>(gProfile.name.size()), gProfile.name.data(), static_cast<unsigned long long>(totalFixedSteps),
+                static_cast<unsigned long long>(totalDroppedSteps), levelsWithDroppedSteps, peakAwakeOfAll, peakBodiesOfAll,
+                peakTempAllocatorBytesOfAll, gProfile.settings.tempAllocatorBytes >> 20);
     return failed == 0 ? 0 : 1;
 }
 
@@ -303,10 +346,21 @@ int main(int argc, char** argv) {
             seconds = std::max(1.0f, static_cast<float>(std::atof(argv[++i])));
         } else if (std::strcmp(argv[i], "--print") == 0) {
             print = true;
+        } else if (std::strcmp(argv[i], "--physics-profile") == 0 && i + 1 < argc) {
+            const std::optional<PhysicsProfile> profile = physicsProfile(argv[++i]);
+            if (!profile) {
+                std::printf("unknown physics profile \"%s\"; known profiles:", argv[i]);
+                for (const std::string_view name : physicsProfileNames()) {
+                    std::printf(" %.*s", static_cast<int>(name.size()), name.data());
+                }
+                std::printf("\n");
+                return 2;
+            }
+            gProfile = *profile;
         } else if (argv[i][0] != '-') {
             only = argv[i];
         } else {
-            std::printf("usage: mb_cloth_smoke [--seconds S] [--print] [level]\n");
+            std::printf("usage: mb_cloth_smoke [--seconds S] [--print] [--physics-profile name] [level]\n");
             return 2;
         }
     }

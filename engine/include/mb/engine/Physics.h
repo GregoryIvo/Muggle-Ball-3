@@ -180,6 +180,12 @@ struct PhysicsSettings {
     int maxBodyPairs = 65536;
     int maxContactConstraints = 32768;
     int threads = -1;  // worker threads; -1 = hardware concurrency - 1 but at most 3, 0 = run on the caller
+    // Jolt's body mutexes (the striping of its body locks): 0 lets Jolt derive the count from the hardware, which
+    // is what the desktop does; a platform whose hardware_concurrency() is 0 or untrustworthy sets it explicitly.
+    int bodyMutexes = 0;
+    // The block Jolt's temporary allocator hands out during a step; a step that needs more goes on from the heap
+    // (and logs it once). 16 MiB is generous for the biggest level; the Vita profile sizes it from measurements.
+    std::size_t tempAllocatorBytes = 16u << 20;
 };
 
 class PhysicsWorld {
@@ -200,6 +206,22 @@ public:
     // each step needs its own target, however many a call takes.
     // Returns the number of fixed steps taken.
     int step(float dt, const std::function<void()>& beforeStep = {});
+
+    // Fixed steps thrown away so far: a step() call handed more time than maxStepsPerCall steps cover keeps the
+    // remainder below one step and drops the whole steps in between (the simulation then runs behind real time
+    // instead of spiralling). The game and the benchmarks log it per level; the Vita's frame target wants it at zero.
+    std::uint64_t droppedSteps() const;
+    // How many of the world's bodies are awake (Jolt's active bodies), what the solver's cost scales with: the same
+    // count as awakeBodyCount() below, as an int for callers (the benchmarks, PhysicsProfile) that compare it
+    // against int settings such as maxBodies. bodyCount() already existed (below) and is what this would have been.
+    int activeBodyCount() const;
+    // The most the step allocator (PhysicsSettings::tempAllocatorBytes) has needed at once over this world's life,
+    // in or out of its block: what a step would have taken from the block had it been big enough, even on a step
+    // that spilled to the heap (every spilled allocation still live is counted). Mostly Jolt's per-step buffer of
+    // 488 bytes per maxContactConstraints, so it is measured per profile (docs/PHYSICS.md, "The Vita profile").
+    // Sizing tempAllocatorBytes at or above this (with headroom) keeps every step inside the block. Zero until the
+    // first step() call.
+    std::size_t tempAllocatorPeakBytes() const;
 
     Mat4 pose(BodyId body) const;  // the body's frame, as given in BodyDesc::pose
     Vec3 linearVelocity(BodyId body) const;

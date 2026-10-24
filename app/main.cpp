@@ -37,6 +37,9 @@
 //   MuggleBall3 --play-music <name> [--seconds N]
 //                                            play a named sound (see sounds.xml) or one pass of a music
 //                                            track (Menu, Village, Pirates, Cowboys, Knights), wait, exit
+//   --physics-profile <name>                 picks every level's PhysicsSettings (mb/game/PhysicsProfile.h); default
+//                                            the platform's own (mb::defaultPhysicsProfileName(): "desktop" here,
+//                                            "vita" on a Vita build). An unknown name prints the known ones and exits 2.
 //
 // In the level viewer: Left/Right (or PageUp/PageDown) = previous/next level, Space = shoot a test ball, P = pause
 // the physics, L = reload the level, F1 = physics wireframes, left-drag = orbit, right-drag = pan, wheel = zoom,
@@ -63,6 +66,7 @@
 #include "mb/game/LevelScene.h"
 #include "mb/game/MaterialLibrary.h"
 #include "mb/game/ModelCache.h"
+#include "mb/game/PhysicsProfile.h"
 #include "mb/game/PhysicsScene.h"
 #include "mb/game/SaveData.h"
 #include "mb/game/TextureIndex.h"
@@ -127,6 +131,9 @@ struct Options {
     std::optional<BallShot> ball;                // --ball: a test ball at t = 0
     std::vector<mb_app::PrizeCue> prizes;        // --drop-prize, --catch-prize
     std::vector<mb_app::EffectCue> effects;      // --effect
+    // --physics-profile; defaulted once MB3_ASSETS and the rest are known to be real (see main()): every level,
+    // the game session's and the level viewer's alike, is built from this.
+    mb::PhysicsProfile physicsProfile = *mb::physicsProfile(mb::defaultPhysicsProfileName());
 };
 
 int checkLevel(const char* path) {
@@ -145,7 +152,7 @@ int checkLevel(const char* path) {
 class Viewer {
 public:
     Viewer(mb::Renderer& renderer, Assets& assets, const Options& options)
-        : assets_(assets), models_(renderer, assets.root / "Data" / "Meshes") {
+        : assets_(assets), models_(renderer, assets.root / "Data" / "Meshes"), profile_(options.physicsProfile) {
         if (options.camera) {
             const auto& c = *options.camera;
             camera.lookAt({c[0], c[1], c[2]}, {c[3], c[4], c[5]}, c[6]);
@@ -159,7 +166,8 @@ public:
             const auto start = Clock::now();
             const mb::Level level = mb::loadLevelJson(entry.path);
             const auto loaded = Clock::now();
-            auto physics = std::make_unique<mb::PhysicsScene>(level, assets_.materials);
+            auto physics = std::make_unique<mb::PhysicsScene>(level, assets_.materials, mb::PhysicsOptions{},
+                                                               mb::physicsSettingsFor(profile_, entry.name));
             const auto simulated = Clock::now();
             auto next = std::make_unique<mb::LevelScene>(models_, assets_.materials, assets_.textures, level,
                                                          physics->plan());
@@ -269,6 +277,7 @@ private:
 
     Assets& assets_;
     mb::ModelCache models_;
+    mb::PhysicsProfile profile_;  // --physics-profile; every level is built from it, like PlaySession
     std::unique_ptr<mb::PhysicsScene> physics_;
     std::unique_ptr<mb::LevelScene> scene_;
     std::unique_ptr<mb::ClothDraw> sails_;
@@ -335,7 +344,9 @@ int runPlayScreenshot(const Options& options) {
     Assets assets;
     const mb::SaveData save = openSave(options);
     const std::string name = assets.catalog.levels()[startLevel(assets, options)].name;
-    mb_app::PlaySession session(renderer, assets, save, nullptr, {.autoplay = true, .prizes = options.prizes, .effects = options.effects});
+    mb_app::PlaySession session(
+        renderer, assets, save, nullptr,
+        {.autoplay = true, .prizes = options.prizes, .effects = options.effects, .profile = options.physicsProfile});
     mb::GameHud hud;
     hud.lives = mb::GameplayRules{}.startHearts;
     if (const std::optional<int> index = mb::Campaign::load(assets.root / "Data" / "xml" / "levels.json").indexOf(name)) {
@@ -429,8 +440,9 @@ int runGame(const Options& options) {
     mb::logInfo("Asset root: {}", assets.root.string());
 
     mb::GameAudio audio(assets.root);  // after the window, so the device closes before SDL quits
-    mb_app::PlaySession session(renderer, assets, save, &audio,
-                                {.autoplay = options.autoplay, .prizes = options.prizes, .effects = options.effects});
+    mb_app::PlaySession session(
+        renderer, assets, save, &audio,
+        {.autoplay = options.autoplay, .prizes = options.prizes, .effects = options.effects, .profile = options.physicsProfile});
     mb_app::FrontEndOptions frontEnd;
     frontEnd.language = options.form.language;
     frontEnd.startLevel = options.level;
@@ -625,7 +637,8 @@ void printUsage() {
         "       MuggleBall3 --form <name> [--screenshot out.png] [--size WxH] [--language L] [--hover W | --press W]"
         " [--no-background]\n"
         "       MuggleBall3 --play-sound <name> [--seconds N]\n"
-        "       MuggleBall3 --play-music <Menu|Village|Pirates|Cowboys|Knights> [--seconds N]\n",
+        "       MuggleBall3 --play-music <Menu|Village|Pirates|Cowboys|Knights> [--seconds N]\n"
+        "       (any of the above) [--physics-profile <name>]\n",
         stderr);
 }
 
@@ -726,6 +739,18 @@ int main(int argc, char** argv) {
                 }
                 options.camera = values;
                 options.viewer = true;
+                ++i;
+            } else if (arg == "--physics-profile" && hasValue) {
+                const std::optional<mb::PhysicsProfile> profile = mb::physicsProfile(argv[i + 1]);
+                if (!profile) {
+                    std::fprintf(stderr, "unknown physics profile \"%s\"; known profiles:", argv[i + 1]);
+                    for (const std::string_view name : mb::physicsProfileNames()) {
+                        std::fprintf(stderr, " %.*s", static_cast<int>(name.size()), name.data());
+                    }
+                    std::fprintf(stderr, "\n");
+                    return 2;
+                }
+                options.physicsProfile = *profile;
                 ++i;
             } else {
                 printUsage();

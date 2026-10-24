@@ -15,6 +15,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <thread>
+#include <vector>
 
 namespace mb {
 
@@ -50,7 +51,8 @@ constexpr float kMaxPenetrationRecovery = 0.05f;
 // again; a level loads hundreds of bodies at once, a spawned prize is one.
 constexpr std::size_t kOptimizeAfterAdds = 64;
 
-constexpr std::size_t kTempBytes = 16u << 20;
+// Below this, a single contact manifold can outgrow the block before the first step even runs.
+constexpr std::size_t kMinTempBytes = 1u << 20;
 
 // Jolt's TempAllocatorImpl aborts the process when its block runs out; this one goes on from
 // the heap instead, so a scene with more contacts than expected only gets slower.
@@ -65,8 +67,18 @@ public:
             return nullptr;
         }
         const std::size_t padded = JPH::AlignUp(static_cast<std::size_t>(bytes), JPH_RVECTOR_ALIGNMENT);
+        // The high-water mark is what the block would have needed to serve everything live right now, this
+        // allocation included: what is in the block plus what spilled to the heap and is not yet freed.
+        peak_ = std::max(peak_, top_ + spilledLive_ + padded);
         if (top_ + padded > size_) {
-            return JPH::AlignedAllocate(bytes, JPH_RVECTOR_ALIGNMENT);
+            if (!loggedFallback_) {
+                loggedFallback_ = true;
+                logWarn("physics: the {} MiB step allocator overflowed, taking {} bytes from the heap (logged once)",
+                        size_ >> 20, padded);
+            }
+            spilledLive_ += padded;
+            spilled_.push_back({JPH::AlignedAllocate(bytes, JPH_RVECTOR_ALIGNMENT), padded});
+            return spilled_.back().address;
         }
         void* address = block_ + top_;
         top_ += padded;
@@ -80,15 +92,33 @@ public:
         auto* p = static_cast<std::uint8_t*>(address);
         if (p >= block_ && p < block_ + size_) {
             top_ = static_cast<std::size_t>(p - block_);  // Jolt frees in reverse order of allocating
-        } else {
-            JPH::AlignedFree(address);
+            return;
         }
+        // A spilled block: Jolt frees in reverse order, so it is almost always the last one.
+        for (auto it = spilled_.rbegin(); it != spilled_.rend(); ++it) {
+            if (it->address == address) {
+                spilledLive_ -= it->bytes;
+                spilled_.erase(std::next(it).base());
+                break;
+            }
+        }
+        JPH::AlignedFree(address);
     }
+
+    std::size_t peakBytes() const { return peak_; }
 
 private:
     std::size_t size_;
     std::uint8_t* block_;
     std::size_t top_ = 0;
+    std::size_t peak_ = 0;       // the most this allocator has needed at once, in or out of the block
+    std::size_t spilledLive_ = 0;  // bytes handed out from the heap and not yet freed
+    struct Spilled {
+        void* address;
+        std::size_t bytes;
+    };
+    std::vector<Spilled> spilled_;  // empty unless the block overflowed
+    bool loggedFallback_ = false;
 };
 
 // A step is a few tenths of a millisecond; with more than this many workers the time spent waking and waiting for
@@ -120,6 +150,8 @@ PhysicsSettings sanitized(PhysicsSettings s) {
     s.maxBodies = std::max(1, s.maxBodies);
     s.maxBodyPairs = std::max(1, s.maxBodyPairs);
     s.maxContactConstraints = std::max(1, s.maxContactConstraints);
+    s.bodyMutexes = std::max(0, s.bodyMutexes);
+    s.tempAllocatorBytes = std::max(kMinTempBytes, s.tempAllocatorBytes);
     return s;
 }
 
@@ -255,10 +287,11 @@ Mat4 fromJolt(JPH::RVec3Arg position, JPH::QuatArg rotation) {
 
 PhysicsWorld::Impl::Impl(Vec3 gravity, const PhysicsSettings& requested)
     : settings(sanitized(requested)),
-      tempAllocator(std::make_unique<FallbackTempAllocator>(kTempBytes)),
+      tempAllocator(std::make_unique<FallbackTempAllocator>(settings.tempAllocatorBytes)),
       jobSystem(makeJobSystem(settings.threads)),
       bodies(system.GetBodyInterfaceNoLock()) {
-    system.Init(static_cast<JPH::uint>(settings.maxBodies), 0, static_cast<JPH::uint>(settings.maxBodyPairs),
+    system.Init(static_cast<JPH::uint>(settings.maxBodies), static_cast<JPH::uint>(settings.bodyMutexes),
+                static_cast<JPH::uint>(settings.maxBodyPairs),
                 static_cast<JPH::uint>(settings.maxContactConstraints), broadPhaseLayers, objectVsBroadPhase,
                 objectPairs);
     JPH::PhysicsSettings joltSettings = system.GetPhysicsSettings();
@@ -546,9 +579,26 @@ int PhysicsWorld::step(float dt, const std::function<void()>& beforeStep) {
         ++steps;
     }
     if (w.accumulator + epsilon >= fixed) {
-        w.accumulator = std::fmod(w.accumulator, fixed);  // too far behind: drop whole steps, keep the remainder
+        // Too far behind: drop whole steps, keep the remainder below one step, exactly as before this counter
+        // existed (the simulation is unchanged). No epsilon here: a count within epsilon of a whole step below
+        // it is counted as not-yet-dropped, matching the remainder the fmod below keeps (which the next call's
+        // loop will then take as one more step) - so dropped + taken always reconciles with the time handed in.
+        w.droppedSteps += static_cast<std::uint64_t>(std::floor(w.accumulator / fixed));
+        w.accumulator = std::fmod(w.accumulator, fixed);
     }
     return steps;
+}
+
+std::uint64_t PhysicsWorld::droppedSteps() const { return impl_->droppedSteps; }
+
+int PhysicsWorld::activeBodyCount() const {
+    return static_cast<int>(impl_->system.GetNumActiveBodies(JPH::EBodyType::RigidBody));
+}
+
+std::size_t PhysicsWorld::tempAllocatorPeakBytes() const {
+    // The constructor always makes a FallbackTempAllocator (above); tempAllocator's static type is JPH::TempAllocator
+    // only because that is Jolt's own interface.
+    return static_cast<const FallbackTempAllocator&>(*impl_->tempAllocator).peakBytes();
 }
 
 Mat4 PhysicsWorld::pose(BodyId body) const {

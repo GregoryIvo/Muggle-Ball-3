@@ -96,6 +96,14 @@ new one. It does not fsync, so a power cut can still lose the latest save, and a
 handled as below. Each part is saved on its own (`saveSettings`, `saveProgress`, `saveHighScores`), and
 loading never writes: a first run creates no files.
 
+Some file systems refuse to rename over an existing regular file instead of replacing it. When that happens,
+`writeFileAtomic` moves the target aside to `<file>.bak` (`keepAsBackup`, replacing an older one of its own)
+and renames the temp file over the now-empty path; if that second rename also fails, the backup is put back,
+so the call either succeeds (leaving the previous contents at `<file>.bak`) or leaves `<file>` exactly as it
+was. Desktop file systems rename over an existing file outright, so this path is not normally taken; it
+exists for the Vita's, which `docs/VITA.md` records once it is known. (A target that is not a regular file,
+such as a directory already at the save path, is never moved aside: the write just fails and reports why.)
+
 ## Damaged files
 
 `SaveData`'s constructor never throws.
