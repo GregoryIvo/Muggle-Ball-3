@@ -105,9 +105,11 @@ public:
     virtual void warnMissing(const char* what, std::uint32_t handle) = 0;
 };
 
-// Sorts a frame's draw items into the opaque and the blended lists. Items whose mesh or texture does not
-// exist are left out after warnMissing. The lists keep their storage between frames; call collect() once
-// per frame and read the results until the next call.
+// Sorts a frame's draw items into the opaque and the blended lists. An item whose mesh does not exist is
+// left out after warnMissing; an item whose texture does not exist is kept after warnMissing and drawn
+// with the white texture (as for handle 0) — unlike sprites and effect batches below, which drop on a
+// missing texture. The lists keep their storage between frames; call collect() once per frame and read
+// the results until the next call.
 class DrawCollector {
 public:
     void collect(const FrameParams& frame, std::span<const DrawItem> items, ResourceQuery& resources);
