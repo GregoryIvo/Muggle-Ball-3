@@ -56,6 +56,19 @@ included here.
   excludes a level whose host and device rows cover a different number of steps or a different `endedBy`,
   and keeps the most complete run, with a warning, when a level's join key repeats within one CSV (an
   interrupted run followed by a full re-run).
+- `tools/vita_pack.py` (PlayStation Vita port, M6a): mirrors only the asset
+  files the runtime actually reads into a separate folder, resampling
+  non-power-of-two mipmapped textures to the next power of two (Pillow, or
+  macOS `sips`, or left as copied and listed in its manifest, along with any
+  texture whose header could not even be read). A re-run only trusts a
+  matching mtime for an already-resampled file once it also checks the
+  resampled file is actually power-of-two, so a `--no-resample` or
+  Pillow/sips-unavailable run never permanently skips a texture that still
+  needs fixing; a per-file resample failure is caught and reported instead of
+  aborting the whole pack; `--out` is refused when it is inside `--assets` (or
+  the reverse), or already holds unrelated content with no `vita_pack.json`
+  of its own, so a wrong `--out` can never delete someone else's files. See
+  `docs/ASSET_FORMATS.md`, "Vita pack".
 
 ### Changed
 - Renderer split into a backend-neutral part (`engine/src/render/RenderCommon.*`:
