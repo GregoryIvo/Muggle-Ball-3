@@ -11,6 +11,8 @@ included here.
 - PlayStation Vita port, milestone M1a: the VitaSDK cross build (`cmake/Vita.cmake`),
   Jolt through its Platform Blue hook, a hello VPK that probes the console, a
   placeholder LiveArea set and `docs/VITA.md`. The desktop build is unchanged.
+- Vita M1b: a `vita` CI job that cross-builds in the pinned `vitasdk/vitasdk` container
+  (vitaGL cached at its pinned commit) and uploads the data-free VPKs.
 
 ## [0.1.0] - 2026-10-23
 
