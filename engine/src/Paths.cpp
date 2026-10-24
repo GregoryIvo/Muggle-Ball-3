@@ -19,14 +19,21 @@ std::filesystem::path assetRoot() {
             return bundled;
         }
     }
-    std::filesystem::path local = std::filesystem::current_path() / "assets";
-    if (std::filesystem::exists(local, ec)) {
-        return local;
+    // current_path() throws where there is no working directory (the Vita's app0:/ sandbox); the error_code
+    // overload reports that instead, and the candidate is simply skipped.
+    std::filesystem::path local;
+    if (const std::filesystem::path cwd = std::filesystem::current_path(ec); !ec) {
+        local = cwd / "assets";
+        if (std::filesystem::exists(local, ec)) {
+            return local;
+        }
     }
-    if (const std::filesystem::path user = userDataDir(); !user.empty() && std::filesystem::exists(user / "assets", ec)) {
+    const std::filesystem::path user = userDataDir();
+    if (!user.empty() && std::filesystem::exists(user / "assets", ec)) {
         return user / "assets";
     }
-    return local;
+    // Last resort, as before: a path the caller fails to find, named after whichever candidate is least unlikely.
+    return !user.empty() ? user / "assets" : (!local.empty() ? local : std::filesystem::path("assets"));
 }
 
 std::filesystem::path userDataDir() {

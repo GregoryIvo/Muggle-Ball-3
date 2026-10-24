@@ -89,12 +89,19 @@ void testFileHelpers() {
           "overwrite keeps binary contents");
     check(!fs::exists(fs::path(file) += ".tmp"), "no temp file is left after a write");
 
-    // A target that cannot be replaced (a folder) fails cleanly and leaves nothing behind.
+    // A target that `rename` refuses to replace outright (a folder: the write's `rename(temp, path)` gets
+    // EISDIR on this file system, as the fallback is written for) is moved aside instead of blocking the
+    // write: writeFileAtomic succeeds, the folder ends up at "<path>.bak" with what was in it untouched, and
+    // no temp file is left.
     const fs::path blocked = dir.path / "blocked";
     fs::create_directories(blocked / "inside");
     WarningCapture quiet;
-    check(!mb::writeFileAtomic(blocked, "x"), "replacing a folder fails");
-    check(fs::is_directory(blocked) && !fs::exists(fs::path(blocked) += ".tmp"), "failure leaves the target and no temp file");
+    check(mb::writeFileAtomic(blocked, "x") && readText(blocked) == "x",
+          "a folder in the way is moved aside, not left blocking the write");
+    const fs::path blockedBackup = fs::path(blocked) += ".bak";
+    check(fs::is_directory(blockedBackup) && fs::is_directory(blockedBackup / "inside"),
+          "the folder survives as the backup, with its own contents");
+    check(!fs::exists(fs::path(blocked) += ".tmp"), "no temp file is left after the fallback");
 
     // A stale temp file from a crash does not matter.
     writeText(fs::path(file) += ".tmp", "half a fi");

@@ -14,6 +14,10 @@ std::optional<std::string> readTextFile(const std::filesystem::path& path);
 // "<path>.tmp" and renamed over the target, which leaves either the old file or the new one (it does not
 // survive a power cut, which would need an fsync). Missing parent folders are created. Returns false and
 // logs why on failure; the old file is then untouched and no ".tmp" is left behind.
+// If the rename over an existing target is refused outright (some file systems do, rather than replacing
+// it), the target is moved aside with keepAsBackup() and the rename retried; should the retry also fail, the
+// backup is put back so the target is left exactly as it was before the call, and the failure is reported
+// as usual. Otherwise the call succeeds and the thing that was in the target's place is kept at "<path>.bak".
 bool writeFileAtomic(const std::filesystem::path& path, std::string_view contents);
 
 // Moves a file that cannot be used to "<path>.bak", replacing an older backup, so that a fresh file can
