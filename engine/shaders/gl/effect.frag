@@ -1,5 +1,6 @@
 // Straight alpha, like the meshes: the blend state multiplies by alpha. See ../effect.frag.
-varying vec2 vUv;
+// highp, not the fragment stage's default mediump: see sprite.frag's comment.
+varying highp vec2 vUv;
 varying vec4 vColor;
 
 uniform sampler2D baseTexture;

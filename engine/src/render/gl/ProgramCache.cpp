@@ -95,18 +95,28 @@ ProgramCache::ProgramCache() {
         sprite_ = link(spriteVertex_, spriteFragment_, {"inPosition", "inUv", "inColor"}, "sprite");
         effect_ = link(effectVertex_, effectFragment_, {"inPosition", "inUv", "inColor"}, "effect");
     } catch (...) {
+        // Whichever programs already linked before the one that threw are real, non-zero GL program objects
+        // (link() throws on its own program at the point it fails, and has already deleted that one): the
+        // constructor is about to fail and ~ProgramCache will never run for this object, so without this,
+        // those earlier programs leak for the rest of the process.
+        releasePrograms();
         releaseShaders();
         throw;
     }
 }
 
 ProgramCache::~ProgramCache() {
-    for (const GlProgram* p : {&mesh_, &meshNoDiscard_, &line_, &sprite_, &effect_}) {
+    releasePrograms();
+    releaseShaders();
+}
+
+void ProgramCache::releasePrograms() {
+    for (GlProgram* p : {&mesh_, &meshNoDiscard_, &line_, &sprite_, &effect_}) {
         if (p->program) {
             glDeleteProgram(p->program);
+            p->program = 0;
         }
     }
-    releaseShaders();
 }
 
 void ProgramCache::releaseShaders() {

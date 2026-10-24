@@ -42,6 +42,7 @@ PFNGLUNIFORM4FPROC glUniform4f = nullptr;
 PFNGLUNIFORM4FVPROC glUniform4fv = nullptr;
 PFNGLUNIFORMMATRIX4FVPROC glUniformMatrix4fv = nullptr;
 PFNGLENABLEVERTEXATTRIBARRAYPROC glEnableVertexAttribArray = nullptr;
+PFNGLDISABLEVERTEXATTRIBARRAYPROC glDisableVertexAttribArray = nullptr;
 PFNGLVERTEXATTRIBPOINTERPROC glVertexAttribPointer = nullptr;
 
 namespace mb::render::gl {
@@ -92,8 +93,25 @@ bool hasExtension(const char* extensions, const char* name) {
 
 bool Platform::init(Window* window) {
     if (context) {
-        targetWindow = window;  // a later Renderer may differ (headless vs. windowed) in the same process
-        return true;  // already initialised: a harmless no-op, as the header promises
+        // A later Renderer may differ (headless vs. windowed) from whichever window the context is current
+        // on right now: the header promises a harmless no-op, but without this the context would stay
+        // current on the *old* target, so present()/renderToWindow would swap or draw into the wrong window
+        // (or, if that window was since destroyed, into nothing at all).
+        SDL_Window* handle = window ? window->handle() : headlessWindow;
+        if (!handle) {
+            // Was windowed before; this call wants headless and no headless window exists yet.
+            handle = headlessWindow = SDL_CreateWindow("mb3 headless GL", 64, 64, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
+            if (!handle) {
+                logError("GlPlatformSdl: SDL_CreateWindow (headless) failed: {}", SDL_GetError());
+                return false;
+            }
+        }
+        if (!SDL_GL_MakeCurrent(handle, context)) {
+            logError("GlPlatformSdl: SDL_GL_MakeCurrent failed: {}", SDL_GetError());
+            return false;
+        }
+        targetWindow = window;
+        return true;
     }
 
     if (!SDL_WasInit(SDL_INIT_VIDEO)) {
@@ -118,6 +136,7 @@ bool Platform::init(Window* window) {
         headlessWindow = SDL_CreateWindow("mb3 headless GL", 64, 64, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
         if (!headlessWindow) {
             logError("GlPlatformSdl: SDL_CreateWindow (headless) failed: {}", SDL_GetError());
+            shutdown();  // undoes SDL_InitSubSystem(VIDEO) above if this call made it
             return false;
         }
         handle = headlessWindow;
@@ -126,10 +145,12 @@ bool Platform::init(Window* window) {
     context = SDL_GL_CreateContext(handle);
     if (!context) {
         logError("GlPlatformSdl: SDL_GL_CreateContext failed: {}", SDL_GetError());
+        shutdown();
         return false;
     }
     if (!SDL_GL_MakeCurrent(handle, context)) {
         logError("GlPlatformSdl: SDL_GL_MakeCurrent failed: {}", SDL_GetError());
+        shutdown();
         return false;
     }
     targetWindow = window;
@@ -162,11 +183,13 @@ bool Platform::init(Window* window) {
     MB3_LOAD(glUniform4fv);
     MB3_LOAD(glUniformMatrix4fv);
     MB3_LOAD(glEnableVertexAttribArray);
+    MB3_LOAD(glDisableVertexAttribArray);
     MB3_LOAD(glVertexAttribPointer);
 #undef MB3_LOAD
     if (!glGenBuffers || !glBufferData || !glCreateShader || !glCreateProgram || !glUseProgram ||
-        !glUniformMatrix4fv || !glVertexAttribPointer) {
+        !glUniformMatrix4fv || !glVertexAttribPointer || !glDisableVertexAttribArray) {
         logError("GlPlatformSdl: a required GL 1.5/2.0 entry point is missing");
+        shutdown();  // leaves `context` null, so a later init() tries again instead of running on broken GL
         return false;
     }
 
@@ -185,6 +208,7 @@ bool Platform::init(Window* window) {
         !pRenderbufferStorageExt || !pFramebufferRenderbufferExt || !pCheckFramebufferStatusExt ||
         !pGenerateMipmapExt) {
         logError("GlPlatformSdl: GL_EXT_framebuffer_object is required but this context does not have it");
+        shutdown();
         return false;
     }
 

@@ -4,18 +4,44 @@
 #include "GlFunctions.h"
 #include "GlPlatform.h"
 #include "ProgramCache.h"
+#include "mb/engine/Log.h"
 #include "mb/engine/Renderer.h"
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace mb {
 
 class Window;
+
+// RenderState::pack() only ever uses 17 bits (RenderCommon.cpp), so this value can never be a real packed
+// state: the sentinel both Impl's initial currentStateKey and drawFrame's per-frame reset use to force the
+// next applyRenderState() to re-apply cull/depth/blend instead of trusting a cache that may be stale (another
+// Renderer sharing this process-global context, or the clear's own forced depth/colour masks).
+inline constexpr std::uint32_t kInvalidStateKey = 0xffffffffu;
+
+// MB3_GL_DEBUG=1 drains and logs any pending GL error once per distinct code. Neither vitaGL nor this desktop
+// build has anything like the SDL GPU back end's MB3_GPU_DEBUG validation layer, so this is the GL back end's
+// only way to surface a driver-reported error (an oversized texture, an out-of-memory allocation on the
+// console) instead of leaving it silently pending for whatever GL call happens to check next.
+inline void drainGlErrors(const char* where) {
+    const char* env = std::getenv("MB3_GL_DEBUG");
+    if (!env || !*env || *env == '0') {
+        return;
+    }
+    static std::unordered_set<GLenum> logged;
+    for (GLenum err = glGetError(); err != GL_NO_ERROR; err = glGetError()) {
+        if (logged.insert(err).second) {
+            logError("GL error 0x{:x} at {}", static_cast<unsigned>(err), where);
+        }
+    }
+}
 
 // A GPU mesh: one VBO (mb::Vertex, static) and one IBO, 16-bit when the mesh fits (the plan's §4.3 and M4a:
 // every shipped mesh does, the largest has 5171 vertices) else 32-bit.
@@ -82,13 +108,17 @@ struct Renderer::Impl : render::ResourceQuery {
     bool warnedMissingResource = false;
 
     // GL state tracking, so a draw only calls glUseProgram/glBindBuffer/glBindTexture/the state setters when
-    // something actually changed (see THE WORK #3, "Minimise GL state changes").
+    // something actually changed (see THE WORK #3, "Minimise GL state changes"). drawFrame() resets all of
+    // these to "nothing bound" at the top of every frame; see its comment.
     GLuint boundProgram = 0;
     GLuint boundArrayBuffer = 0;
     GLuint boundElementBuffer = 0;
     GLuint boundTexture = 0;
     VertexLayout currentLayout = VertexLayout::None;
-    std::uint32_t currentStateKey = 0xffffffffu;  // RenderState::pack() never reaches this: 17 bits used
+    std::uint32_t currentStateKey = kInvalidStateKey;
+    // Whether vertex attribute 2 is currently enabled: every layout but Line uses it (bindVertexBuffer toggles
+    // it instead of leaving it enabled for the life of the context, see Renderer.cpp's init()).
+    bool attrib2Enabled = true;
     std::uint64_t frameId = 0;
     // The frame this program's per-frame uniforms (viewProj, the light, or sprite's pixelToClip) were last
     // set: compared against frameId so a program bound more than once in a frame is not re-uploaded.

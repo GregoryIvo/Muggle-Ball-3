@@ -22,7 +22,11 @@ Re-run it (and commit the headers) after editing a shader:
     python3 tools/build_shaders.py
 
 Needs glslangValidator and spirv-cross on PATH for the SDL GPU half (brew install glslang
-spirv-cross); glslangValidator is optional for the GL half.
+spirv-cross); glslangValidator is optional for the GL half. --gl-only skips the SDL GPU half
+entirely (so neither tool is needed, matching the GL half's own "optional" claim above) when
+only engine/shaders/gl/*.vert and *.frag changed:
+
+    python3 tools/build_shaders.py --gl-only
 
 The SDL GPU shaders follow its binding rules, which the back end relies on:
   SPIR-V   vertex: uniform buffers in set 1; fragment: sampled textures in set 2,
@@ -221,25 +225,30 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--shaders", type=pathlib.Path, default=root / "engine" / "shaders")
     parser.add_argument("--out", type=pathlib.Path, default=root / "engine" / "shaders" / "generated")
+    parser.add_argument("--gl-only", action="store_true",
+                        help="Only (re)generate gl_shaders.h: skip the SDL GPU half entirely, so "
+                             "spirv-cross is never required and glslangValidator stays optional there too.")
     args = parser.parse_args()
 
-    glslang = find_tool("glslangValidator")
-    spirv_cross = find_tool("spirv-cross")
-
-    sources = sorted(p for stage in STAGES for p in args.shaders.glob(f"*.{stage}"))
-    if not sources:
-        sys.exit(f"no shaders in {args.shaders}")
     args.out.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp = pathlib.Path(tmp)
-        for source in sources:
-            name, stage = source.stem, source.suffix[1:]
-            words = compile_spirv(glslang, source, tmp / f"{source.name}.spv")
-            msl, entry = spirv_to_msl(spirv_cross, tmp / f"{source.name}.spv", tmp / f"{source.name}.metal")
-            target = args.out / f"{name}_{stage}.h"
-            target.write_bytes(header_text(name, stage, source.name, words, msl, entry).encode())
-            print(f"{source.name}: {len(words) * 4} bytes SPIR-V, {len(msl)} chars MSL -> {target}")
+    if not args.gl_only:
+        glslang = find_tool("glslangValidator")
+        spirv_cross = find_tool("spirv-cross")
+
+        sources = sorted(p for stage in STAGES for p in args.shaders.glob(f"*.{stage}"))
+        if not sources:
+            sys.exit(f"no shaders in {args.shaders}")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = pathlib.Path(tmp)
+            for source in sources:
+                name, stage = source.stem, source.suffix[1:]
+                words = compile_spirv(glslang, source, tmp / f"{source.name}.spv")
+                msl, entry = spirv_to_msl(spirv_cross, tmp / f"{source.name}.spv", tmp / f"{source.name}.metal")
+                target = args.out / f"{name}_{stage}.h"
+                target.write_bytes(header_text(name, stage, source.name, words, msl, entry).encode())
+                print(f"{source.name}: {len(words) * 4} bytes SPIR-V, {len(msl)} chars MSL -> {target}")
 
     # The GL half: independent of the SDL GPU one above, and of glslangValidator being on PATH (shutil.which,
     # not find_tool, which would exit if it is missing).

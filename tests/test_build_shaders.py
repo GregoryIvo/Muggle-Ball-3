@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """tools/build_shaders.py: header formatting, and a full run when the shader tools are installed."""
+import os
 import pathlib
 import re
 import shutil
@@ -69,6 +70,23 @@ class EndToEndTest(unittest.TestCase):
                     self.assertIn(f"gl_{source.stem}_{source.suffix[1:]}[]", text)
             self.assertIn("gl_mesh_frag_nodiscard[]", text)
             self.assertNotIn("ALPHA_TEST_BEGIN", text.split("gl_mesh_frag_nodiscard[]")[1])
+
+
+class GlOnlyTest(unittest.TestCase):
+    def test_gl_only_needs_neither_tool_and_writes_only_gl_shaders_h(self):
+        # Runs with an empty PATH, so neither glslangValidator nor spirv-cross can be found: --gl-only's
+        # whole point is that this still succeeds (the docstring's "glslangValidator is optional for the GL
+        # half" claim is otherwise unreachable, since main() used to require both tools before the GL half
+        # ever ran, regardless of --gl-only not existing at all).
+        with tempfile.TemporaryDirectory() as out:
+            env = dict(os.environ, PATH="")
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "tools" / "build_shaders.py"), "--gl-only", "--out", out],
+                capture_output=True, text=True, env=env)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual([p.name for p in pathlib.Path(out).iterdir()], ["gl_shaders.h"])
+            text = (pathlib.Path(out) / "gl_shaders.h").read_text()
+            self.assertIn("gl_mesh_frag_nodiscard[]", text)
 
 
 class GlFormatTest(unittest.TestCase):

@@ -97,9 +97,11 @@ void Renderer::Impl::init(Window* targetWindow) {
     }
     glFrontFace(GL_CW);       // front faces are clockwise, as in Direct3D
     glDepthFunc(GL_LEQUAL);   // Direct3D's default depth compare
-    // Attributes 0, 1 and 2 are enabled for the life of the context: with no VAOs, bindVertexBuffer() only
-    // ever changes what glVertexAttribPointer points them at, never whether they are enabled, and a program
-    // that reads fewer than three (line.vert) simply does not use the others.
+    // Attributes 0 and 1 are enabled for the life of the context: every layout uses them, and with no VAOs,
+    // bindVertexBuffer() only ever changes what glVertexAttribPointer points them at, never whether they are
+    // enabled. Attribute 2 is not: Line is only 2 wide, so bindVertexBuffer() toggles it per layout instead
+    // (a stale enabled array with no matching pointer is undefined per the GL spec once its buffer is
+    // deleted, even though the line program itself never reads it). Start it enabled, matching attrib2Enabled.
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
     glEnableVertexAttribArray(2);
@@ -114,6 +116,7 @@ void Renderer::Impl::init(Window* targetWindow) {
     whiteTexture = whiteTex.id;
 
     logConfiguration();
+    drainGlErrors("init");
 }
 
 void Renderer::Impl::logConfiguration() const {
@@ -142,6 +145,16 @@ GlTexture Renderer::Impl::createGlTexture(const Image& image, bool mipmaps) {
     if (needsPowerOfTwo) {
         resampled = resampleToPowerOfTwo(image);
         source = &resampled;
+    }
+
+    // GL_MAX_TEXTURE_SIZE (4096 on the Vita): glTexImage2D above that leaves GL_INVALID_VALUE pending and the
+    // texture unloadable (a black draw), with no handle the caller can tell apart from a real one. The SDL GPU
+    // back end logs and returns 0 in the equivalent case; match that instead of handing back a live-looking id.
+    const int maxSize = render::gl::Platform::maxTextureSize();
+    if (source->width > maxSize || source->height > maxSize) {
+        logError("createTexture: {}x{} exceeds the maximum texture size {}", source->width, source->height,
+                 maxSize);
+        return {0, true};
     }
 
     GLuint id = 0;

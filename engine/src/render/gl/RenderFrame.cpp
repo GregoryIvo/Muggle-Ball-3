@@ -64,6 +64,19 @@ void Renderer::Impl::bindVertexBuffer(GLuint vbo, VertexLayout layout) {
         return;  // the pointers already set for this buffer are still valid (see uploadStream's comment)
     }
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    // Attributes 0 and 1 are enabled for the life of the context (every layout uses them); attribute 2 is
+    // not (Line is 2 wide, everything else is 3), so it must be toggled per layout instead of staying enabled
+    // with whatever pointer the previous layout left it at — a stale pointer into a buffer that may since have
+    // been deleted (GL_INVALID_OPERATION on a validating driver) or resized shorter than this draw.
+    const bool needsAttrib2 = layout != VertexLayout::Line;
+    if (needsAttrib2 != attrib2Enabled) {
+        if (needsAttrib2) {
+            glEnableVertexAttribArray(2);
+        } else {
+            glDisableVertexAttribArray(2);
+        }
+        attrib2Enabled = needsAttrib2;
+    }
     switch (layout) {
         case VertexLayout::Mesh:
             glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
@@ -314,6 +327,31 @@ void Renderer::Impl::drawFrame(GLuint targetFbo, int width, int height, const Fr
                                std::span<const DrawItem> items, std::span<const DebugLine> lines,
                                std::span<const Sprite> sprites, std::span<const EffectBatch> effects) {
     ++frameId;
+
+    // Reset every per-draw GL bind cache to "nothing bound" before touching the context. Two reasons this
+    // must happen every frame, not just once at construction:
+    //  1. the clear below forces glDepthMask(GL_TRUE) (and a full glColorMask) outside applyRenderState, so
+    //     if this frame's first draw happens to pack to the same RenderState key as the *previous* frame's
+    //     last draw, applyRenderState's "skip if unchanged" early return would leave that override in force
+    //     and the draw would write depth (or write alpha) when its own state says not to;
+    //  2. GlPlatform.h: "there is one GL context per process" — if more than one Renderer is alive (or was,
+    //     and freed its GL objects) in this process, another Renderer's draws may have rebound the program,
+    //     a buffer or a texture, or changed GL state these caches don't know about.
+    // The cost is a handful of redundant rebinds on the first draw of each kind this frame.
+    boundProgram = 0;
+    boundArrayBuffer = 0;
+    boundElementBuffer = 0;
+    boundTexture = 0;
+    currentLayout = VertexLayout::None;
+    currentStateKey = kInvalidStateKey;
+    // Re-synced directly, not just invalidated: unlike the object-id caches above (where 0 is never a real
+    // name, so the next bind always re-issues the real call), a stale *boolean* here could read as already
+    // correct by coincidence while the real GL enable state is something else.
+    if (!attrib2Enabled) {
+        glEnableVertexAttribArray(2);
+        attrib2Enabled = true;
+    }
+
     collectDraws(frame, items);
 
     lineStream.cpu.resize(lines.size() * 2);
@@ -335,8 +373,9 @@ void Renderer::Impl::drawFrame(GLuint targetFbo, int width, int height, const Fr
     glViewport(0, 0, width, height);
     // glClear respects both masks: a previous frame's last draw may have left either one off (a blended or
     // effect item's depthWrite is often false), which would make the matching half of this clear a no-op.
-    // Both are forced on for the clear and applyRenderState sets the real draw masks again on the first
-    // state change below (its own cache does not know about this override, so that always happens).
+    // Both are forced on for the clear; the state-cache reset above (currentStateKey = kInvalidStateKey)
+    // guarantees applyRenderState cannot mistake this override for the real state and skip re-applying the
+    // real masks on the first draw below.
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glDepthMask(GL_TRUE);
     glClearColor(frame.clear.r, frame.clear.g, frame.clear.b, frame.clear.a);
@@ -356,6 +395,7 @@ void Renderer::Impl::drawFrame(GLuint targetFbo, int width, int height, const Fr
     if (spriteVertexCount > 0) {
         drawSprites(width, height, spriteVertexCount);
     }
+    drainGlErrors("drawFrame");
 }
 
 void Renderer::Impl::renderWindow(const FrameParams& frame, std::span<const DrawItem> items,

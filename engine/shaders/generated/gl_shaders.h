@@ -6,7 +6,8 @@ namespace mb::shaders {
 inline constexpr char gl_effect_frag[] =
     R"GLSL(
 // Straight alpha, like the meshes: the blend state multiplies by alpha. See ../effect.frag.
-varying vec2 vUv;
+// highp, not the fragment stage's default mediump: see sprite.frag's comment.
+varying highp vec2 vUv;
 varying vec4 vColor;
 
 uniform sampler2D baseTexture;
@@ -69,7 +70,9 @@ inline constexpr char gl_mesh_frag[] =
 // lines between the ALPHA_TEST markers removed (the discard-free variant, used when a texture has no alpha
 // below 255 and the material's alpha is 1, so the PowerVR GPU keeps its hidden-surface removal).
 varying vec3 vNormal;
-varying vec2 vUv;
+// highp, not the fragment stage's default mediump: see sprite.frag's comment (NPOT REPEAT tiling needs the
+// range mediump does not reliably give on hardware that treats it as fp16).
+varying highp vec2 vUv;
 
 uniform sampler2D baseTexture;
 uniform vec4 diffuse;
@@ -131,7 +134,12 @@ void main() {
 inline constexpr char gl_sprite_frag[] =
     R"GLSL(
 // Straight (not premultiplied) alpha, like the meshes: the blend state multiplies by alpha.
-varying vec2 vUv;
+// vUv is highp (not the fragment stage's default mediump, see the GL_ES_PREAMBLE's "precision mediump
+// float"): UI sprites tile NPOT textures with REPEAT and scroll a 1024-wide one (handoff 4.3), and mediump
+// only guarantees about 2^10 of range/precision, enough to visibly misplace texels at the tile edges and
+// during scrolling. GLSL ES 1.00 lets the fragment stage declare a varying's precision independently of the
+// vertex stage (as long as it is at least as precise, which vec2 vUv there already is by its own default).
+varying highp vec2 vUv;
 varying vec4 vColor;
 
 uniform sampler2D baseTexture;
@@ -167,7 +175,9 @@ inline constexpr char gl_mesh_frag_nodiscard[] =
 // lines between the ALPHA_TEST markers removed (the discard-free variant, used when a texture has no alpha
 // below 255 and the material's alpha is 1, so the PowerVR GPU keeps its hidden-surface removal).
 varying vec3 vNormal;
-varying vec2 vUv;
+// highp, not the fragment stage's default mediump: see sprite.frag's comment (NPOT REPEAT tiling needs the
+// range mediump does not reliably give on hardware that treats it as fp16).
+varying highp vec2 vUv;
 
 uniform sampler2D baseTexture;
 uniform vec4 diffuse;

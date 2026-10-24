@@ -175,8 +175,16 @@ VAOs, no sRGB, no instancing.
   `glDepthMask(GL_FALSE)` (any blended or effect item does), clearing the depth buffer at the start of the next
   frame is silently a no-op, and whatever was in the depth buffer before stays — this failed `render_test`'s
   mipmap test (a tiny quad, drawn right after other tests, simply did not appear) until both masks are forced
-  on immediately before the clear, with `applyRenderState` setting the real per-draw masks again straight after.
-- Textures: `GL_RGBA8`, `GL_REPEAT`, linear filtering, no anisotropy; `opaqueAlpha` (every alpha byte 255) is
+  on immediately before the clear. **Second finding, from review:** forcing the masks for the clear is not by
+  itself enough — `applyRenderState` skips re-applying cull/depth/blend whenever the packed `RenderState`
+  matches the last one it applied, and that cached key persists across frames, so if a frame's first draw
+  happens to pack to the same key as the *previous* frame's last draw, the clear's forced `glDepthMask(GL_TRUE)`
+  stays in effect for that draw (depth gets written even though the state says `depthWrite = false`). Fixed by
+  resetting the cache (`currentStateKey`, and the other GL bind caches alongside it) to an impossible sentinel
+  at the top of every `drawFrame`, not just once at construction — see `RenderFrame.cpp`'s comment there, which
+  also covers the (currently unreached) case of more than one `Renderer` sharing this process's one GL context.
+- Textures: `GL_RGBA` (the unsized format; the driver picks the internal storage), `GL_REPEAT`, linear
+  filtering, no anisotropy; `opaqueAlpha` (every alpha byte 255) is
   computed once in `createTexture`, and the mesh draw picks the discard-free program when that holds and
   `material.diffuse.a >= 1` and `blend == Opaque`. NPOT: when mipmaps are asked for and
   `!Platform::npotMipmaps()` (the Vita; desktop GL 2.1 here has `GL_ARB_texture_non_power_of_two`, so never),
@@ -196,6 +204,18 @@ VAOs, no sRGB, no instancing.
 - `renderToImage` draws into an FBO (an `RGBA8` colour texture, a `GL_DEPTH_COMPONENT24` depth renderbuffer),
   reused while the size is unchanged, then `glReadPixels` and a row flip (GL reads bottom-up; vitaGL's FBOs are
   flipped internally to match GL, so the same flip is right on both targets).
+- `createTexture` rejects (logs and returns handle 0, like the SDL GPU back end) an image wider or taller than
+  `Platform::maxTextureSize()` (4096 on the Vita) after the NPOT resample, instead of handing back a handle
+  `glTexImage2D` silently refused (`GL_INVALID_VALUE` left pending, the texture unloadable, draws with it
+  black). No shipped asset is this large today.
+- Vertex attribute 2 (`inUv`/`inColor`, depending on the layout) is enabled or disabled per draw in
+  `bindVertexBuffer` to match the layout (every one but `Line`, which is 2 wide), instead of being left enabled
+  for the life of the context with whatever pointer the previous layout's buffer set: with no VAOs, a stale
+  enabled array pointing into a since-deleted buffer is undefined per the GL spec even though nothing currently
+  reads it during a line draw.
+- `MB3_GL_DEBUG=1` drains `glGetError` after `Platform::init` and at the end of every `drawFrame`, logging
+  each distinct code once — the same idea as the SDL GPU back end's `MB3_GPU_DEBUG`, since neither vitaGL nor
+  this desktop build has a validation layer of its own.
 
 **Desktop-only finding (not a device concern):** `SDL_GL_SetSwapInterval(1)` is what the contract asks for and
 is what `GlPlatformSdl.cpp` sets, but on a Mac whose display is asleep, SDL's Cocoa GL back end's vsync wait
@@ -214,13 +234,21 @@ the desktop `GL` variant interactively, not something the Vita build can hit.
 same directory, via `MB3_TEST_OUTPUT_DIR`), calls the test (renamed from `main` to `render_test_main` on that
 one source file, since the compiler's no-mangling treatment of `main` applies only to that exact spelling — the
 renamed function is an ordinary C++ symbol, and the forward declaration must not be `extern "C"` or it will not
-link), appends the exit code as the file's last line, and exits.
+link), appends the exit code as the file's last line, and exits. **Finding, from review:** opening stdout `"w"`
+and stderr `"a"` gives them two independently tracked offsets into the same file; once either stream's newlib
+buffer flushes (both start fully buffered at 1 KiB, well under the ~3 KiB the 19 tests print), the next flush
+of the other stream overwrites what the first appended, and a crash loses whatever was never flushed at all —
+exactly the case this shim exists to diagnose. Fixed: remove the file first, then open both streams `"a"` (one
+shared, always-current offset), stdout line-buffered and stderr fully unbuffered, so text reaches the file as
+it's produced instead of sitting in a buffer a crash never flushes.
 
 1. Copy `mb3_vita_render_test.vpk` to the console and install it from VitaShell. The bubble is "MB3 Render Test".
 2. Start it; it runs the 19 checks with no window of its own and exits.
 3. Send back `ux0:data/MuggleBall3/render-test/results.txt` and the directory's PNGs (particularly any whose
    check failed — the file names say which: `01_clear.png`, `02_checker_quad.png`, and so on through
-   `12c_effect_crowd.png`).
+   `12c_effect_crowd.png`). Also send back `ux0:/data/SDL_Log.txt`: SDL3 on the Vita writes `SDL_Log`/
+   `SDL_LogError` there, not to stderr, so it is the only place `mb::logError`/`logWarn` lines from the engine
+   (as opposed to the test's own `printf` output, which is in `results.txt`) show up.
 
 ### Desktop results (2026-10-24, Apple M3 Pro, Darwin 27, `GL_VERSION 2.1 Metal - 91.7`)
 
@@ -245,15 +273,25 @@ link), appends the exit code as the file's last line, and exits.
   | Piratos-Kartejniki | 95.6% | (507,298): (2,89,207) vs (202,202,202), diff 200 |
   | MainMenu form | 100.0% | (455,245): diff 4 |
 
-  All six are below M4b's 99% bar except the menu. **Not a defect:** every scene's interior and flat regions
-  match almost exactly (random sampling away from edges lands diffs of 0-9 throughout); the mismatches cluster
-  entirely at thin, high-contrast geometry (foliage, rigging, small props) and the single worst pixel in each
-  case sits between two closely-matching neighbours on either side — a one-pixel boundary that Metal's and this
-  GL driver's rasterisers place on different sides of a hard edge, not a shading, blending or sampling bug. The
-  only scene with no 3D edges at all (the menu, sprites only) matches 100.0%. No fix is possible or appropriate
-  here: this is the expected cost of comparing two GPU backends' triangle coverage rules on fine detail, which
-  is exactly why M4b's own tolerance is a percentage and not an exact match. Re-measure on the device once the
-  render-test VPK and a game build run there.
+  All six are below M4b's 99% bar except the menu. **Correction, from review:** the numbers above are right,
+  but an earlier version of this section explained them as rasteriser edge placement only ("not a shading,
+  blending or sampling bug") — that claim does not survive measurement. Of piratos-ostrovok's 22502 pixels
+  differing by more than 8, 6347 (28%) sit inside otherwise-smooth regions (no neighbour differs by more than
+  48) with diffs of 9-16, and whole textured surfaces disagree well above the edges: a 100x60 sand region is
+  19.5% over tolerance (mean diff 5.8), the ship hull 25.5% (mean 6.4), 8.7% of the whole frame is over
+  tolerance-4 — while the flat water plane (0.00%), the background sprite (0.00%) and the HUD text (mean 0.01)
+  match almost exactly, and 4x crops show the GL hull's planks and ornament band visibly softer than SDL GPU's.
+  The real cause: the SDL GPU back end's one sampler (`sdlgpu/Renderer.cpp`'s `createSampler`, 8x anisotropy)
+  samples minified, slanted surfaces anisotropically; this GL back end's one sampler is isotropic trilinear,
+  exactly as §4.3 asks ("drop anisotropy") — so the mismatch is the two back ends disagreeing, by design, on
+  how a minified texture blurs, not a rasteriser edge-coverage artefact. (The *edges*-vs-*fill* framing was not
+  wrong about edges existing at thin high-contrast geometry; it was wrong to say that was the whole story, and
+  wrong to rule out sampling.) This predicts the same ~4-5% gap on the real Vita against the macOS references
+  for every scene with 3D geometry, independent of anything device-specific — the only scene with no 3D edges
+  or minified surfaces at all (the menu, sprites only) is exactly the one that matches 100.0%. No code change
+  follows from this on the GL side (§4.3 is explicit that it wants isotropic filtering); re-measure once on the
+  device to confirm the gap is this and not something new, and record M4b's own tolerance against it knowing
+  the ~95% baseline this comparison already set, not a hoped-for ~99%.
 
 ## Decisions and findings
 
@@ -341,8 +379,13 @@ M4a (tick with the date and paste the relevant log lines):
 
 - [ ] `mb3_vita_render_test.vpk` installs and shows its icon and name ("MB3 Render Test") on the LiveArea;
 - [ ] all 19 render tests pass ("all checks passed" is the last line before the exit code);
-- [ ] `results.txt` comes back, from `ux0:data/MuggleBall3/render-test/`;
-- [ ] if any check failed, its PNG (same directory) comes back too, and the failure is recorded above.
+- [ ] `results.txt` comes back, from `ux0:data/MuggleBall3/render-test/`, and `SDL_Log.txt` from `ux0:/data/`;
+- [ ] if any check failed, its PNG (same directory) comes back too, and the failure is recorded above;
+- [ ] the main menu's tiled/scrolling UI sprites (the `Sky.jpg` background, any tiled form) are not blurred or
+      crawling at their tile seams — review finding: vitaGL's fragment preamble is `mediump float`, and if its
+      GLSL translator treats that as fp16, a `mediump` UV has only about half a texel of precision at a
+      texture coordinate near 1.0, which REPEAT and NPOT tiling (handoff §4.3) reach constantly; fixed to
+      `highp` in the three fragment shaders' `vUv`, but worth confirming on the real GPU translator.
 
 ## Legal
 

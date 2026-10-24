@@ -49,6 +49,7 @@ private:
     GlProgram mesh_, meshNoDiscard_, line_, sprite_, effect_;
 
     void releaseShaders();
+    void releasePrograms();
 };
 
 }  // namespace mb::render::gl

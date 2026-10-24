@@ -3,7 +3,9 @@
 // lines between the ALPHA_TEST markers removed (the discard-free variant, used when a texture has no alpha
 // below 255 and the material's alpha is 1, so the PowerVR GPU keeps its hidden-surface removal).
 varying vec3 vNormal;
-varying vec2 vUv;
+// highp, not the fragment stage's default mediump: see sprite.frag's comment (NPOT REPEAT tiling needs the
+// range mediump does not reliably give on hardware that treats it as fp16).
+varying highp vec2 vUv;
 
 uniform sampler2D baseTexture;
 uniform vec4 diffuse;
