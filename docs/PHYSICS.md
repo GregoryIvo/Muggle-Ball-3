@@ -81,9 +81,12 @@ the biggest level and used nine cores.
 A step keeps a running count of whole fixed steps it has to throw away, `PhysicsWorld::droppedSteps()`: a call to
 `step()` that is handed more time than `maxStepsPerCall` steps cover takes that many and keeps the remainder below
 one step, dropping the whole steps in between so the simulation falls behind real time instead of spiralling into
-ever-larger catch-up calls. It is logged once per level (`PlaySession`, and the end of each level in the three
-smokes) and is expected to be zero on a machine that keeps up with the fixed step; the host can go briefly over
-budget under load, which is reported, not treated as a failure.
+ever-larger catch-up calls. `GameSession::update()` (`game/src/Gameplay.cpp`) keeps the same kind of count for its
+own accumulator, which can drop steps the same way on a long pause even when the world underneath it never does
+(it hands the world only one fixed step per tick); `GameSession::droppedSteps()` is the sum of both. It is logged
+once per level (`PlaySession`, and the end of each level in the three smokes) and is expected to be zero on a
+machine that keeps up with the fixed step; the host can go briefly over budget under load, which is reported, not
+treated as a failure.
 
 ### The Vita profile
 
@@ -98,14 +101,29 @@ use rather than for 32768 bodies. The four windmill levels (`village-dinner`, `v
 that a later retuning of the base "vita" settings cannot drop the only levels measured to need them below that.
 
 The world size is measured, not guessed: `mb_physics_smoke --measure` (extended for this) tracks, for every level
-and every one of its eleven starting configurations, the peak of `PhysicsWorld::bodyCount()` and
-`activeBodyCount()` during a 240 s run. Over all 83 shipped levels (2026-10-23) the peak is **374 bodies, 372 of
-them awake at once**, both on `knight-miss-1457`. The rule the Vita profile is sized by: `maxBodies` is the next
-power of two at or above twice the peak body count, at least 512 (374 x 2 = 748, so **1024**); `maxBodyPairs` is
-8x that (**8192**); `maxContactConstraints` is 4x that (**4096**); the `TempAllocator` is a flat **4 MiB**, well
-above the 16 MiB desktop block's actual high-water mark for these levels (docs/VITA.md records the measurement
-that justified not needing more). Re-run `mb_physics_smoke --measure` and update this paragraph (and
-`PhysicsProfile.cpp`'s table) if new levels are added or a body count ever gets close to these numbers.
+and every one of its eleven starting configurations, the peak of `PhysicsWorld::bodyCount()`,
+`activeBodyCount()` and `tempAllocatorPeakBytes()` (the step allocator's own high-water mark, in or out of its
+block) during a 10 s run (`kRunSeconds`, the same length the plain smoke stands each level for). Over all 83
+shipped levels (2026-10-23) the peak is **374 bodies, 372 of them awake at once**, both on `knight-miss-1457`.
+Two different rules size the Vita profile from the measured peaks, and only the measurements themselves
+(`bodyCount()`, `activeBodyCount()`, `tempAllocatorPeakBytes()`) come from `--measure` — the settings derived
+from them do not:
+- `maxBodies` is the next power of two at or above twice the peak body count, at least 512 (374 x 2 = 748, so
+  **1024**); `maxBodyPairs` is 8x that (**8192**) and `maxContactConstraints` 4x that (**4096**) — both rules of
+  thumb applied to the body peak, not separately measured quantities.
+- `tempAllocatorBytes` is the next whole MiB at or above twice the allocator's own measured peak, at least
+  1 MiB. The step allocator's peak depends on more than the bodies in play: **`--measure --physics-profile
+  vita`** (measuring with the Vita's own `threads = 0` and smaller `maxBodyPairs`/`maxContactConstraints`
+  already in force, not the desktop's) gives a peak of **2,187,184 bytes**, so 2 x 2,187,184 = 4,374,368 bytes,
+  **5 MiB (5,242,880 bytes)**. A bare `--measure` (the desktop profile: several worker threads, 65536
+  `maxBodyPairs`) measures the same levels at **16,179,120 bytes** instead — threads matter more than body
+  count here, because Jolt holds more of the step allocator live at once with several workers in flight than
+  with one, so the two profiles need different budgets even though they play identically (`droppedSteps()` is
+  zero either way). Always measure with `--physics-profile <name>` matching the profile being sized, or the
+  number is for a different thread count than the one that will use it.
+
+Re-run `mb_physics_smoke --measure --physics-profile vita` and update this paragraph (and `PhysicsProfile.cpp`'s
+table) if new levels are added or a measured peak ever gets close to these numbers.
 
 ## Welded to the world
 

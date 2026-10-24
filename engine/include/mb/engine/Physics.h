@@ -215,6 +215,11 @@ public:
     // count as awakeBodyCount() below, as an int for callers (the benchmarks, PhysicsProfile) that compare it
     // against int settings such as maxBodies. bodyCount() already existed (below) and is what this would have been.
     int activeBodyCount() const;
+    // The most the step allocator (PhysicsSettings::tempAllocatorBytes) has needed at once over this world's life,
+    // in or out of its block: what a step would have taken from the block had it been big enough, even on a step
+    // that spilled to the heap. Sizing tempAllocatorBytes at or above this (with headroom) keeps every step inside
+    // the block. Zero until the first step() call.
+    std::size_t tempAllocatorPeakBytes() const;
 
     Mat4 pose(BodyId body) const;  // the body's frame, as given in BodyDesc::pose
     Vec3 linearVelocity(BodyId body) const;

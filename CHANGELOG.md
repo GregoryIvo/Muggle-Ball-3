@@ -14,11 +14,16 @@ included here.
 - PlayStation Vita port, milestone M3a: `mb_engine` and `mb_game` cross-compile for the
   Vita by default now (`MB3_VITA_BUILD_ENGINE` defaults ON); portability fixes found no
   behaviour to change on the desktop (`STBI_NO_THREAD_LOCALS`, `error_code` filesystem
-  calls, a fallback in `writeFileAtomic` for a rename a file system refuses, `setLogFile`
-  and `sceClibPrintf` logging on `__vita__`). `PhysicsWorld` gained `droppedSteps()`,
-  `bodyCount()` and `activeBodyCount()`; a named `PhysicsProfile` ("desktop", "vita", see
+  calls, a fallback in `writeFileAtomic` for a rename a regular file a file system
+  refuses, a missing log directory created on first use, `setLogFile` and
+  `sceClibPrintf` logging on `__vita__`). `PhysicsWorld` gained `droppedSteps()`,
+  `bodyCount()`, `activeBodyCount()` and `tempAllocatorPeakBytes()` (the step
+  allocator's own high-water mark, with a one-time log on its first heap spill);
+  `GameSession` gained its own `droppedSteps()`, the session's own accumulator plus the
+  world's. A named `PhysicsProfile` ("desktop", "vita", see
   `game/include/mb/game/PhysicsProfile.h` and `docs/PHYSICS.md`) picks every level's
-  `PhysicsSettings`, selected with `--physics-profile <name>` in `MuggleBall3`,
+  `PhysicsSettings`, sized from `mb_physics_smoke --measure`; selected with
+  `--physics-profile <name>` in `MuggleBall3` (the game and the level viewer alike),
   `mb_physics_smoke`, `mb_gameplay_smoke` and `mb_cloth_smoke`.
 
 ## [0.1.0] - 2026-10-23

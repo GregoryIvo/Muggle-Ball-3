@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <mutex>
 #include <string>
+#include <system_error>
 
 namespace mb {
 
@@ -37,6 +38,13 @@ void setLogFile(const std::filesystem::path& path) {
         gLogFile = nullptr;
     }
     gLogFileWarned = false;
+    // A fresh console has no ux0:data/MuggleBall3/ yet; fopen's "a" mode never creates missing directories, only
+    // the final file, so without this the very first run would get no log at all. A failure here is harmless:
+    // it falls through to fopen, which then fails too and gives the existing warning below.
+    if (path.has_parent_path()) {
+        std::error_code ec;
+        std::filesystem::create_directories(path.parent_path(), ec);
+    }
     gLogFile = std::fopen(pathText.c_str(), "a");
     if (gLogFile == nullptr) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "cannot open the log file %s", pathText.c_str());

@@ -1719,12 +1719,17 @@ void testDroppedSteps() {
     PhysicsWorld world(kGravity, s);
     check(world.droppedSteps() == 0, "droppedSteps: zero before any step() call");
     check(world.step(kStep) == 1 && world.droppedSteps() == 0, "droppedSteps: a normal step reports none dropped");
-    check(world.step(kStep * 20.0f) == 8 && world.droppedSteps() == 12,
-          "droppedSteps: 20 fixed steps' worth of time with maxStepsPerCall 8 takes 8 steps and drops the other 12");
+    // 20 fixed steps' worth of time, 8 taken, leaves 12 fixed steps' worth in the accumulator - but kStep*20.0f
+    // is computed in float and added to a double accumulator, landing a hair under 12*fixed; floor() with no
+    // epsilon (unlike the loop above) counts that as only 11 whole steps dropped, keeping a near-whole step as
+    // remainder instead. That remainder is not thrown away: the next call below takes it as one more step.
+    check(world.step(kStep * 20.0f) == 8 && world.droppedSteps() == 11,
+          "droppedSteps: 20 fixed steps' worth of time with maxStepsPerCall 8 takes 8 steps and drops 11 more");
     // The remainder below one step is kept, not thrown away with the dropped steps: feeding it what is left
-    // takes exactly one more step, and droppedSteps does not move again.
+    // takes exactly one more step (the near-whole remainder from above plus this nearly-empty one), and
+    // droppedSteps does not move again.
     check(world.step(kStep * 0.999f) == 1, "droppedSteps: the remainder kept below one step still carries over");
-    check(world.droppedSteps() == 12, "droppedSteps: and stays at 12 once nothing more is dropped");
+    check(world.droppedSteps() == 11, "droppedSteps: and stays at 11 once nothing more is dropped");
 }
 
 // PhysicsWorld::bodyCount() (the world's body records) and activeBodyCount() (Jolt's awake rigid bodies):

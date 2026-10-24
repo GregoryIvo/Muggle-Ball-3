@@ -107,9 +107,11 @@ struct Outcome {
     int bolts = 0, meteors = 0;                    // that struck
     std::array<int, kPrizeKindCount> dropped{};    // prizes dropped, by kind
     int givenUp = 0;  // balls lost in a pocket they could not be freed from, see play()
-    std::uint64_t fixedSteps = 0, droppedSteps = 0;  // PhysicsWorld::step()/droppedSteps(), over the whole run
+    std::uint64_t fixedSteps = 0, droppedSteps = 0;  // GameSession::droppedSteps(), over the whole run (its own
+                                                      // accumulator plus the world's: see Gameplay.h)
     int peakAwake = 0;   // the most bodies awake at once, sampled a few times a second
     int bodyCount = 0;   // the world's bodies at the end (it does not change during a run)
+    std::size_t tempAllocatorPeakBytes = 0;  // PhysicsWorld::tempAllocatorPeakBytes(), at the end of the run
     std::vector<GameEvent> events;
     std::vector<std::string> problems;
     std::vector<std::string> standing;  // the targets left, one line each
@@ -133,11 +135,11 @@ bool gStrict = false;   // every target counts, whatever the ball can reach, and
 bool gNoStall = false;  // the look at what the ball can reach stays, the stall rule goes
 int gCampaignLevel = 0; // every level is played as this one of the campaign (0: as its own)
 std::uint64_t gSeed = 1;  // of the prizes, see prizeSeedOf()
-// --physics-profile; every level's settings come from it. Set to the "desktop" profile at the top of main(), not
-// here: a global initialized by calling into mb_game's own globals (PhysicsProfile.cpp's profile table) at static
-// init time would race them across translation units, so this stays default-constructed (which needs nothing
-// from another TU) until main() runs, after which every static object in the program is guaranteed built.
-PhysicsProfile gProfile;
+// --physics-profile; every level's settings come from it. A command line that passes the flag overrides this in
+// main(). Safe to build here at static-init time: physicsProfile() reaches PhysicsProfile.cpp's table through a
+// function-local static, which C++ builds the first time anything calls it, whatever order translation units'
+// globals are otherwise initialized in.
+PhysicsProfile gProfile = *physicsProfile("desktop");
 
 // The seed of one level's prizes. The default of SessionOptions is the same for every level, so every level would replay the same
 // first drops (a cannon, a bonus, a bat size ...) and nine of the 28 prizes would never drop in a run of 83 levels.
@@ -248,8 +250,9 @@ Outcome play(const Level& level, const MaterialLibrary& materials, double second
     out.stepMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count() /
                  static_cast<double>(std::max<std::uint64_t>(frame, 1));
     out.fixedSteps = static_cast<std::uint64_t>(std::llround(session.time() / options.physicsSettings.fixedStep));
-    out.droppedSteps = scene.world().droppedSteps();
+    out.droppedSteps = session.droppedSteps();
     out.bodyCount = static_cast<int>(scene.world().bodyCount());
+    out.tempAllocatorPeakBytes = scene.world().tempAllocatorPeakBytes();
 
     // The frees of each ball that came one after the other where the one before was: a ball freed jamFreesInARow times like that
     // and pinned again is lost where it is, not past the bat (GameSession::freeBall()).
@@ -362,6 +365,7 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, const Cam
     std::uint64_t totalFixedSteps = 0, totalDroppedSteps = 0;
     int peakAwakeOfAll = 0, peakBodiesOfAll = 0;
     int levelsWithDroppedSteps = 0;
+    std::size_t peakTempAllocatorBytesOfAll = 0;
     for (const LevelEntry& entry : catalog.levels()) {
         if (only && lower(entry.name).find(lower(only)) == std::string::npos) {
             continue;
@@ -379,14 +383,15 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, const Cam
         // Not part of the table above (it would not fit): fixed steps taken and dropped (PhysicsWorld::droppedSteps,
         // docs/PHYSICS.md), and the peak awake and total body counts the Vita's world size (docs/VITA.md) is sized
         // from. The host can drop steps when the machine running the test stalls; that is reported, not failed on.
-        std::printf("  physics: %llu steps (%llu dropped), peak %d awake, %d bodies\n",
+        std::printf("  physics: %llu steps (%llu dropped), peak %d awake, %d bodies, temp allocator peak %zu bytes\n",
                     static_cast<unsigned long long>(out.fixedSteps), static_cast<unsigned long long>(out.droppedSteps),
-                    out.peakAwake, out.bodyCount);
+                    out.peakAwake, out.bodyCount, out.tempAllocatorPeakBytes);
         totalFixedSteps += out.fixedSteps;
         totalDroppedSteps += out.droppedSteps;
         levelsWithDroppedSteps += out.droppedSteps > 0;
         peakAwakeOfAll = std::max(peakAwakeOfAll, out.peakAwake);
         peakBodiesOfAll = std::max(peakBodiesOfAll, out.bodyCount);
+        peakTempAllocatorBytesOfAll = std::max(peakTempAllocatorBytesOfAll, out.tempAllocatorPeakBytes);
         std::fflush(stdout);
         for (int i = 0; i < 2; ++i) {
             withTargets[i] += out.targetsAtStart[i] > 0;
@@ -501,9 +506,10 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, const Cam
                 stepMs / std::max(levels, 1), worstStepMs, worstLevel.c_str(), slowest);
     std::printf("physics profile \"%.*s\": %llu fixed steps over all levels, %llu dropped (in %d levels; the host can drop "
                 "steps when it stalls, which is not a failure here); peak %d bodies awake at once, %d bodies in the "
-                "largest level\n",
+                "largest level; temp allocator peak %zu bytes (of %zu MiB)\n",
                 static_cast<int>(gProfile.name.size()), gProfile.name.data(), static_cast<unsigned long long>(totalFixedSteps),
-                static_cast<unsigned long long>(totalDroppedSteps), levelsWithDroppedSteps, peakAwakeOfAll, peakBodiesOfAll);
+                static_cast<unsigned long long>(totalDroppedSteps), levelsWithDroppedSteps, peakAwakeOfAll, peakBodiesOfAll,
+                peakTempAllocatorBytesOfAll, gProfile.settings.tempAllocatorBytes >> 20);
     return failed == 0 && levels > 0 ? 0 : 1;
 }
 
@@ -521,7 +527,6 @@ int main(int argc, char** argv) {
         std::printf("SKIP: converted levels or materials not found under %s\n", assets.string().c_str());
         return 77;
     }
-    gProfile = *physicsProfile("desktop");
     double seconds = kDefaultSeconds;
     bool log = false, left = false;
     const char* only = nullptr;

@@ -32,8 +32,11 @@ std::filesystem::path assetRoot() {
     if (!user.empty() && std::filesystem::exists(user / "assets", ec)) {
         return user / "assets";
     }
-    // Last resort, as before: a path the caller fails to find, named after whichever candidate is least unlikely.
-    return !user.empty() ? user / "assets" : (!local.empty() ? local : std::filesystem::path("assets"));
+    // Last resort, as before this file gained the error_code overload: local (cwd/assets) over user/assets over a
+    // bare "assets", so a "not found under ..." message keeps naming the folder it always named on the desktop,
+    // where current_path() always succeeds. The Vita-only concern (a working directory that may not exist) is
+    // served by skipping `local` above when current_path() fails, not by reordering this fallback.
+    return !local.empty() ? local : (!user.empty() ? user / "assets" : std::filesystem::path("assets"));
 }
 
 std::filesystem::path userDataDir() {

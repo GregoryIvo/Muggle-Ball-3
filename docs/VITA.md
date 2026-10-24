@@ -188,22 +188,27 @@ right next to the `MB3_PLATFORM_VITA` CMake variable it has always set.
   real, and stb's thread-local error buffer does not need it (nothing here decodes off the main thread).
 - **Filesystem** (`engine/src/Paths.cpp` and an audit of `engine/src`, `game/src`, `app`): `assetRoot()`'s
   `current_path()` candidate now uses the `error_code` overload and is skipped, not thrown, when there is no
-  working directory (`app0:/` is a read-only sandbox with no notion of one). One more throwing call was found
+  working directory (`app0:/` is a read-only sandbox with no notion of one); its last-resort fallback order
+  (local candidate, then the user data directory, then a bare `"assets"`) is unchanged from the desktop's, so a
+  "not found under ..." message still names the same folder it always did there. One more throwing call was found
   and fixed on the way: `ParticleLibrary::load` (`game/src/ParticleDef.cpp`) iterated a `directory_iterator`
   with a range-`for`, whose implicit `operator++()` throws on a read error partway through the folder; it now
   increments through the `error_code` overload like every other directory walk in the codebase (`LevelCatalog`,
   `TextureIndex`, `UiAssets`). Everywhere else already used the non-throwing overloads.
 - **Saves** (`engine/src/Files.cpp`, `writeFileAtomic`): if `rename(temp, path)` refuses to replace an existing
-  target outright (some file systems do; it is a real, reproducible case on this host too, not hypothetical —
-  `path` a directory gets `EISDIR`, which `tests/test_save.cpp` exercises), the target is moved aside with
-  `keepAsBackup()` and the rename retried; if that also fails, the backup is put back. Whether the Vita's file
+  *regular file* outright (some file systems do), the target is moved aside with `keepAsBackup()` and the rename
+  retried; if that also fails, the backup is put back. The fallback is gated on `path` being a regular file so
+  that it cannot replace something that is not a save (`path` a directory, which gets `EISDIR` on this host,
+  fails cleanly instead and is left untouched; `tests/test_save.cpp` exercises both). Whether the Vita's file
   system (exFAT via `sceIo`) ever refuses an ordinary save file's rename this way is unmeasured — the hello's
   probe already checks a plain `rename` over an existing file, and this fallback is the answer if that or a
   real save ever needs it. See `docs/SAVES.md`, "Writes".
 - **Logging** (`engine/include/mb/engine/Log.h`, `Log.cpp`): `setLogFile(path)` appends every message to a file
-  from then on (opened once, flushed per message, failures silenced after one `SDL_Log` warning); on `__vita__`,
-  `logMessage` also calls `sceClibPrintf`, because `SDL_Log` has nowhere useful to go there. Neither changes
-  desktop behaviour unless `setLogFile` is called. The hello already writes its own log by hand
+  from then on (opened once, flushed per message, failures silenced after one `SDL_Log` warning), creating the
+  file's parent directory first if it does not exist yet — a fresh `ux0:data/MuggleBall3/` has none, so without
+  this the very first run would get no log at all; on `__vita__`, `logMessage` also calls `sceClibPrintf`,
+  because `SDL_Log` has nowhere useful to go there. Neither changes desktop behaviour unless `setLogFile` is
+  called. The hello already writes its own log by hand
   (`sceIoOpen`/`write`); wiring the game's own entry point through `setLogFile` to `ux0:data/MuggleBall3/log.txt`
   is for the Vita front end (M5b).
 - **Threads** (`engine/src/Physics.cpp`, `makeJobSystem`): unchanged. `hardware_concurrency()` returning 0 (very
@@ -221,19 +226,35 @@ right next to the `MB3_PLATFORM_VITA` CMake variable it has always set.
   iterations the desktop uses (docs/PHYSICS.md, "The solver"; a lighter solver waits for M3b's device benchmark),
   runs single-threaded with one explicit body-mutex stripe, caps `maxStepsPerCall` at 4 (two 30 fps frames), and
   sizes the world from measurement rather than the desktop's 32768-body headroom: `mb_physics_smoke --measure`,
-  extended to track peak `bodyCount()`/`activeBodyCount()`, found **374 bodies, 372 of them awake at once** as
-  the peak over all 83 levels and every starting configuration (both on `knight-miss-1457`). The rule
-  (docs/PHYSICS.md, "The Vita profile") gives `maxBodies` 1024 (next power of two at or above 2x374), `maxBodyPairs`
-  8192, `maxContactConstraints` 4096, and a flat 4 MiB `TempAllocator`. The four windmill levels keep their own
-  override at 100 velocity iterations, pinned separately from the base settings so a later retune of the other
-  79 levels cannot quietly drop them too. `--physics-profile <name>` (default `defaultPhysicsProfileName()`:
-  "vita" under `MB3_PLATFORM_VITA`, else "desktop") is now a flag of `MuggleBall3` and all three physics smokes;
-  desktop runs that never pass it are unaffected (checked below).
+  extended to track peak `bodyCount()`/`activeBodyCount()`/`tempAllocatorPeakBytes()`, found **374 bodies, 372 of
+  them awake at once** over all 83 levels and every starting configuration (both on `knight-miss-1457`). The rule
+  (docs/PHYSICS.md, "The Vita profile") gives `maxBodies` 1024 (next power of two at or above 2x374),
+  `maxBodyPairs` 8192, `maxContactConstraints` 4096. `tempAllocatorBytes` needed its own measurement run with
+  `--physics-profile vita` (not a bare `--measure`, which measures the desktop's several worker threads instead
+  of the Vita's single one): the step allocator's own peak then is **2,187,184 bytes**, giving **5 MiB**
+  (next whole MiB at or above 2x that). A bare `--measure` measures the same levels at **16,179,120 bytes**
+  instead — Jolt holds more of the step allocator live at once with several workers in flight than with one, so
+  the two profiles need different budgets though they play identically (`droppedSteps()` is zero either way).
+  5 MiB is close to the 2-4 MiB the plan guessed (section 5.5) before anything measured it. The four windmill
+  levels keep their own override at 100 velocity iterations, pinned separately from the base settings so a later
+  retune of the other 79 levels cannot quietly drop them too. `--physics-profile <name>` (default
+  `defaultPhysicsProfileName()`: "vita" under `MB3_PLATFORM_VITA`, else "desktop") is now a flag of `MuggleBall3`
+  (including the level viewer) and all three physics smokes; desktop runs that never pass it are unaffected
+  (checked below). The profile table itself is a function-local static built the first time anything calls
+  `physicsProfile()`, not a plain global: a global here would have its construction order relative to other
+  translation units' globals left unspecified, which the three smokes' own `gProfile` globals hit as a
+  `bad_alloc` before this fix (`game/src/PhysicsProfile.cpp`). `GameSession` gained its own `droppedSteps()`
+  (its `update()` accumulator's drops plus the world's), because a session's accumulator can itself drop whole
+  steps on a long pause the same way `PhysicsWorld::step()` does; `PlaySession` and `mb_gameplay_smoke` report
+  that total, not just the world's own count.
 - **Behaviour unchanged on the desktop, verified**: `mb_physics_smoke --shots 4 --seconds 10` against the main
   branch's own build and this worktree's gives identical per-level numbers (same seeds, same default settings,
   same trajectories) — see the PR description / M3a report for the pasted comparison. All three physics smokes
-  also pass with `--physics-profile vita` on the host, with zero dropped steps (they step at a fixed dt, which
-  never exceeds `maxStepsPerCall` at 4).
+  also pass with `--physics-profile vita` on the host at their default lengths, with zero dropped steps (they
+  step at a fixed dt, which never exceeds `maxStepsPerCall` at 4); see the M3a report for the pasted summaries
+  and temp allocator peaks. (A 20 s `mb_physics_smoke --physics-profile vita` run separately fails on
+  `village-ogorod` and `village-park` — the same failure the desktop profile already has at 20 s, pre-existing
+  and out of scope here, not a Vita-profile regression.)
 
 ## Known limits and open questions
 

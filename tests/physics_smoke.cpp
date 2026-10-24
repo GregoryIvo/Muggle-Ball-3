@@ -47,10 +47,11 @@ namespace {
 
 constexpr float kStep = 1.0f / 60.0f;
 
-// --physics-profile: every scene's settings start here, by level id. Left default-constructed (see
-// mb_gameplay_smoke's gProfile comment: calling into mb_game's own globals at static init time would race them
-// across translation units) and set to "desktop" at the top of main(), where that race cannot happen.
-PhysicsProfile gProfile;
+// --physics-profile: every scene's settings start here, by level id; a command line that passes the flag
+// overrides this in main(). Safe to build at static-init time: physicsProfile() reaches PhysicsProfile.cpp's
+// table through a function-local static, which C++ builds the first time anything calls it, in whatever order
+// translation units' globals are otherwise initialized.
+PhysicsProfile gProfile = *physicsProfile("desktop");
 // --velocity-steps, --position-steps, --collision-steps, --threads: on top of the profile, for every level, so a
 // run can compare solver settings against a profile other than plain defaults.
 std::optional<int> gVelocitySteps, gPositionSteps, gCollisionSteps, gThreads;
@@ -94,6 +95,7 @@ struct Outcome {
     double stepMs = 0;            // average time of a fixed step
     std::uint64_t droppedSteps = 0;  // PhysicsWorld::droppedSteps(), at the end of the run
     int peakBodies = 0, peakActive = 0;  // the world's body count and Jolt's active body count, peak over the run
+    std::size_t tempAllocatorPeakBytes = 0;  // PhysicsWorld::tempAllocatorPeakBytes(), at the end of the run
     struct Mover {
         ActorIndex actor;
         float distance;
@@ -158,6 +160,7 @@ Outcome run(PhysicsScene& scene, float seconds) {
     out.brokenJoints = scene.brokenJoints().size();
     out.stepMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count() / steps;
     out.droppedSteps = scene.world().droppedSteps();
+    out.tempAllocatorPeakBytes = scene.world().tempAllocatorPeakBytes();
 
     for (std::size_t k = 0; k < tracked.size(); ++k) {
         const Mat4 pose = scene.actorPose(tracked[k]);
@@ -291,6 +294,7 @@ struct Totals {
     std::uint64_t totalFixedSteps = 0, totalDroppedSteps = 0;
     int peakBodiesOfAll = 0, peakActiveOfAll = 0;
     int levelsWithDroppedSteps = 0;
+    std::size_t peakTempAllocatorBytesOfAll = 0;  // FallbackTempAllocator's high-water mark, peak over every level
 };
 
 // A level stands on its own: nothing that is not a machine, or touched by one, may move or break; and each motor
@@ -380,6 +384,7 @@ int test(const MaterialLibrary& materials, const LevelCatalog& catalog, int shot
         std::uint64_t levelFixedSteps = static_cast<std::uint64_t>(std::lround(seconds / kStep));
         std::uint64_t levelDroppedSteps = alone.droppedSteps;
         int levelPeakBodies = alone.peakBodies, levelPeakActive = alone.peakActive;
+        std::size_t levelPeakTempBytes = alone.tempAllocatorPeakBytes;
 
         bool touchedSomething = false;
         for (int shot = 0; shot < shots; ++shot) {
@@ -401,6 +406,7 @@ int test(const MaterialLibrary& materials, const LevelCatalog& catalog, int shot
             levelDroppedSteps += shotOutcome.droppedSteps;
             levelPeakBodies = std::max(levelPeakBodies, shotOutcome.peakBodies);
             levelPeakActive = std::max(levelPeakActive, shotOutcome.peakActive);
+            levelPeakTempBytes = std::max(levelPeakTempBytes, shotOutcome.tempAllocatorPeakBytes);
             if (shotOutcome.stepMs > total.worstStepMs) {
                 total.worstStepMs = shotOutcome.stepMs;
                 total.worstLevel = entry.name;
@@ -450,6 +456,7 @@ int test(const MaterialLibrary& materials, const LevelCatalog& catalog, int shot
             levelDroppedSteps += settleOutcome.droppedSteps;
             levelPeakBodies = std::max(levelPeakBodies, settleOutcome.peakBodies);
             levelPeakActive = std::max(levelPeakActive, settleOutcome.peakActive);
+            levelPeakTempBytes = std::max(levelPeakTempBytes, settleOutcome.tempAllocatorPeakBytes);
             ActorIndex firstHanging = kNoActor;
             const std::size_t hanging = hangingBodies(scene, resting, firstHanging);
             total.hanging += hanging;
@@ -471,14 +478,15 @@ int test(const MaterialLibrary& materials, const LevelCatalog& catalog, int shot
             untouched.push_back(entry.name);
         }
         // Not failed on: the host can drop steps when the machine running the test stalls (docs/PHYSICS.md).
-        std::printf("  physics: %llu steps (%llu dropped), peak %d awake, %d bodies\n",
+        std::printf("  physics: %llu steps (%llu dropped), peak %d awake, %d bodies, temp allocator peak %zu bytes\n",
                     static_cast<unsigned long long>(levelFixedSteps), static_cast<unsigned long long>(levelDroppedSteps),
-                    levelPeakActive, levelPeakBodies);
+                    levelPeakActive, levelPeakBodies, levelPeakTempBytes);
         total.totalFixedSteps += levelFixedSteps;
         total.totalDroppedSteps += levelDroppedSteps;
         total.levelsWithDroppedSteps += levelDroppedSteps > 0;
         total.peakBodiesOfAll = std::max(total.peakBodiesOfAll, levelPeakBodies);
         total.peakActiveOfAll = std::max(total.peakActiveOfAll, levelPeakActive);
+        total.peakTempAllocatorBytesOfAll = std::max(total.peakTempAllocatorBytesOfAll, levelPeakTempBytes);
     }
     const PhysicsScene::Counts& counts = total.counts;
     std::printf("physics: %zu levels, %zu dynamic (%zu of them running machines), %zu kinematic and %zu static bodies "
@@ -497,10 +505,10 @@ int test(const MaterialLibrary& materials, const LevelCatalog& catalog, int shot
                 summarySettings.collisionSteps);
     std::printf("physics profile \"%.*s\": %llu fixed steps over all levels, %llu dropped (in %d levels; the host can drop "
                 "steps when it stalls, which is not a failure here); peak %d bodies awake at once, %d bodies in the "
-                "largest level\n",
+                "largest level; temp allocator peak %zu bytes (of %zu MiB)\n",
                 static_cast<int>(gProfile.name.size()), gProfile.name.data(), static_cast<unsigned long long>(total.totalFixedSteps),
                 static_cast<unsigned long long>(total.totalDroppedSteps), total.levelsWithDroppedSteps, total.peakActiveOfAll,
-                total.peakBodiesOfAll);
+                total.peakBodiesOfAll, total.peakTempAllocatorBytesOfAll, gProfile.settings.tempAllocatorBytes >> 20);
     if (!untouched.empty()) {
         std::printf("the balls touched nothing in:");
         for (const std::string& name : untouched) {
@@ -566,6 +574,7 @@ int measure(const MaterialLibrary& materials, const LevelCatalog& catalog, const
     using enum StartState;
     constexpr JointBreaking load = JointBreaking::Load, impact = JointBreaking::Impact;
     int peakBodiesOfAll = 0, peakActiveOfAll = 0;  // over every level and every configuration below
+    std::size_t peakTempBytesOfAll = 0;  // FallbackTempAllocator's high-water mark, likewise
     const Config configs[] = {
         {"A load", {.start = Asleep, .breaking = load}, false},
         {"B load", {.start = SavedVelocities, .breaking = load}, false},
@@ -619,6 +628,7 @@ int measure(const MaterialLibrary& materials, const LevelCatalog& catalog, const
         std::size_t levelJoints = 0;
         std::vector<Outcome> outcomes;
         int levelPeakBodies = 0, levelPeakActive = 0;
+        std::size_t levelPeakTempBytes = 0;
         for (const Config& c : configs) {
             PhysicsScene scene(level, materials, c.options, settingsFor(entry.name));
             if (c.ball) {
@@ -629,6 +639,7 @@ int measure(const MaterialLibrary& materials, const LevelCatalog& catalog, const
             levelJoints = scene.counts().joints;
             levelPeakBodies = std::max(levelPeakBodies, outcomes.back().peakBodies);
             levelPeakActive = std::max(levelPeakActive, outcomes.back().peakActive);
+            levelPeakTempBytes = std::max(levelPeakTempBytes, outcomes.back().tempAllocatorPeakBytes);
         }
         std::printf("%-28s %6zu %6zu", entry.name.c_str(), bodies, levelJoints);
         for (std::size_t i = 0; i < kConfigs; ++i) {
@@ -642,11 +653,13 @@ int measure(const MaterialLibrary& materials, const LevelCatalog& catalog, const
             levelsMoved[i] += o.moved > 0;
             levelsBroken[i] += o.brokenJoints > 0;
         }
-        // The Vita's world size (docs/PHYSICS.md, "The Vita profile"; docs/VITA.md) is sized from these two
-        // numbers' peak over all 83 levels and every configuration above (whichever one body count peaks in).
-        std::printf(" | peak %4d bodies, %4d awake", levelPeakBodies, levelPeakActive);
+        // The Vita's world size (docs/PHYSICS.md, "The Vita profile"; docs/VITA.md) is sized from these numbers'
+        // peak over all 83 levels and every configuration above (whichever one peaks in, not necessarily together).
+        std::printf(" | peak %4d bodies, %4d awake, temp alloc %7zu B", levelPeakBodies, levelPeakActive,
+                    levelPeakTempBytes);
         peakBodiesOfAll = std::max(peakBodiesOfAll, levelPeakBodies);
         peakActiveOfAll = std::max(peakActiveOfAll, levelPeakActive);
+        peakTempBytesOfAll = std::max(peakTempBytesOfAll, levelPeakTempBytes);
         std::printf("\n");
         std::fflush(stdout);
     }
@@ -675,12 +688,21 @@ int measure(const MaterialLibrary& materials, const LevelCatalog& catalog, const
                 "1 unit, the most %.2f (%s)\n",
                 stretched, joints, stretchedFar, static_cast<double>(mostStretched), mostStretchedLevel.c_str());
     // docs/PHYSICS.md, "The Vita profile": maxBodies is the next power of two at or above 2x the peak body count
-    // (at least 512), maxBodyPairs 8x that and maxContactConstraints 4x that.
+    // (at least 512), maxBodyPairs 8x that and maxContactConstraints 4x that; these two are rule-derived from the
+    // body peak, not measured on their own. tempAllocatorBytes is sized by a separate rule, from its own measured
+    // peak: the next whole MiB at or above 2x that peak, at least 1 MiB. That peak depends on the thread count and
+    // the maxBodyPairs/maxContactConstraints already in force as much as on the bodies in play (Jolt holds more of
+    // the step allocator live at once with several workers than with one), so pass --physics-profile to match the
+    // profile being sized, or this number is for a different thread count than the one that will use it.
     const std::uint32_t suggestedMaxBodies =
         std::bit_ceil(std::max<std::uint32_t>(512, static_cast<std::uint32_t>(peakBodiesOfAll) * 2));
-    std::printf("\npeak over all %zu levels and every configuration above: %d bodies, %d awake at once; the Vita profile's "
-                "rule (docs/PHYSICS.md) gives maxBodies %u, maxBodyPairs %u, maxContactConstraints %u\n",
-                levels, peakBodiesOfAll, peakActiveOfAll, suggestedMaxBodies, suggestedMaxBodies * 8, suggestedMaxBodies * 4);
+    constexpr std::size_t kMiB = 1u << 20;
+    const std::size_t suggestedTempBytes = std::max<std::size_t>(kMiB, ((peakTempBytesOfAll * 2 + kMiB - 1) / kMiB) * kMiB);
+    std::printf("\npeak over all %zu levels and every configuration above: %d bodies, %d awake at once, temp allocator "
+                "%zu bytes; the Vita profile's rule (docs/PHYSICS.md) gives maxBodies %u, maxBodyPairs %u, "
+                "maxContactConstraints %u, tempAllocatorBytes %zu (%zu MiB)\n",
+                levels, peakBodiesOfAll, peakActiveOfAll, peakTempBytesOfAll, suggestedMaxBodies, suggestedMaxBodies * 8,
+                suggestedMaxBodies * 4, suggestedTempBytes, suggestedTempBytes / kMiB);
     return 0;
 }
 
@@ -698,7 +720,6 @@ int main(int argc, char** argv) {
         std::printf("SKIP: converted levels or materials not found under %s\n", assets.string().c_str());
         return 77;
     }
-    gProfile = *physicsProfile("desktop");
     bool measuring = false;
     int shots = 4;
     float seconds = kRunSeconds;

@@ -3,6 +3,7 @@
 #include "StringUtil.h"
 
 #include <array>
+#include <vector>
 
 namespace mb {
 
@@ -18,8 +19,11 @@ namespace {
 //     touches the world, so striping it would only add overhead for no concurrency to protect against).
 //   - maxStepsPerCall 4: two 30 fps frames' worth, so a missed vblank still lets the simulation catch up within a
 //     couple of frames instead of spiralling; droppedSteps() reports whenever it does not.
-//   - maxBodies, maxBodyPairs, maxContactConstraints, tempAllocatorBytes: sized from the measured peaks, see
-//     docs/PHYSICS.md.
+//   - maxBodies, maxBodyPairs, maxContactConstraints: sized from the measured peak body count by a rule of
+//     thumb, not themselves separately measured; tempAllocatorBytes is sized the same way from its own
+//     measured peak, 2,187,184 bytes (measured with these settings already in force, in particular
+//     threads = 0: Jolt holds less of the step allocator live at once with one worker than with several,
+//     see docs/PHYSICS.md, "The Vita profile"). Re-measure both if threads or bodyMutexes ever change.
 constexpr PhysicsSettings kVitaSettings{
     .fixedStep = 1.0f / 60.0f,
     .maxStepsPerCall = 4,
@@ -31,7 +35,7 @@ constexpr PhysicsSettings kVitaSettings{
     .maxContactConstraints = 4096,
     .threads = 0,
     .bodyMutexes = 1,
-    .tempAllocatorBytes = 4u << 20,
+    .tempAllocatorBytes = 5u << 20,
 };
 
 // The four windmill levels (docs/PHYSICS.md, "The solver"): the only levels whose towers were measured to need
@@ -51,16 +55,26 @@ constexpr std::array<PhysicsProfile::LevelOverride, 4> kVitaOverrides{{
     {"Village-Dvorik", kWindmillSettings},
 }};
 
-const PhysicsProfile kProfiles[] = {
-    {"desktop", PhysicsSettings{}, {}},
-    {"vita", kVitaSettings, {kVitaOverrides.begin(), kVitaOverrides.end()}},
-};
+// A function-local static, built the first time anything asks for it rather than at program static-init time: a
+// plain global here (a `PhysicsProfile[]`, said non-constexpr by its vector members) would have its construction
+// order relative to every other translation unit's globals left unspecified, so another TU's own global whose
+// initializer reaches into this table first could see it unbuilt (the three smokes' gProfile globals hit exactly
+// this as a bad_alloc, before their own initializers were changed to call physicsProfile() directly, which this
+// fix makes safe at any time). A function-local static has no such race: it is guaranteed built, thread-safely,
+// the first time control reaches here, whoever calls first and whenever that is.
+const std::vector<PhysicsProfile>& profileTable() {
+    static const std::vector<PhysicsProfile> profiles = {
+        {"desktop", PhysicsSettings{}, {}},
+        {"vita", kVitaSettings, {kVitaOverrides.begin(), kVitaOverrides.end()}},
+    };
+    return profiles;
+}
 
 }  // namespace
 
 std::optional<PhysicsProfile> physicsProfile(std::string_view name) {
     const std::string wanted = lowerAscii(name);
-    for (const PhysicsProfile& profile : kProfiles) {
+    for (const PhysicsProfile& profile : profileTable()) {
         if (lowerAscii(profile.name) == wanted) {
             return profile;
         }
@@ -69,7 +83,14 @@ std::optional<PhysicsProfile> physicsProfile(std::string_view name) {
 }
 
 std::span<const std::string_view> physicsProfileNames() {
-    static constexpr std::array<std::string_view, std::size(kProfiles)> names = {"desktop", "vita"};
+    // Derived from the same table, rather than a second, separately maintained list, so the two cannot disagree.
+    static const std::vector<std::string_view> names = [] {
+        std::vector<std::string_view> result;
+        for (const PhysicsProfile& profile : profileTable()) {
+            result.push_back(profile.name);
+        }
+        return result;
+    }();
     return names;
 }
 

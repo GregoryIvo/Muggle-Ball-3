@@ -48,14 +48,16 @@ bool writeFileAtomic(const fs::path& path, std::string_view contents) {
     if (!ec) {
         return true;
     }
-    // Some file systems refuse to rename over an existing target instead of replacing it outright (`path` a
-    // directory is one such case on this host, EISDIR: tests/test_save.cpp exercises it; whether the Vita's
-    // file system ever does this for an ordinary save file is unverified, see docs/VITA.md). Move whatever
-    // is in the way to "<path>.bak" (replacing an older one of its own) and try again; if the second rename
-    // also fails, put the backup back so the write leaves the original rather than nothing.
+    // Some file systems refuse to rename over an existing target instead of replacing it outright (whether the
+    // Vita's file system ever does this for an ordinary save file is unverified, see docs/VITA.md). The fallback
+    // below only applies when `path` is a regular file: a directory at the save path (or anything else that is
+    // not a plain file) fails cleanly here instead, exactly as a rename over it always has, leaving the
+    // directory untouched and no ".tmp" behind (tests/test_save.cpp exercises this). For a regular file, move
+    // whatever is in the way to "<path>.bak" (replacing an older one of its own) and try again; if the second
+    // rename also fails, put the backup back so the write leaves the original rather than nothing.
     const std::error_code firstError = ec;
     std::error_code existsError;
-    if (fs::exists(path, existsError) && keepAsBackup(path)) {
+    if (fs::is_regular_file(path, existsError) && keepAsBackup(path)) {
         fs::rename(temp, path, ec);
         if (!ec) {
             return true;

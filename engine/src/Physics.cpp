@@ -66,7 +66,15 @@ public:
             return nullptr;
         }
         const std::size_t padded = JPH::AlignUp(static_cast<std::size_t>(bytes), JPH_RVECTOR_ALIGNMENT);
+        // The high-water mark is what the block would have needed to serve this allocation without spilling,
+        // so it is tracked even when the allocation below falls through to the heap.
+        peak_ = std::max(peak_, top_ + padded);
         if (top_ + padded > size_) {
+            if (!loggedFallback_) {
+                loggedFallback_ = true;
+                logWarn("physics: the {} MiB step allocator overflowed, taking {} bytes from the heap (logged once)",
+                        size_ >> 20, padded);
+            }
             return JPH::AlignedAllocate(bytes, JPH_RVECTOR_ALIGNMENT);
         }
         void* address = block_ + top_;
@@ -86,10 +94,14 @@ public:
         }
     }
 
+    std::size_t peakBytes() const { return peak_; }
+
 private:
     std::size_t size_;
     std::uint8_t* block_;
     std::size_t top_ = 0;
+    std::size_t peak_ = 0;       // the most this allocator has needed at once, in or out of the block
+    bool loggedFallback_ = false;
 };
 
 // A step is a few tenths of a millisecond; with more than this many workers the time spent waking and waiting for
@@ -550,10 +562,11 @@ int PhysicsWorld::step(float dt, const std::function<void()>& beforeStep) {
         ++steps;
     }
     if (w.accumulator + epsilon >= fixed) {
-        // Too far behind: drop whole steps, keep the remainder below one step. The same epsilon as the loop
-        // above, so a count that should be exact (20 fixed steps in, 8 taken, 12 dropped) is not undercounted
-        // by one from the fractional error of adding a float dt to a double accumulator.
-        w.droppedSteps += static_cast<std::uint64_t>(std::floor((w.accumulator + epsilon) / fixed));
+        // Too far behind: drop whole steps, keep the remainder below one step, exactly as before this counter
+        // existed (the simulation is unchanged). No epsilon here: a count within epsilon of a whole step below
+        // it is counted as not-yet-dropped, matching the remainder the fmod below keeps (which the next call's
+        // loop will then take as one more step) - so dropped + taken always reconciles with the time handed in.
+        w.droppedSteps += static_cast<std::uint64_t>(std::floor(w.accumulator / fixed));
         w.accumulator = std::fmod(w.accumulator, fixed);
     }
     return steps;
@@ -563,6 +576,12 @@ std::uint64_t PhysicsWorld::droppedSteps() const { return impl_->droppedSteps; }
 
 int PhysicsWorld::activeBodyCount() const {
     return static_cast<int>(impl_->system.GetNumActiveBodies(JPH::EBodyType::RigidBody));
+}
+
+std::size_t PhysicsWorld::tempAllocatorPeakBytes() const {
+    // The constructor always makes a FallbackTempAllocator (above); tempAllocator's static type is JPH::TempAllocator
+    // only because that is Jolt's own interface.
+    return static_cast<const FallbackTempAllocator&>(*impl_->tempAllocator).peakBytes();
 }
 
 Mat4 PhysicsWorld::pose(BodyId body) const {

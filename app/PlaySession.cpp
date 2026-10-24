@@ -130,16 +130,18 @@ PlaySession::~PlaySession() {
     logPhysicsSummary();
 }
 
-// docs/PHYSICS.md: fixed steps taken and dropped (PhysicsWorld::droppedSteps, not a failure, the host can drop
-// steps when it stalls), and the peak awake and total body counts the Vita profile's world size is sized from.
+// docs/PHYSICS.md: fixed steps taken and dropped (GameSession::droppedSteps(), not a failure, the host can drop
+// steps when it stalls: its own accumulator's drops plus the world's, see Gameplay.h), the peak awake and total
+// body counts the Vita profile's world size is sized from, and the step allocator's high-water mark.
 void PlaySession::logPhysicsSummary() const {
     if (!session_) {
         return;
     }
     const mb::PhysicsWorld& world = session_->scene().world();
     const std::uint64_t steps = static_cast<std::uint64_t>(std::llround(session_->time() / world.settings().fixedStep));
-    mb::logInfo("physics: {} ended after {} steps ({} dropped), peak {} awake, {} bodies", currentLevelName_, steps,
-                world.droppedSteps(), peakAwakeBodies_, world.bodyCount());
+    mb::logInfo("physics: {} ended after {} steps ({} dropped), peak {} awake, {} bodies, temp allocator peak {} bytes",
+                currentLevelName_, steps, session_->droppedSteps(), peakAwakeBodies_, world.bodyCount(),
+                world.tempAllocatorPeakBytes());
 }
 
 bool PlaySession::start(std::string_view levelName, const mb::GameHud& hud, const Progress& progress) {

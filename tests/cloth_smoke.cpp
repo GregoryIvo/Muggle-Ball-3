@@ -51,10 +51,11 @@ constexpr std::size_t kSails = 22, kParticles = 453, kPins = 84;
 // is not a ratio of masses that rules a joint out (Jolt has no constraint that reaches a soft body's particle).
 constexpr float kLightestHolder = 1.0f, kHeaviestHolder = 70.0f;
 
-// --physics-profile; every PhysicsScene the smoke builds comes from it. Left default-constructed here (see
-// mb_gameplay_smoke's gProfile comment: a global initializer that reaches into mb_game's own globals would race
-// them across translation units) and set to "desktop" at the top of main(), where that race cannot happen.
-PhysicsProfile gProfile;
+// --physics-profile; every PhysicsScene the smoke builds comes from it. A command line that passes the flag
+// overrides this in main(). Safe to build here at static-init time: physicsProfile() reaches
+// PhysicsProfile.cpp's table through a function-local static, which C++ builds the first time anything calls
+// it, whatever order translation units' globals are otherwise initialized in.
+PhysicsProfile gProfile = *physicsProfile("desktop");
 
 bool finite(Vec3 p) {
     return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z);
@@ -89,6 +90,7 @@ struct Report {
     std::uint64_t fixedSteps = 0, droppedSteps = 0;  // PhysicsWorld::step()/droppedSteps(), over this report's run
     int peakAwake = 0;  // the most bodies awake at once while the sails settled, sampled every tenth of a second
     int bodyCount = 0;  // the world's bodies at the end
+    std::size_t tempAllocatorPeakBytes = 0;  // PhysicsWorld::tempAllocatorPeakBytes(), at the end of the run
 };
 
 // One level standing alone: false (with the reason) if a sail misbehaves.
@@ -131,6 +133,7 @@ bool standAlone(const Level& level, const MaterialLibrary& materials, float seco
     report.fixedSteps = static_cast<std::uint64_t>(steps);
     report.droppedSteps = scene.world().droppedSteps();
     report.bodyCount = static_cast<int>(scene.world().bodyCount());
+    report.tempAllocatorPeakBytes = scene.world().tempAllocatorPeakBytes();
 
     for (std::size_t i = 0; i < cloths.size(); ++i) {
         const ClothPlan& cloth = cloths.plan(i);
@@ -253,6 +256,7 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, float sec
     float drift = 0, stretch = 0, lightest = std::numeric_limits<float>::infinity(), heaviest = 0;
     std::uint64_t totalFixedSteps = 0, totalDroppedSteps = 0;
     int peakAwakeOfAll = 0, peakBodiesOfAll = 0, levelsWithDroppedSteps = 0;
+    std::size_t peakTempAllocatorBytesOfAll = 0;
     std::printf("%-26s %5s %9s %5s %7s %8s %8s\n", "level", "sails", "particles", "pins", "drift", "stretch", "ms/step");
     for (const LevelEntry& entry : catalog.levels()) {
         if (only && entry.name.find(only) == std::string::npos) {
@@ -270,14 +274,15 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, float sec
                         ballTouches(level, materials, settings, why) && letsGoAndLeaves(level, materials, settings, why);
         std::printf("%s %5zu %9zu %5zu %7.2f %8.3f %8.3f\n", header.c_str(), report.sails, report.particles, report.pins,
                     static_cast<double>(report.drift), static_cast<double>(report.stretch), report.stepMs);
-        std::printf("  physics: %llu steps (%llu dropped), peak %d awake, %d bodies\n",
+        std::printf("  physics: %llu steps (%llu dropped), peak %d awake, %d bodies, temp allocator peak %zu bytes\n",
                     static_cast<unsigned long long>(report.fixedSteps), static_cast<unsigned long long>(report.droppedSteps),
-                    report.peakAwake, report.bodyCount);
+                    report.peakAwake, report.bodyCount, report.tempAllocatorPeakBytes);
         totalFixedSteps += report.fixedSteps;
         totalDroppedSteps += report.droppedSteps;
         levelsWithDroppedSteps += report.droppedSteps > 0;
         peakAwakeOfAll = std::max(peakAwakeOfAll, report.peakAwake);
         peakBodiesOfAll = std::max(peakBodiesOfAll, report.bodyCount);
+        peakTempAllocatorBytesOfAll = std::max(peakTempAllocatorBytesOfAll, report.tempAllocatorPeakBytes);
         if (!ok) {
             std::printf("FAIL %s: %s\n", entry.name.c_str(), why.c_str());
             ++failed;
@@ -311,9 +316,11 @@ int run(const MaterialLibrary& materials, const LevelCatalog& catalog, float sec
         ++failed;
     }
     std::printf("physics profile \"%.*s\": %llu fixed steps over all levels, %llu dropped (in %d levels; the host can drop steps when "
-                "it stalls, which is not a failure here); peak %d bodies awake at once, %d bodies in the largest level\n",
+                "it stalls, which is not a failure here); peak %d bodies awake at once, %d bodies in the largest level; "
+                "temp allocator peak %zu bytes (of %zu MiB)\n",
                 static_cast<int>(gProfile.name.size()), gProfile.name.data(), static_cast<unsigned long long>(totalFixedSteps),
-                static_cast<unsigned long long>(totalDroppedSteps), levelsWithDroppedSteps, peakAwakeOfAll, peakBodiesOfAll);
+                static_cast<unsigned long long>(totalDroppedSteps), levelsWithDroppedSteps, peakAwakeOfAll, peakBodiesOfAll,
+                peakTempAllocatorBytesOfAll, gProfile.settings.tempAllocatorBytes >> 20);
     return failed == 0 ? 0 : 1;
 }
 
@@ -331,7 +338,6 @@ int main(int argc, char** argv) {
         std::printf("SKIP: converted levels or materials not found under %s\n", assets.string().c_str());
         return 77;
     }
-    gProfile = *physicsProfile("desktop");
     float seconds = kRunSeconds;
     bool print = false;
     const char* only = nullptr;

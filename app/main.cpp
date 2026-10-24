@@ -131,8 +131,8 @@ struct Options {
     std::optional<BallShot> ball;                // --ball: a test ball at t = 0
     std::vector<mb_app::PrizeCue> prizes;        // --drop-prize, --catch-prize
     std::vector<mb_app::EffectCue> effects;      // --effect
-    // --physics-profile; defaulted once MB3_ASSETS and the rest are known to be real (see main()): every level's
-    // game session (not the level viewer, which keeps the desktop's own PhysicsSettings{}) is built from this.
+    // --physics-profile; defaulted once MB3_ASSETS and the rest are known to be real (see main()): every level,
+    // the game session's and the level viewer's alike, is built from this.
     mb::PhysicsProfile physicsProfile = *mb::physicsProfile(mb::defaultPhysicsProfileName());
 };
 
@@ -152,7 +152,7 @@ int checkLevel(const char* path) {
 class Viewer {
 public:
     Viewer(mb::Renderer& renderer, Assets& assets, const Options& options)
-        : assets_(assets), models_(renderer, assets.root / "Data" / "Meshes") {
+        : assets_(assets), models_(renderer, assets.root / "Data" / "Meshes"), profile_(options.physicsProfile) {
         if (options.camera) {
             const auto& c = *options.camera;
             camera.lookAt({c[0], c[1], c[2]}, {c[3], c[4], c[5]}, c[6]);
@@ -166,7 +166,8 @@ public:
             const auto start = Clock::now();
             const mb::Level level = mb::loadLevelJson(entry.path);
             const auto loaded = Clock::now();
-            auto physics = std::make_unique<mb::PhysicsScene>(level, assets_.materials);
+            auto physics = std::make_unique<mb::PhysicsScene>(level, assets_.materials, mb::PhysicsOptions{},
+                                                               mb::physicsSettingsFor(profile_, entry.name));
             const auto simulated = Clock::now();
             auto next = std::make_unique<mb::LevelScene>(models_, assets_.materials, assets_.textures, level,
                                                          physics->plan());
@@ -276,6 +277,7 @@ private:
 
     Assets& assets_;
     mb::ModelCache models_;
+    mb::PhysicsProfile profile_;  // --physics-profile; every level is built from it, like PlaySession
     std::unique_ptr<mb::PhysicsScene> physics_;
     std::unique_ptr<mb::LevelScene> scene_;
     std::unique_ptr<mb::ClothDraw> sails_;
