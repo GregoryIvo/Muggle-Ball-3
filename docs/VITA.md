@@ -40,7 +40,7 @@ benchmark" below) draws its progress with SDL's own GXM renderer rather than vit
 | newlib / vita-headers / vita-toolchain | `64aa7aa3` / `ebc8f4f7` / `c527abce` | `$VITASDK/version_info.txt` |
 | vdpm packages | `sdl3 3.4.16`, `vitaShaRK 1.7`, `libmathneon r11 (0faab81)`, `SceShaccCgExt 1.0.1`, `taihen 0.11` | `vdpm install sdl3 vitaShaRK libmathneon SceShaccCgExt taihen` |
 | vitaGL | commit **`76f43e6fbe1513cee44118da7ff2c16728c4fed2`** (2026-10-22, "Don't cache failed shader compilations"), built from source, **not** vdpm's package | `make -j8 NO_DEBUG=1 HAVE_SHADER_CACHE=1 NO_SPLASHSCREEN=1 install` |
-| CI container | `vitasdk/vitasdk:2026.08` (Ubuntu 24.04, multi-arch); frozen tag `2026.08-20261015.2` | Docker Hub, 2026-10-23; the digest is pinned in the workflow (M1b) |
+| CI container | `vitasdk/vitasdk:2026.08` (Ubuntu 24.04, multi-arch); frozen tag `2026.08-20261015.2` = `vitasdk/vitasdk@sha256:8227da1b596d981f4513cd9b36bda1e43857f6dae5bcf4312c1cd40167f7d9bb` | `docker buildx imagetools inspect`, 2026-10-23; the digest is what `.github/workflows/build.yml` pins |
 
 Install (what was done on the Mac, 2026-10-23; the SDK lives beside the repo, outside it):
 
@@ -126,6 +126,21 @@ bubble). The file layout and the image sizes are those of vitasdk's `pretty_live
 minimal background-plus-gate layout (`style="a1"`), not the sample's framed one. `tests/test_vita_livearea.py`
 checks the committed files' sizes and colour type, and that short titles still fit. A personal set made
 from the game's images is a later, opt-in tool (M8), and its output is never committed, like the macOS icon.
+
+## CI
+
+The `vita` job in `.github/workflows/build.yml` runs in the SDK's container, pinned by digest (the table above),
+checks that the target packages are there (`vdpm list`; it installs any that are missing), restores vitaGL from
+`actions/cache` (keyed on the pinned commit and the flag line, both set in the job's `env`) or builds and installs
+it, configures with the toolchain file and `MB3_BUILD_TESTS=OFF` (Ninja if the image has it, Makefiles otherwise),
+builds, checks that there is no `assets/` in the tree and no data file in any VPK, and uploads every VPK as the
+`vita-vpk` artifact. The desktop jobs are untouched. Change the commit or the flags in one place (the job's `env`)
+and here.
+
+The job was written on 2026-10-23 while GitHub Actions was unavailable to this repository (an account billing
+issue, expected to clear in November 2026), so it has not run yet; every shell step was run by hand against the
+native SDK on the Mac with the same results it asserts. Until Actions is back, PRs are merged on a local build,
+the full test suite and the cross build, as the macOS PRs are.
 
 ## Installing and running the hello
 

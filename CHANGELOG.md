@@ -69,6 +69,8 @@ included here.
   the reverse), or already holds unrelated content with no `vita_pack.json`
   of its own, so a wrong `--out` can never delete someone else's files. See
   `docs/ASSET_FORMATS.md`, "Vita pack".
+- Vita M1b: a `vita` CI job that cross-builds in the pinned `vitasdk/vitasdk` container
+  (vitaGL cached at its pinned commit) and uploads the data-free VPKs.
 
 ### Changed
 - Renderer split into a backend-neutral part (`engine/src/render/RenderCommon.*`:

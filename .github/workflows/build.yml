@@ -59,3 +59,90 @@ jobs:
       # architectures are there, that it links only system libraries, and that the signature verifies.
       - name: Package
         run: scripts/package_macos.sh --universal
+
+  # The PlayStation Vita cross build (docs/VITA.md): the SDK's container, pinned by digest, vitaGL built from
+  # source at the pinned commit (cached), then the VPKs. It never sees the game's data, so the artifact is
+  # code only.
+  vita:
+    runs-on: ubuntu-24.04
+    # vitasdk/vitasdk:2026.08-20261015.2 (release 2026.08; Ubuntu 24.04 with the target packages).
+    container: vitasdk/vitasdk@sha256:8227da1b596d981f4513cd9b36bda1e43857f6dae5bcf4312c1cd40167f7d9bb
+    env:
+      VITASDK: /usr/local/vitasdk
+      # Keep these three in step with docs/VITA.md ("Toolchain (pinned)").
+      VITAGL_COMMIT: 76f43e6fbe1513cee44118da7ff2c16728c4fed2
+      VITAGL_FLAGS: NO_DEBUG=1 HAVE_SHADER_CACHE=1 NO_SPLASHSCREEN=1
+      VITAGL_DEPS: sdl3 vitaShaRK libmathneon SceShaccCgExt taihen
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          echo "$VITASDK/bin" >> "$GITHUB_PATH"
+          "$VITASDK/bin/arm-vita-eabi-g++" --version | head -1
+          cat "$VITASDK/version_info.txt" || true
+          command -v ninja >/dev/null && echo "ninja: $(ninja --version)" || echo "ninja: not in the image, using Makefiles"
+          cmake --version | head -1
+
+      # The full image carries the target packages; a slimmer image, or a package renamed upstream, shows up here.
+      - name: Target packages
+        run: |
+          export PATH="$VITASDK/bin:$PATH"
+          missing=""
+          for pkg in $VITAGL_DEPS; do
+            vdpm list 2>/dev/null | grep -qi "^$pkg " || missing="$missing $pkg"
+          done
+          if [ -n "$missing" ]; then
+            echo "installing:$missing"
+            VDPM_NONINTERACTIVE=1 vdpm install $missing
+          fi
+          test -f "$VITASDK/arm-vita-eabi/lib/libSDL3.a"
+          test -f "$VITASDK/arm-vita-eabi/lib/libvitashark.a"
+          test -f "$VITASDK/arm-vita-eabi/lib/libmathneon.a"
+
+      - name: Restore vitaGL
+        id: vitagl-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/vitasdk/arm-vita-eabi/lib/libvitaGL.a
+            /usr/local/vitasdk/arm-vita-eabi/include/vitaGL.h
+          key: vitagl-${{ env.VITAGL_COMMIT }}-${{ env.VITAGL_FLAGS }}
+
+      - name: Build vitaGL
+        if: steps.vitagl-cache.outputs.cache-hit != 'true'
+        run: |
+          export PATH="$VITASDK/bin:$PATH"
+          git clone --quiet https://github.com/Rinnegatamante/vitaGL.git /tmp/vitaGL
+          git -C /tmp/vitaGL checkout --quiet "$VITAGL_COMMIT"
+          make -C /tmp/vitaGL -j"$(nproc)" $VITAGL_FLAGS install
+          rm -rf /tmp/vitaGL
+
+      - name: Configure
+        run: |
+          export PATH="$VITASDK/bin:$PATH"
+          generator="Unix Makefiles"
+          command -v ninja >/dev/null && generator=Ninja
+          cmake -S . -B build-vita -G "$generator" -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$VITASDK/share/vita.toolchain.cmake" -DMB3_BUILD_TESTS=OFF
+
+      - name: Build
+        run: cmake --build build-vita --parallel "$(nproc)"
+
+      # The game's data is never in the tree, so it can never be in a VPK built here.
+      - name: No game data
+        run: |
+          test ! -e assets
+          for vpk in $(find build-vita -name '*.vpk' -not -name '*.out'); do
+            echo "$vpk"; unzip -l "$vpk"
+            if unzip -l "$vpk" | grep -Eqi '\.(json|glb|ogg|jpg|x|mb3|dds)$'; then
+              echo "game data in $vpk"; exit 1
+            fi
+          done
+
+      - name: Upload VPKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: vita-vpk
+          path: build-vita/**/*.vpk
+          if-no-files-found: error
