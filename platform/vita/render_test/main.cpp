@@ -4,12 +4,15 @@
 // per-check PNGs, at: see platform/vita/render_test/CMakeLists.txt), runs the test, appends its exit code
 // as the file's last line, and exits. Nothing here is the test itself: that is engine-only (M4a's 19
 // conformance checks), unchanged from the host build.
-#include <psp2/io/dirent.h>
+#include <psp2/io/stat.h>
 #include <psp2/kernel/processmgr.h>
 
 #include <cstdio>
 
-extern "C" int render_test_main();
+// Not extern "C": render_test.cpp's main() (renamed to this by -Dmain=render_test_main) is an ordinary
+// C++ function once it is not literally spelled "main" (that spelling is what gets the compiler's special
+// no-mangling treatment), so this declaration must mangle the same way, not be unmangled.
+int render_test_main();
 
 namespace {
 constexpr const char* kResultsDir = "ux0:data/MuggleBall3/render-test";
