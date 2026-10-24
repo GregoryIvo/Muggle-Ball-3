@@ -310,6 +310,11 @@ void GameSession::update(double seconds, const GameInput& input) {
         accumulator_ = std::max(0.0, accumulator_ - fixedStep_);
     }
     if (accumulator_ + epsilon >= fixedStep_) {
+        // Too far behind: drop whole steps, keep the remainder below one step. No epsilon here (unlike the
+        // loop above), the same rule PhysicsWorld::step uses for its own counter: dropped + taken reconciles
+        // exactly with the time handed to update(), and a remainder within epsilon of a whole step is kept
+        // rather than counted as dropped.
+        droppedSteps_ += static_cast<std::uint64_t>(std::floor(accumulator_ / fixedStep_));
         accumulator_ = std::fmod(accumulator_, fixedStep_);
     }
 }

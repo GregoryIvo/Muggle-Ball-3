@@ -8,7 +8,8 @@ option(MB3_BUNDLE_ASSETS "macOS: copy the converted game assets into the .app. F
 option(MB3_GAME_ICON "macOS: use the icon converted from your copy of the game (it is the game's artwork: off for apps you hand out)" ON)
 set(MB3_ASSETS_DIR "" CACHE PATH "Converted game assets: icon and bundled assets (default: $MB3_ASSETS, else <source>/assets)")
 
-if(CMAKE_HOST_APPLE)
+# A cross build (a toolchain file) is never a macOS build, whatever the host.
+if(CMAKE_HOST_APPLE AND NOT CMAKE_TOOLCHAIN_FILE)
   if(MB3_UNIVERSAL)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
   endif()
@@ -31,6 +32,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# The target is known only now: project() read the toolchain file. VitaSDK's sets VITA.
+if(VITA)
+  include(cmake/Vita.cmake)
+endif()
+
 if(NOT MB3_ASSETS_DIR)
   if(DEFINED ENV{MB3_ASSETS} AND NOT "$ENV{MB3_ASSETS}" STREQUAL "")
     set(MB3_ASSETS_DIR "$ENV{MB3_ASSETS}")
@@ -43,9 +49,27 @@ option(MB3_BUILD_TESTS "Build unit tests" ON)
 
 include(cmake/Dependencies.cmake)
 
-add_subdirectory(engine)
-add_subdirectory(game)
-add_subdirectory(app)
+if(MB3_PLATFORM_VITA)
+  # The toolchain, the dependencies and a hello VPK that probes the console (docs/VITA_PLAN.md, M1a). The
+  # engine and the game follow in M3a and M5b; until they cross-compile, MB3_VITA_BUILD_ENGINE is how that
+  # work is tried.
+  add_subdirectory(platform/vita/hello)
+  if(MB3_VITA_BUILD_ENGINE)
+    add_subdirectory(engine)
+    add_subdirectory(game)
+    # app/ builds mb_app (not the desktop MuggleBall3 exe: its CMakeLists.txt returns early under
+    # MB3_PLATFORM_VITA) for the Vita's own entry point below to link.
+    add_subdirectory(app)
+    # The M4a device render test (docs/VITA.md "GL back end"): needs mb_engine, so it comes after it.
+    add_subdirectory(platform/vita/render_test)
+    # The game's own VPK (M5b): needs mb_app, so it comes after app/.
+    add_subdirectory(platform/vita/game)
+  endif()
+else()
+  add_subdirectory(engine)
+  add_subdirectory(game)
+  add_subdirectory(app)
+endif()
 
 if(MB3_BUILD_TESTS)
   enable_testing()

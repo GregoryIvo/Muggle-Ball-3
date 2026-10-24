@@ -6,10 +6,8 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
-#include <cmath>
 #include <cstring>
 #include <limits>
-#include <tuple>
 
 namespace mb {
 
@@ -133,53 +131,17 @@ void Renderer::Impl::warnMissing(const char* what, std::uint32_t handle) {
     }
 }
 
-void Renderer::Impl::collectDraws(SDL_GPUTextureFormat colorFormat, const FrameParams& frame,
-                                  std::span<const DrawItem> items) {
-    opaqueDraws.clear();
-    blendedDraws.clear();
-    for (const DrawItem& item : items) {
-        const auto mesh = meshes.find(item.mesh);
-        if (mesh == meshes.end()) {
-            warnMissing("mesh", item.mesh);
-            continue;
-        }
-        const MaterialParams& material = item.material;
-        SDL_GPUTexture* texture = whiteTexture;
-        if (material.texture != 0) {
-            if (const auto found = textures.find(material.texture); found != textures.end()) {
-                texture = found->second;
-            } else {
-                warnMissing("texture", material.texture);
-            }
-        }
-
-        PendingDraw draw;
-        draw.item = &item;
-        draw.mesh = &mesh->second;
-        draw.texture = texture;
-        draw.pipeline = PipelineKey::forMaterial(colorFormat, material);
-        if (material.blend == BlendMode::Opaque) {
-            opaqueDraws.push_back(draw);
-        } else {
-            const Vec3 toItem = item.world.translationPart() - frame.eye;
-            draw.distanceSq = dot(toItem, toItem);
-            blendedDraws.push_back(draw);
+SDL_GPUTexture* Renderer::Impl::resolveTexture(TextureHandle handle) const {
+    if (handle != 0) {
+        if (const auto found = textures.find(handle); found != textures.end()) {
+            return found->second;
         }
     }
+    return whiteTexture;
+}
 
-    // Opaque: by layer, then grouped by pipeline, texture and mesh so state changes are rare.
-    // stable_sort keeps submission order among equals, so frames are reproducible.
-    std::stable_sort(opaqueDraws.begin(), opaqueDraws.end(), [](const PendingDraw& a, const PendingDraw& b) {
-        return std::make_tuple(a.item->layer, a.pipeline.pack(), a.item->material.texture, a.item->mesh) <
-               std::make_tuple(b.item->layer, b.pipeline.pack(), b.item->material.texture, b.item->mesh);
-    });
-    // Blended: by layer, then far to near, which is what alpha blending needs to look right.
-    std::stable_sort(blendedDraws.begin(), blendedDraws.end(), [](const PendingDraw& a, const PendingDraw& b) {
-        if (a.item->layer != b.item->layer) {
-            return a.item->layer < b.item->layer;
-        }
-        return a.distanceSq > b.distanceSq;
-    });
+void Renderer::Impl::collectDraws(const FrameParams& frame, std::span<const DrawItem> items) {
+    drawCollector.collect(frame, items, *this);
 }
 
 void Renderer::Impl::releaseStream(StreamBuffer& buffer) {
@@ -241,109 +203,42 @@ void Renderer::Impl::uploadStream(SDL_GPUCommandBuffer* cmd, StreamBuffer& buffe
 }
 
 Uint32 Renderer::Impl::uploadLines(SDL_GPUCommandBuffer* cmd, std::span<const DebugLine> lines) {
-    auto* out = static_cast<LineVertex*>(mapStream(lineBuffer, lines.size() * 2 * sizeof(LineVertex), "debug line"));
+    auto* out = static_cast<render::LineVertex*>(
+        mapStream(lineBuffer, lines.size() * 2 * sizeof(render::LineVertex), "debug line"));
     if (!out) {
         return 0;
     }
-    for (const DebugLine& line : lines) {
-        *out++ = {line.a, line.color};
-        *out++ = {line.b, line.color};
-    }
-    const auto vertexCount = static_cast<Uint32>(lines.size() * 2);
-    uploadStream(cmd, lineBuffer, vertexCount * static_cast<Uint32>(sizeof(LineVertex)));
+    const Uint32 vertexCount = render::buildLineVertices(lines, out);
+    uploadStream(cmd, lineBuffer, vertexCount * static_cast<Uint32>(sizeof(render::LineVertex)));
     return vertexCount;
 }
 
-// Writes the sprites as triangles (six vertices each) and groups them into runs of one texture. Returns the
-// vertex count; the runs are left in spriteRuns.
+// Writes the sprites as triangles (six vertices each) and groups them into runs of one texture (by handle;
+// resolveTexture looks the GPU texture up once per run when drawing). Returns the vertex count; the runs are
+// left in spriteRuns.
 Uint32 Renderer::Impl::uploadSprites(SDL_GPUCommandBuffer* cmd, std::span<const Sprite> sprites) {
     spriteRuns.clear();
-    constexpr std::size_t kVerticesPerSprite = 6;
-    SpriteVertex* const first =
-        static_cast<SpriteVertex*>(mapStream(spriteBuffer, sprites.size() * kVerticesPerSprite * sizeof(SpriteVertex), "sprite"));
+    render::SpriteVertex* const first = static_cast<render::SpriteVertex*>(
+        mapStream(spriteBuffer, render::spriteVertexCapacity(sprites) * sizeof(render::SpriteVertex), "sprite"));
     if (!first) {
         return 0;
     }
-    SpriteVertex* out = first;
-    for (const Sprite& sprite : sprites) {
-        if (sprite.width <= 0 || sprite.height <= 0) {
-            continue;
-        }
-        SDL_GPUTexture* texture = whiteTexture;
-        if (sprite.texture != 0) {
-            const auto found = textures.find(sprite.texture);
-            if (found == textures.end()) {
-                warnMissing("texture", sprite.texture);
-                continue;
-            }
-            texture = found->second;
-        }
-
-        // Corners in the order top-left, top-right, bottom-right, bottom-left. Without rotation they are the
-        // rectangle's own edges, so axis-aligned sprites land on exact pixel boundaries.
-        Vec2 corner[4] = {{sprite.x, sprite.y},
-                          {sprite.x + sprite.width, sprite.y},
-                          {sprite.x + sprite.width, sprite.y + sprite.height},
-                          {sprite.x, sprite.y + sprite.height}};
-        if (sprite.rotation != 0) {
-            const float cx = sprite.x + sprite.width * 0.5f, cy = sprite.y + sprite.height * 0.5f;
-            const float cosine = std::cos(sprite.rotation), sine = std::sin(sprite.rotation);
-            for (Vec2& c : corner) {
-                const float dx = c.x - cx, dy = c.y - cy;
-                c = {cx + dx * cosine - dy * sine, cy + dx * sine + dy * cosine};  // clockwise on a y-down screen
-            }
-        }
-        const SpriteVertex tl{corner[0], {sprite.uv0.x, sprite.uv0.y}, sprite.tint};
-        const SpriteVertex tr{corner[1], {sprite.uv1.x, sprite.uv0.y}, sprite.tint};
-        const SpriteVertex br{corner[2], {sprite.uv1.x, sprite.uv1.y}, sprite.tint};
-        const SpriteVertex bl{corner[3], {sprite.uv0.x, sprite.uv1.y}, sprite.tint};
-        const auto vertex = static_cast<Uint32>(out - first);
-        if (spriteRuns.empty() || spriteRuns.back().texture != texture) {
-            spriteRuns.push_back({texture, vertex, 0});
-        }
-        spriteRuns.back().vertexCount += kVerticesPerSprite;
-        for (const SpriteVertex& v : {tl, tr, br, tl, br, bl}) {
-            *out++ = v;
-        }
-    }
-    const auto vertexCount = static_cast<Uint32>(out - first);
-    uploadStream(cmd, spriteBuffer, vertexCount * static_cast<Uint32>(sizeof(SpriteVertex)));
+    const Uint32 vertexCount = render::buildSpriteVertices(sprites, first, spriteRuns, *this);
+    uploadStream(cmd, spriteBuffer, vertexCount * static_cast<Uint32>(sizeof(render::SpriteVertex)));
     return vertexCount;
 }
 
-// Writes every batch's triangles into one stream, in order, and notes where each batch begins. Returns the vertex
-// count; the runs are left in effectRuns.
+// Writes every batch's triangles into one stream, in order, and notes where each batch begins (by texture
+// handle; resolveTexture looks the GPU texture up once per run when drawing). Returns the vertex count; the
+// runs are left in effectRuns.
 Uint32 Renderer::Impl::uploadEffects(SDL_GPUCommandBuffer* cmd, std::span<const EffectBatch> effects) {
     effectRuns.clear();
-    std::size_t total = 0;
-    for (const EffectBatch& batch : effects) {
-        total += batch.vertices.size() / 3 * 3;  // whole triangles only
-    }
-    EffectVertex* const first = static_cast<EffectVertex*>(mapStream(effectBuffer, total * sizeof(EffectVertex), "effect"));
+    EffectVertex* const first = static_cast<EffectVertex*>(
+        mapStream(effectBuffer, render::effectVertexCapacity(effects) * sizeof(EffectVertex), "effect"));
     if (!first) {
         return 0;
     }
-    EffectVertex* out = first;
-    for (const EffectBatch& batch : effects) {
-        const std::size_t count = batch.vertices.size() / 3 * 3;
-        if (count == 0) {
-            continue;
-        }
-        SDL_GPUTexture* texture = whiteTexture;
-        if (batch.texture != 0) {
-            const auto found = textures.find(batch.texture);
-            if (found == textures.end()) {
-                warnMissing("texture", batch.texture);
-                continue;
-            }
-            texture = found->second;
-        }
-        effectRuns.push_back({texture, batch.blend, batch.depthTest, batch.colourOnly, static_cast<Uint32>(out - first),
-                              static_cast<Uint32>(count)});
-        std::memcpy(out, batch.vertices.data(), count * sizeof(EffectVertex));
-        out += count;
-    }
-    const auto vertexCount = static_cast<Uint32>(out - first);
+    const Uint32 vertexCount = render::buildEffectVertices(effects, first, effectRuns, *this);
     uploadStream(cmd, effectBuffer, vertexCount * static_cast<Uint32>(sizeof(EffectVertex)));
     return vertexCount;
 }
@@ -352,7 +247,7 @@ void Renderer::Impl::drawEffects(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* 
                                  const Mat4& viewProj) {
     const SDL_GPUBufferBinding binding{effectBuffer.vertices, 0};
     SDL_GPUGraphicsPipeline* bound = nullptr;
-    for (const EffectRun& run : effectRuns) {
+    for (const render::EffectRun& run : effectRuns) {
         SDL_GPUGraphicsPipeline* pipeline = pipelines->get(PipelineKey::forEffects(colorFormat, run.blend, run.depthTest));
         if (!pipeline) {
             continue;
@@ -363,7 +258,8 @@ void Renderer::Impl::drawEffects(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* 
             SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);  // everything is rebound after a pipeline change, as for the meshes
             bound = pipeline;
         }
-        const SDL_GPUTextureSamplerBinding textureBinding{run.texture, sampler};
+        // One texture lookup per run, not per triangle.
+        const SDL_GPUTextureSamplerBinding textureBinding{resolveTexture(run.texture), sampler};
         SDL_BindGPUFragmentSamplers(pass, 0, &textureBinding, 1);
         const EffectFragmentUniforms uniforms{{run.colourOnly ? 1.0f : 0.0f, 0, 0, 0}};
         SDL_PushGPUFragmentUniformData(cmd, 0, &uniforms, sizeof(uniforms));
@@ -371,8 +267,8 @@ void Renderer::Impl::drawEffects(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* 
     }
 }
 
-void Renderer::Impl::drawMeshes(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, const Mat4& viewProj,
-                                const FrameParams& frame) {
+void Renderer::Impl::drawMeshes(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd, SDL_GPUTextureFormat colorFormat,
+                                const Mat4& viewProj, const FrameParams& frame) {
     VertexUniforms vertexUniforms;
     vertexUniforms.viewProj = viewProj;
 
@@ -386,14 +282,18 @@ void Renderer::Impl::drawMeshes(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* c
     SDL_GPUBuffer* boundVertices = nullptr;
     SDL_GPUTexture* boundTexture = nullptr;
 
-    const auto drawAll = [&](const std::vector<PendingDraw>& draws) {
-        for (const PendingDraw& draw : draws) {
+    const auto drawAll = [&](std::span<const render::PendingDraw> draws) {
+        for (const render::PendingDraw& draw : draws) {
             const DrawItem& item = *draw.item;
-            const GpuMesh& mesh = *draw.mesh;
-            const std::uint32_t first = std::min(item.firstIndex, mesh.indexCount);
-            const std::uint32_t available = mesh.indexCount - first;
-            const std::uint32_t count = item.indexCount == 0 ? available : std::min(item.indexCount, available);
-            SDL_GPUGraphicsPipeline* pipeline = count ? pipelines->get(draw.pipeline) : nullptr;
+            // The mesh was validated when the draw was collected, so this always finds it.
+            const auto meshIt = meshes.find(item.mesh);
+            if (meshIt == meshes.end()) {
+                continue;
+            }
+            const GpuMesh& mesh = meshIt->second;
+            const render::IndexRange range = render::indexRange(item, mesh.indexCount);
+            SDL_GPUGraphicsPipeline* pipeline =
+                range.count ? pipelines->get(PipelineKey{draw.state, colorFormat}) : nullptr;
             if (!pipeline) {
                 continue;
             }
@@ -411,15 +311,16 @@ void Renderer::Impl::drawMeshes(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* c
                 SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
                 boundVertices = mesh.vertices;
             }
-            if (draw.texture != boundTexture) {
-                const SDL_GPUTextureSamplerBinding textureBinding{draw.texture, sampler};
+            // Resolved by handle, not carried on the draw: 0 (and a destroyed handle) is the white texture.
+            SDL_GPUTexture* texture = resolveTexture(item.material.texture);
+            if (texture != boundTexture) {
+                const SDL_GPUTextureSamplerBinding textureBinding{texture, sampler};
                 SDL_BindGPUFragmentSamplers(pass, 0, &textureBinding, 1);
-                boundTexture = draw.texture;
+                boundTexture = texture;
             }
 
-            // The normal matrix is the inverse-transpose of the world matrix (row-vector convention).
             vertexUniforms.world = item.world;
-            vertexUniforms.normalMatrix = transpose(inverse(item.world));
+            vertexUniforms.normalMatrix = render::normalMatrix(item.world);
             SDL_PushGPUVertexUniformData(cmd, 0, &vertexUniforms, sizeof(vertexUniforms));
 
             const MaterialParams& material = item.material;
@@ -430,11 +331,11 @@ void Renderer::Impl::drawMeshes(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* c
                                       0, 0};
             SDL_PushGPUFragmentUniformData(cmd, 0, &fragmentUniforms, sizeof(fragmentUniforms));
 
-            SDL_DrawGPUIndexedPrimitives(pass, count, 1, first, 0, 0);
+            SDL_DrawGPUIndexedPrimitives(pass, range.count, 1, range.first, 0, 0);
         }
     };
-    drawAll(opaqueDraws);
-    drawAll(blendedDraws);
+    drawAll(drawCollector.opaque());
+    drawAll(drawCollector.blended());
 }
 
 void Renderer::Impl::drawSprites(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* cmd,
@@ -448,12 +349,15 @@ void Renderer::Impl::drawSprites(SDL_GPURenderPass* pass, SDL_GPUCommandBuffer* 
     SDL_PushGPUVertexUniformData(cmd, 0, pixelToClip, sizeof(pixelToClip));
     const SDL_GPUBufferBinding binding{spriteBuffer.vertices, 0};
     SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
+    TextureHandle boundHandle = 0;
     SDL_GPUTexture* bound = nullptr;
-    for (const SpriteRun& run : spriteRuns) {
-        if (run.texture != bound) {
-            const SDL_GPUTextureSamplerBinding textureBinding{run.texture, sampler};
+    for (const render::SpriteRun& run : spriteRuns) {
+        if (run.texture != boundHandle || !bound) {
+            // One texture lookup per run, not per sprite.
+            bound = resolveTexture(run.texture);
+            boundHandle = run.texture;
+            const SDL_GPUTextureSamplerBinding textureBinding{bound, sampler};
             SDL_BindGPUFragmentSamplers(pass, 0, &textureBinding, 1);
-            bound = run.texture;
         }
         SDL_DrawGPUPrimitives(pass, run.vertexCount, 1, run.firstVertex, 0);
     }
@@ -463,7 +367,7 @@ void Renderer::Impl::drawFrame(SDL_GPUCommandBuffer* cmd, SDL_GPUTexture* color,
                                SDL_GPUTexture* depth, Uint32 width, Uint32 height, const FrameParams& frame,
                                std::span<const DrawItem> items, std::span<const DebugLine> lines,
                                std::span<const Sprite> sprites, std::span<const EffectBatch> effects) {
-    collectDraws(colorFormat, frame, items);
+    collectDraws(frame, items);
     const Uint32 lineVertexCount = uploadLines(cmd, lines);  // copy passes cannot run inside the render pass
     const Uint32 spriteVertexCount = uploadSprites(cmd, sprites);
     const Uint32 effectVertexCount = uploadEffects(cmd, effects);
@@ -494,7 +398,7 @@ void Renderer::Impl::drawFrame(SDL_GPUCommandBuffer* cmd, SDL_GPUTexture* color,
     SDL_SetGPUScissor(pass, &scissor);
 
     const Mat4 viewProj = frame.view * frame.projection;
-    drawMeshes(pass, cmd, viewProj, frame);
+    drawMeshes(pass, cmd, colorFormat, viewProj, frame);
     if (effectVertexCount > 0) {
         drawEffects(pass, cmd, colorFormat, viewProj);
     }

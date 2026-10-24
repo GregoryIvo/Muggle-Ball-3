@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """tools/build_shaders.py: header formatting, and a full run when the shader tools are installed."""
+import os
 import pathlib
 import re
 import shutil
@@ -46,13 +47,60 @@ class EndToEndTest(unittest.TestCase):
                            check=True, capture_output=True)
             sources = sorted(p.name for p in (ROOT / "engine" / "shaders").iterdir()
                              if p.suffix in (".vert", ".frag"))
-            headers = sorted(p.name for p in pathlib.Path(out).iterdir())
+            # gl_shaders.h is the GL half's one header, generated from engine/shaders/gl/*, not from the
+            # top-level sources this loop checks.
+            headers = sorted(p.name for p in pathlib.Path(out).iterdir() if p.name != "gl_shaders.h")
             self.assertEqual(headers, [s.replace(".", "_") + ".h" for s in sources])
             for header in pathlib.Path(out).iterdir():
+                if header.name == "gl_shaders.h":
+                    continue
                 text = header.read_text()
                 self.assertIn("0x07230203", text)           # SPIR-V magic
                 self.assertIn('_msl_entry[] = "main0"', text)
                 self.assertIn("#include <metal_stdlib>", text)
+
+    def test_gl_header_has_every_program_and_the_discard_free_variant(self):
+        with tempfile.TemporaryDirectory() as out:
+            subprocess.run([sys.executable, str(ROOT / "tools" / "build_shaders.py"), "--out", out],
+                           check=True, capture_output=True)
+            text = (pathlib.Path(out) / "gl_shaders.h").read_text()
+            gl_dir = ROOT / "engine" / "shaders" / "gl"
+            for source in gl_dir.iterdir():
+                if source.suffix in (".vert", ".frag"):
+                    self.assertIn(f"gl_{source.stem}_{source.suffix[1:]}[]", text)
+            self.assertIn("gl_mesh_frag_nodiscard[]", text)
+            self.assertNotIn("ALPHA_TEST_BEGIN", text.split("gl_mesh_frag_nodiscard[]")[1])
+
+
+class GlOnlyTest(unittest.TestCase):
+    def test_gl_only_needs_neither_tool_and_writes_only_gl_shaders_h(self):
+        # Runs with an empty PATH, so neither glslangValidator nor spirv-cross can be found: --gl-only's
+        # whole point is that this still succeeds (the docstring's "glslangValidator is optional for the GL
+        # half" claim is otherwise unreachable, since main() used to require both tools before the GL half
+        # ever ran, regardless of --gl-only not existing at all).
+        with tempfile.TemporaryDirectory() as out:
+            env = dict(os.environ, PATH="")
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "tools" / "build_shaders.py"), "--gl-only", "--out", out],
+                capture_output=True, text=True, env=env)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual([p.name for p in pathlib.Path(out).iterdir()], ["gl_shaders.h"])
+            text = (pathlib.Path(out) / "gl_shaders.h").read_text()
+            self.assertIn("gl_mesh_frag_nodiscard[]", text)
+
+
+class GlFormatTest(unittest.TestCase):
+    def test_strip_alpha_test_removes_the_marked_lines_only(self):
+        body = "before\n// ALPHA_TEST_BEGIN\nif (x) discard;\n// ALPHA_TEST_END\nafter\n"
+        self.assertEqual(B.strip_alpha_test(body), "before\nafter\n")
+
+    def test_strip_alpha_test_requires_both_markers(self):
+        with self.assertRaises(SystemExit):
+            B.strip_alpha_test("no markers here\n")
+
+    def test_gl_cpp_string_rejects_the_raw_string_terminator(self):
+        with self.assertRaises(SystemExit):
+            B.gl_cpp_string("test", 'contains )GLSL" already')
 
 
 if __name__ == "__main__":

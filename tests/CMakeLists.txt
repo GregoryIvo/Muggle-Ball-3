@@ -84,6 +84,12 @@ target_link_libraries(mb_window_tests PRIVATE mb_engine)
 add_test(NAME mb_window_tests COMMAND mb_window_tests)
 set_tests_properties(mb_window_tests PROPERTIES SKIP_RETURN_CODE 77)
 
+# The Vita's buttons, stick and touch turned into InputEvents (docs/VITA_PLAN.md 5.8), driven with no window,
+# SDL events or device: platform-neutral on purpose, so these rules are covered on the host. CPU only.
+add_executable(mb_console_input_tests test_console_input.cpp)
+target_link_libraries(mb_console_input_tests PRIVATE mb_engine)
+add_test(NAME mb_console_input_tests COMMAND mb_console_input_tests)
+
 # Mixer maths on synthetic PCM, rendered offline: no audio device, no game data.
 add_executable(mb_mixer_tests test_mixer.cpp)
 target_link_libraries(mb_mixer_tests PRIVATE mb_engine Threads::Threads)
@@ -145,6 +151,11 @@ add_test(NAME mb_path_tests COMMAND mb_path_tests)
 add_executable(mb_physics_scene_tests test_physics_scene.cpp)
 target_link_libraries(mb_physics_scene_tests PRIVATE mb_game)
 add_test(NAME mb_physics_scene_tests COMMAND mb_physics_scene_tests)
+
+# The named physics profiles (desktop, vita) and their per-level overrides. CPU only, no game data needed.
+add_executable(mb_physics_profile_tests test_physics_profile.cpp)
+target_link_libraries(mb_physics_profile_tests PRIVATE mb_game)
+add_test(NAME mb_physics_profile_tests COMMAND mb_physics_profile_tests)
 
 # Runs all converted levels in the physics world when MB3_ASSETS points at the data; exits 77 (skipped) otherwise.
 add_executable(mb_physics_smoke physics_smoke.cpp)
