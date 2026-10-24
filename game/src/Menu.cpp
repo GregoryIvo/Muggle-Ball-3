@@ -87,6 +87,10 @@ void Menu::setVideoModes(std::vector<VideoMode> modes) {
     videoModes_ = std::move(modes);
 }
 
+void Menu::setFullscreenAvailable(bool available) {
+    fullscreenAvailable_ = available;
+}
+
 void Menu::open(std::string_view form) {
     const std::string name(form);  // `form` may point into the widgets about to be replaced
     UiForm next = loadForm_(name);  // throws before anything changes if there is no such form
@@ -160,7 +164,12 @@ void Menu::prepareOptions() {
     set("Camera", [&](UiWidget& w) { w.checked = s.smartCamera; });
     set("Shadow", [&](UiWidget& w) { w.checked = s.shadows; });
     set("Mirror", [&](UiWidget& w) { w.checked = s.mirrors; });
-    set("Fullscreen", [&](UiWidget& w) { w.checked = s.fullscreen; });
+    set("Fullscreen", [&](UiWidget& w) {
+        w.checked = s.fullscreen;
+        if (!fullscreenAvailable_) {
+            w.visible = false;  // nothing to toggle: one fixed display, no window (the Vita)
+        }
+    });
     videoAtOpen_ = s;
 
     if (videoModes_.empty()) {

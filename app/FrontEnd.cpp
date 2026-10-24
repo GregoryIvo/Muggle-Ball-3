@@ -17,8 +17,14 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-// Window sizes the video list offers: the original's 4:3 shapes, those that fit on the display.
+// Window sizes the video list offers: the original's 4:3 shapes, those that fit on the display. The Vita has
+// one fixed 960x544 display and no window to resize, so the list (and the Fullscreen box, see the Menu call
+// below) is simply not offered there.
 std::vector<mb::VideoMode> videoModes(const mb::Window& window) {
+#ifdef MB3_PLATFORM_VITA
+    (void)window;
+    return {};
+#else
     int displayWidth = 0, displayHeight = 0;
     const bool known = window.displaySize(displayWidth, displayHeight);
     std::vector<mb::VideoMode> modes;
@@ -28,7 +34,40 @@ std::vector<mb::VideoMode> videoModes(const mb::Window& window) {
         }
     }
     return modes;
+#endif
 }
+
+#ifdef MB3_PLATFORM_VITA
+// There is no system cursor to draw on the Vita (a PSTV has no touch screen at all, and even on a Vita the
+// stick and d-pad need something to show where they point): a small crosshair built from tinted Sprites
+// (texture 0 draws a plain colour, as PlaySession's fade-to-black cover does), a dark 2 px outline under a
+// light 1 px cross about 16 px across, so it reads on any background. No cursor-shaped asset survived
+// conversion (MB3cursor.ani is not converted; a grep of Data/Menu and Textures/Forms|Icons found nothing
+// wired to a form as a pointer), so this is the fallback docs/VITA_PLAN.md 6 "M5b" names.
+void appendCursor(std::vector<mb::Sprite>& sprites, float x, float y) {
+    constexpr float kArmLength = 8.0f;   // half the cross's ~16 px span
+    constexpr float kOutline = 2.0f;     // how far the dark outline extends past the light cross
+    const auto addCross = [&](float halfLength, float thickness, mb::Color tint) {
+        mb::Sprite horizontal;
+        horizontal.x = x - halfLength;
+        horizontal.y = y - thickness * 0.5f;
+        horizontal.width = halfLength * 2.0f;
+        horizontal.height = thickness;
+        horizontal.tint = tint;
+        sprites.push_back(horizontal);
+        mb::Sprite vertical;
+        vertical.x = x - thickness * 0.5f;
+        vertical.y = y - halfLength;
+        vertical.width = thickness;
+        vertical.height = halfLength * 2.0f;
+        vertical.tint = tint;
+        sprites.push_back(vertical);
+    };
+    constexpr float kLightThickness = 1.0f;
+    addCross(kArmLength + kOutline, kLightThickness + kOutline * 2.0f, mb::Color{0, 0, 0, 0.85f});
+    addCross(kArmLength, kLightThickness, mb::Color{1, 1, 1, 0.95f});
+}
+#endif
 
 void applyVideo(mb::Window& window, const mb::Settings& settings) {
     window.setFullscreen(settings.fullscreen);
@@ -52,6 +91,9 @@ public:
           menu_([this](std::string_view name) { return assets_.loadForm(name); }, campaign_, save, hooksFor(window, options.hooks)),
           flow_(menu_, campaign_, save) {
         menu_.setVideoModes(videoModes(window));
+#ifdef MB3_PLATFORM_VITA
+        menu_.setFullscreenAvailable(false);  // one fixed 960x544 display: nothing to toggle
+#endif
         menu_.setLevelsLocked(options.lockLevels);
         window.windowedSize(seenWidth_, seenHeight_);
         seenFullscreen_ = window.fullscreen();
@@ -86,6 +128,10 @@ public:
             followWindow();
             int width = 0, height = 0;
             renderer_.drawableSize(width, height);
+#ifdef MB3_PLATFORM_VITA
+            cursorX_ = input.mouseX;
+            cursorY_ = input.mouseY;
+#endif
             flow_.setLevelEnding(flow_.mode() == mb::GameFlow::Mode::Playing && session_.ending());
             const mb::GameFlow::Step step =
                 flow_.update(toUiInput(input), seconds, mb::UiLayout::fit(width, height), assets_.imageSizes());
@@ -187,6 +233,9 @@ private:
             mb::logInfo("starting level {}: {}", index + 1, *name);
             window_.setTitle("Muggle Ball 3 - " + *name);
             ok = session_.start(*name, flow_.hud(), [this, next](float fraction) {
+                // A level can take a while to build; pumping events here keeps the Vita's power timer ticking
+                // (Window::keepAwake()) so a long load never lets the console think nothing is happening.
+                window_.keepAwake();
                 if (!next) {
                     menu_.setProgress(fraction);
                     drawMenu();
@@ -205,6 +254,9 @@ private:
     void drawMenu() {
         std::vector<mb::Sprite> sprites;
         menu_.draw(assets_, sprites);
+#ifdef MB3_PLATFORM_VITA
+        appendCursor(sprites, cursorX_, cursorY_);  // on top of the menu's own sprites
+#endif
         renderer_.renderToWindow({}, {}, {}, sprites);
     }
 
@@ -218,6 +270,9 @@ private:
         mb::drawHud(assets_, flow_.hud(), width, height, overlay);
         if (mode == mb::GameFlow::Mode::Paused) {
             mb::drawPause(assets_, width, height, overlay);
+#ifdef MB3_PLATFORM_VITA
+            appendCursor(overlay, cursorX_, cursorY_);  // the pause screen is a menu too: it needs a pointer
+#endif
         }
         session_.render(renderer_, overlay);
     }
@@ -235,6 +290,9 @@ private:
     mb::GameFlow::Mode mode_ = mb::GameFlow::Mode::Menu;  // as of the last announceMode()
     bool seenFullscreen_ = false;                         // the window as of the last followWindow()
     int seenWidth_ = 0, seenHeight_ = 0;
+#ifdef MB3_PLATFORM_VITA
+    float cursorX_ = 0, cursorY_ = 0;  // input.mouseX/Y as of the last poll, for the drawn virtual cursor
+#endif
 };
 
 }  // namespace

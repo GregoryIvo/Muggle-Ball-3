@@ -595,6 +595,12 @@ void testOptions() {
     none.menu.open("Options");
     check(!none.widget("VideoMode").visible, "video: with no modes the list is hidden");
 
+    // Without a window to make fullscreen (the Vita), the check box is hidden the same way.
+    Harness noFullscreen;
+    noFullscreen.menu.setFullscreenAvailable(false);
+    noFullscreen.menu.open("Options");
+    check(!noFullscreen.widget("Fullscreen").visible, "video: with fullscreen unavailable the check box is hidden");
+
     // A window size that is not in the list shows the nearest mode.
     Harness near1([](SaveData& save) {
         save.settings.windowWidth = 1180;
