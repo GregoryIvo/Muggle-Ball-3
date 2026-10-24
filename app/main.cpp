@@ -52,6 +52,7 @@
 #include "FormViewer.h"
 #include "FrontEnd.h"
 #include "FrontEndAudio.h"
+#include "Game.h"
 #include "PlaySession.h"
 #include "mb/engine/Log.h"
 #include "mb/engine/Paths.h"
@@ -97,9 +98,6 @@ using Clock = std::chrono::steady_clock;
 using mb_app::Assets;
 using mb_app::kClearColor;
 
-constexpr int kDefaultWidth = 1024;
-constexpr int kDefaultHeight = 768;
-
 // Where the test ball is shot from and at what angle (the bat's end of the board, away from the player).
 constexpr float kBallStartY = 1.2f;
 constexpr float kBallStartZ = -15.0f;
@@ -118,8 +116,8 @@ struct Options {
     std::string playSound;   // --play-sound
     std::string playMusic;   // --play-music
     double seconds = 0;      // --seconds: stop a played sound or music after this long; 0 means play it out
-    int width = kDefaultWidth;
-    int height = kDefaultHeight;
+    int width = mb_app::kDefaultWindowWidth;
+    int height = mb_app::kDefaultWindowHeight;
     bool sizeGiven = false;  // --size was on the command line
     bool shapes = false;
     std::optional<std::array<float, 7>> camera;  // eye, target, vertical fov in degrees
@@ -388,78 +386,6 @@ void windowSize(const Options& options, const mb::SaveData& save, int& width, in
     height = options.sizeGiven ? options.height : save.settings.windowHeight;
 }
 
-// Average time per frame (and how much of it `work` took: the physics, the update of the rules), logged every few seconds
-// and when the window closes.
-class FrameStats {
-public:
-    explicit FrameStats(const char* work) : work_(work) {}
-
-    void work(double ms) { workMs_ += ms; }
-
-    void frame() {
-        const Clock::time_point now = Clock::now();
-        if (last_ != Clock::time_point{}) {
-            totalMs_ += std::chrono::duration<double, std::milli>(now - last_).count();
-            ++frames_;
-        }
-        last_ = now;
-        if (totalMs_ >= kReportMs) {
-            report();
-        }
-    }
-
-    void report() {
-        if (frames_ > 0) {
-            mb::logInfo("average frame time {:.2f} ms ({:.0f} fps) over {} frames, {} {:.2f} ms", totalMs_ / frames_,
-                        1000.0 * frames_ / totalMs_, frames_, work_, workMs_ / frames_);
-        }
-        totalMs_ = 0;
-        workMs_ = 0;
-        frames_ = 0;
-    }
-
-private:
-    static constexpr double kReportMs = 5000;
-    const char* work_;
-    Clock::time_point last_{};
-    double totalMs_ = 0;
-    double workMs_ = 0;
-    int frames_ = 0;
-};
-
-// The game: the main menu on a window, levels played from it, with sound, and what the player keeps saved.
-int runGame(const Options& options) {
-    Assets assets;
-    mb::SaveData save = openSave(options);
-    mb::logInfo("Save data: {}", options.autoplay ? "none (--autoplay)" : save.directory().string());
-    int windowWidth = 0, windowHeight = 0;
-    windowSize(options, save, windowWidth, windowHeight);
-    mb::Window window("Muggle Ball 3", windowWidth, windowHeight, save.settings.fullscreen);
-    mb::Renderer renderer(window);
-    mb::logInfo("GPU backend: {}", renderer.backendName());
-    mb::logInfo("Asset root: {}", assets.root.string());
-
-    mb::GameAudio audio(assets.root);  // after the window, so the device closes before SDL quits
-    mb_app::PlaySession session(
-        renderer, assets, save, &audio,
-        {.autoplay = options.autoplay, .prizes = options.prizes, .effects = options.effects, .profile = options.physicsProfile});
-    mb_app::FrontEndOptions frontEnd;
-    frontEnd.language = options.form.language;
-    frontEnd.startLevel = options.level;
-    frontEnd.hideCursor = !options.autoplay;  // nobody plays with the pointer
-    mb_app::connectAudio(frontEnd, audio);
-    FrameStats stats("update");
-    frontEnd.events.frame = [&, audioFrame = std::move(frontEnd.events.frame)] {
-        audioFrame();
-        stats.work(session.takeUpdateMillis());
-        stats.frame();
-    };
-    const int result = mb_app::runFrontEnd(window, renderer, session, save, frontEnd);
-    stats.report();
-    saveWindowState(window, save, !options.sizeGiven);
-    return result;
-}
-
 int runWindow(const Options& options) {
     // Resolve the assets and the level first, so a bad argument fails before a window flashes up.
     Assets assets;
@@ -489,7 +415,7 @@ int runWindow(const Options& options) {
     mb_app::HudOverlay hud(renderer, options.hud);
     bool shapes = options.shapes;
     bool paused = false;
-    FrameStats stats("physics");
+    mb_app::FrameStats stats("physics");
     std::mt19937 random{std::random_device{}()};
     std::uniform_real_distribution<float> sideways(-5.0f, 5.0f);  // degrees off straight ahead
     Clock::time_point lastFrame = Clock::now();
@@ -642,6 +568,23 @@ void printUsage() {
         stderr);
 }
 
+// Translates the harness's catch-all Options into what mb_app::runGame actually needs: it does not know
+// --screenshot, --form, --play-sound/music, the viewer or the level-viewer camera, because the Vita's own
+// entry point builds a GameOptions directly (docs/VITA_PLAN.md, M5a/M5b).
+mb_app::GameOptions toGameOptions(const Options& options) {
+    mb_app::GameOptions game;
+    game.level = options.level;
+    game.language = options.form.language;
+    game.autoplay = options.autoplay;
+    game.prizes = options.prizes;
+    game.effects = options.effects;
+    game.physicsProfile = options.physicsProfile;
+    if (options.sizeGiven) {
+        game.windowSize = mb_app::WindowSize{options.width, options.height};
+    }
+    return game;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -784,7 +727,7 @@ int main(int argc, char** argv) {
         if (!options.screenshot.empty()) {
             return options.autoplay ? runPlayScreenshot(options) : runScreenshot(options);
         }
-        return options.viewer && !options.autoplay ? runWindow(options) : runGame(options);
+        return options.viewer && !options.autoplay ? runWindow(options) : mb_app::runGame(toGameOptions(options));
     } catch (const std::exception& e) {
         mb::logError("fatal: {}", e.what());
         return 1;

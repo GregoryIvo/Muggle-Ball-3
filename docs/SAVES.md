@@ -122,7 +122,7 @@ such as a directory already at the save path, is never moved aside: the write ju
 
 ## Using it
 
-The game (`runGame` in `app/main.cpp`) loads one `SaveData`, opens the window at its size and fullscreen state, and
+The game (`runGame` in `app/Game.cpp`) loads one `SaveData`, opens the window at its size and fullscreen state, and
 hands it to the front end, whose `Menu` shows it and changes it: the Options form edits `settings` (the sliders,
 check boxes and video list), the stage screens read `progress` and `settings.bat`, the high-score form shows
 `highScores`. The `Menu` writes what it changed when the player leaves Options (settings), picks a bat (settings) and
@@ -131,7 +131,7 @@ enters a score (high scores); `GameFlow` writes `progress` when a level ends, wo
 player resizes it or goes fullscreen (not while Options is up, which holds choices not applied yet), and
 `runGame`, like the level viewer's `runWindow`, saves the window state when the window closes. The form viewer
 (`--form`) gives the menus a `SaveData` with no folder instead, so it never touches the real files, and so does `--autoplay`
-(`openSave` in `app/main.cpp`): the autopilot plays on nobody's behalf, so it runs on the defaults, kept in memory, and what it
+(`openSave` in `app/Game.cpp`): the autopilot plays on nobody's behalf, so it runs on the defaults, kept in memory, and what it
 finishes or scores is gone when it quits.
 
 ```cpp
