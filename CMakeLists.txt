@@ -52,11 +52,13 @@ include(cmake/Dependencies.cmake)
 if(MB3_PLATFORM_VITA)
   # The toolchain, the dependencies and a hello VPK that probes the console (docs/VITA_PLAN.md, M1a). The
   # engine and the game follow in M3a and M5b; until they cross-compile, MB3_VITA_BUILD_ENGINE is how that
-  # work is tried.
+  # work is tried. The physics bench VPK (M3b) needs them, so it lives inside the same guard, next to the
+  # hello.
   add_subdirectory(platform/vita/hello)
   if(MB3_VITA_BUILD_ENGINE)
     add_subdirectory(engine)
     add_subdirectory(game)
+    add_subdirectory(platform/vita/bench)
   endif()
 else()
   add_subdirectory(engine)

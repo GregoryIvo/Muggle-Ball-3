@@ -41,11 +41,11 @@ barrels and the turn of the projectiles are played).
 |---|---|
 | `engine/` | Platform-neutral runtime: window and input, GPU renderer and shaders, model and image loading, physics (`PhysicsWorld` over Jolt), audio (Ogg Vorbis decoding, mixer, device), logging, paths |
 | `game/` | Magic Ball rules: object types, level model and loader, materials, scene building, level physics (`PhysicsScene`), the rules of play (`GameSession`, `BallReach`, the autopilot `Autopilot`), the level's special objects (`SpecialObjects`), the prizes (`Prizes`, the session's `SessionPrizes.cpp`), the weapons and the strikes of the prizes (`Weapons`), the sails (`Cloth`, `ClothPlan`), objects that follow paths (`PathPlayer`), the particle systems (`ParticleDef`, `ParticleSystem`, `ParticleDraw`), what a session looks and sounds like (`PlayScene`, `ObjectEffects`, `BrickEffects`, `PrizeScene`, `PrizeHud`, `Billboard`, `BatBarrels`, `WeaponScene`, `WeaponEffects`, `ClothDraw`, `PlaySounds`), camera, sound library, save data; the 2D UI (bitmap fonts, string table, menu forms, the menu screens and their flow, the HUD) |
-| `app/` | Executable entry point: the game's front end and its play session (`PlaySession`), the level viewer (with physics and music) and the menu form viewer |
+| `app/` | Executable entry point: the game's front end and its play session (`PlaySession`), the level viewer (with physics and music), the menu form viewer, and the physics benchmark (`app/bench/`, `mb_physics_bench`) |
 | `platform/macos/` | App bundle metadata |
-| `platform/vita/` | PlayStation Vita: the hello that probes the console, Jolt's platform header, what newlib lacks, and the placeholder LiveArea set (see [`docs/VITA.md`](docs/VITA.md)) |
+| `platform/vita/` | PlayStation Vita: the hello that probes the console, the physics bench VPK (`platform/vita/bench/`), Jolt's platform header, what newlib lacks, and the placeholder LiveArea set (see [`docs/VITA.md`](docs/VITA.md)) |
 | `scripts/` | `package_macos.sh`: universal build, ad-hoc signing, Developer ID signing and notarization |
-| `tools/` | Asset pipeline: `convert_assets.py` runs the converters for levels (`mb3level.py`), meshes (`x2glb.py`), materials, sounds and music (`sounds.py`), textures, the menus, strings and fonts (`ui.py`) and the level list (`campaign.py`), object and particle definitions (`objects.py`), and on macOS the app icon (`make_icon.py`); also the MoleBox dumper, the shader compiler and the Vita LiveArea placeholder (`vita_livearea.py`) |
+| `tools/` | Asset pipeline: `convert_assets.py` runs the converters for levels (`mb3level.py`), meshes (`x2glb.py`), materials, sounds and music (`sounds.py`), textures, the menus, strings and fonts (`ui.py`) and the level list (`campaign.py`), object and particle definitions (`objects.py`), and on macOS the app icon (`make_icon.py`); also the MoleBox dumper, the shader compiler, the Vita LiveArea placeholder (`vita_livearea.py`) and `bench_ratio.py` (compares a host and a device physics-bench CSV) |
 | `docs/` | Architecture, level format, converted asset formats (`ASSET_FORMATS.md`), levels in the physics world (`PHYSICS.md`), sound and music (`AUDIO.md`), macOS packaging (`MACOS.md`), the PlayStation Vita port (`VITA.md`, its plan `VITA_PLAN.md`), save files (`SAVES.md`), what the object definitions say about gameplay (`OBJECTS.md`), the rules of play and the footage behind them (`GAMEPLAY.md`), how the data was recovered |
 | `tests/` | C++ and Python tests; the ones that read the game data are skipped unless `MB3_ASSETS` is set |
 
@@ -88,7 +88,16 @@ to regenerate them; that is the only thing that needs `glslangValidator` and
 A homebrew port to the PS Vita and PSTV is under way; [`docs/VITA.md`](docs/VITA.md) has the toolchain, the
 build, what was measured and the device checklist, and [`docs/VITA_PLAN.md`](docs/VITA_PLAN.md) the plan. With
 VitaSDK installed, `cmake -DCMAKE_TOOLCHAIN_FILE=$VITASDK/share/vita.toolchain.cmake` cross-builds what exists
-so far (a hello VPK); the desktop build is not affected.
+so far (a hello VPK, and the physics bench VPK below); the desktop build is not affected.
+
+The physics benchmark plays levels with the autopilot in fixed steps, as fast as the machine can, and writes
+a CSV; the same code runs on the Mac and (`mb3_vita_bench.vpk`) on the console, so the ratio of the two CSVs
+is the measured speed of the device (`docs/VITA.md`, "Physics benchmark"):
+
+```sh
+./build/app/mb_physics_bench platform/vita/bench/bench-physics.pass1.json --out host-pass1.csv
+python3 tools/bench_ratio.py host-pass1.csv device-pass1.csv   # once a device CSV comes back
+```
 
 ## Game data
 
