@@ -78,6 +78,57 @@ and some sink into the floor). A step costs 0.09 ms on average with a ball in th
 of the 1,992 runs of `mb_physics_smoke --shots 24`. Worker threads are capped at 3: nine workers took twice as long as three on
 the biggest level and used nine cores.
 
+A step keeps a running count of whole fixed steps it has to throw away, `PhysicsWorld::droppedSteps()`: a call to
+`step()` that is handed more time than `maxStepsPerCall` steps cover takes that many and keeps the remainder below
+one step, dropping the whole steps in between so the simulation falls behind real time instead of spiralling into
+ever-larger catch-up calls. `GameSession::update()` (`game/src/Gameplay.cpp`) keeps the same kind of count for its
+own accumulator, which can drop steps the same way on a long pause even when the world underneath it never does
+(it hands the world only one fixed step per tick); `GameSession::droppedSteps()` is the sum of both. It is logged
+once per level (`PlaySession`, and the end of each level in the three smokes) and is expected to be zero on a
+machine that keeps up with the fixed step; the host can go briefly over budget under load, which is reported, not
+treated as a failure.
+
+### The Vita profile
+
+`game/include/mb/game/PhysicsProfile.h` names a `PhysicsSettings` for a platform: `physicsProfile("desktop")` is
+`PhysicsSettings{}` unchanged; `physicsProfile("vita")` keeps the same fixed step and solver iterations above (a
+lighter solver for the 79 non-windmill levels waits for M3b's device benchmark (`app/bench/PhysicsBench.h`,
+`docs/VITA.md` "Physics benchmark") and a repeat of the 240 s stability check on real hardware) but runs on the
+caller's thread with one explicit body-mutex stripe (`threads = 0`,
+`bodyMutexes = 1`: nothing but the caller ever touches the world, so there is no concurrency for more stripes to
+protect against), `maxStepsPerCall = 4` (two 30 fps frames' worth), and a world sized for what the levels actually
+use rather than for 32768 bodies. The four windmill levels (`village-dinner`, `village-na-melnice`,
+`village-rinok`, `Village-Dvorik`) carry their own override in the profile, pinned at 100 velocity iterations, so
+that a later retuning of the base "vita" settings cannot drop the only levels measured to need them below that.
+
+The world size is measured, not guessed: `mb_physics_smoke --measure` (extended for this) tracks, for every level
+and every one of its eleven starting configurations, the peak of `PhysicsWorld::bodyCount()`,
+`activeBodyCount()` and `tempAllocatorPeakBytes()` (the step allocator's own high-water mark, in or out of its
+block) during a 10 s run (`kRunSeconds`, the same length the plain smoke stands each level for). Over all 83
+shipped levels (2026-10-23) the peak is **374 bodies, 372 of them awake at once**, both on `knight-miss-1457`.
+Two different rules size the Vita profile from the measured peaks, and only the measurements themselves
+(`bodyCount()`, `activeBodyCount()`, `tempAllocatorPeakBytes()`) come from `--measure` — the settings derived
+from them do not:
+- `maxBodies` is the next power of two at or above twice the peak body count, at least 512 (374 x 2 = 748, so
+  **1024**); `maxBodyPairs` is 8x that (**8192**) and `maxContactConstraints` 4x that (**4096**) — both rules of
+  thumb applied to the body peak, not separately measured quantities.
+- `tempAllocatorBytes` is the next whole MiB at or above twice the allocator's own measured peak, at least
+  1 MiB. The step allocator's peak is dominated not by the bodies in play but by a buffer Jolt takes from it
+  every step for the contact constraints: 488 bytes per `maxContactConstraints` (`ContactConstraintManager.cpp`,
+  `mMaxConstraints * cMaxConstraintSize` plus a `uint32` each), with about 188 KB of level-dependent data on top.
+  So a profile must be measured with its own `maxContactConstraints` in force: **`--measure --physics-profile
+  vita`** (4096 constraints) gives a peak of **2,187,184 bytes** (4096 x 488 = 1,998,848 plus 188,336), so
+  2 x 2,187,184 = 4,374,368 bytes, **5 MiB (5,242,880 bytes)**. A bare `--measure` (the desktop profile, 32768
+  constraints) measures the same levels at **16,179,120 bytes**, exactly (32768 - 4096) x 488 more; the thread
+  count and `maxBodyPairs` have no effect on it (measured on `knight-miss-1457` with `--threads 0` and `3` under
+  both profiles: identical peaks; Jolt's per-step body-pair buffer is sized by its own `mMaxInFlightBodyPairs`,
+  not by `maxBodyPairs`). The two profiles play identically (`droppedSteps()` is zero either way). Always
+  measure with `--physics-profile <name>` matching the profile being sized, and re-measure whenever
+  `maxContactConstraints` changes, or a Jolt upgrade changes the size of a contact constraint.
+
+Re-run `mb_physics_smoke --measure --physics-profile vita` and update this paragraph (and `PhysicsProfile.cpp`'s
+table) if new levels are added or a measured peak ever gets close to these numbers.
+
 ## Welded to the world
 
 555 fixed joints tie 551 bodies to the world with a maxForce that never breaks (trees, fences, rocks, cacti, mirrors

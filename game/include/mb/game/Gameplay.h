@@ -422,6 +422,11 @@ public:
     const BatView& bat() const { return bat_; }
     std::span<const BallView> balls() const { return views_; }
     const SessionStats& stats() const { return stats_; }
+    // Whole fixed steps thrown away so far: update()'s own accumulator, which drops steps the same way
+    // PhysicsWorld::step does when a call runs past maxStepsPerCall, plus the world's own (its one step per
+    // tick() never drops anything, but a call that overshoots does both at once). The Vita's frame target
+    // wants this at zero (docs/VITA.md).
+    std::uint64_t droppedSteps() const { return droppedSteps_ + scene_.world().droppedSteps(); }
     const GameplayRules& rules() const { return rules_; }
     TargetRule levelEnd() const { return levelEnd_; }
     // The level's special objects: the cannonballs and rockets in flight, for the presentation.
@@ -551,6 +556,7 @@ private:
     SessionPhase phase_ = SessionPhase::Entering;
     double time_ = 0;
     double accumulator_ = 0;
+    std::uint64_t droppedSteps_ = 0;  // whole fixed steps this accumulator has thrown away; see droppedSteps()
     std::uint64_t ticks_ = 0;
     bool launchPending_ = false;
 
