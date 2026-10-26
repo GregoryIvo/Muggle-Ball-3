@@ -96,6 +96,14 @@ new one. It does not fsync, so a power cut can still lose the latest save, and a
 handled as below. Each part is saved on its own (`saveSettings`, `saveProgress`, `saveHighScores`), and
 loading never writes: a first run creates no files.
 
+Some file systems refuse to rename over an existing regular file instead of replacing it. When that happens,
+`writeFileAtomic` moves the target aside to `<file>.bak` (`keepAsBackup`, replacing an older one of its own)
+and renames the temp file over the now-empty path; if that second rename also fails, the backup is put back,
+so the call either succeeds (leaving the previous contents at `<file>.bak`) or leaves `<file>` exactly as it
+was. Desktop file systems rename over an existing file outright, so this path is not normally taken; it
+exists for the Vita's, which `docs/VITA.md` records once it is known. (A target that is not a regular file,
+such as a directory already at the save path, is never moved aside: the write just fails and reports why.)
+
 ## Damaged files
 
 `SaveData`'s constructor never throws.
@@ -114,7 +122,7 @@ loading never writes: a first run creates no files.
 
 ## Using it
 
-The game (`runGame` in `app/main.cpp`) loads one `SaveData`, opens the window at its size and fullscreen state, and
+The game (`runGame` in `app/Game.cpp`) loads one `SaveData`, opens the window at its size and fullscreen state, and
 hands it to the front end, whose `Menu` shows it and changes it: the Options form edits `settings` (the sliders,
 check boxes and video list), the stage screens read `progress` and `settings.bat`, the high-score form shows
 `highScores`. The `Menu` writes what it changed when the player leaves Options (settings), picks a bat (settings) and
@@ -123,7 +131,7 @@ enters a score (high scores); `GameFlow` writes `progress` when a level ends, wo
 player resizes it or goes fullscreen (not while Options is up, which holds choices not applied yet), and
 `runGame`, like the level viewer's `runWindow`, saves the window state when the window closes. The form viewer
 (`--form`) gives the menus a `SaveData` with no folder instead, so it never touches the real files, and so does `--autoplay`
-(`openSave` in `app/main.cpp`): the autopilot plays on nobody's behalf, so it runs on the defaults, kept in memory, and what it
+(`openSave` in `app/Game.cpp`): the autopilot plays on nobody's behalf, so it runs on the defaults, kept in memory, and what it
 finishes or scores is gone when it quits.
 
 ```cpp

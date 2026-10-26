@@ -89,7 +89,9 @@ void testFileHelpers() {
           "overwrite keeps binary contents");
     check(!fs::exists(fs::path(file) += ".tmp"), "no temp file is left after a write");
 
-    // A target that cannot be replaced (a folder) fails cleanly and leaves nothing behind.
+    // A target that cannot be replaced (a folder) fails cleanly and leaves nothing behind: the fallback only
+    // moves aside a regular file (it would otherwise destroy the user's directory on a .bak collision), so a
+    // folder in the way still blocks the write exactly as a plain rename onto it always has.
     const fs::path blocked = dir.path / "blocked";
     fs::create_directories(blocked / "inside");
     WarningCapture quiet;
@@ -100,6 +102,10 @@ void testFileHelpers() {
     writeText(fs::path(file) += ".tmp", "half a fi");
     check(mb::writeFileAtomic(file, "three") && readText(file) == "three", "a stale temp file is overwritten");
 
+    // The fallback's own regular-file path (rename refused, so the old file is moved to .bak and the rename
+    // retried) is not provoked here: on this host, `rename` replaces an existing regular file outright, so
+    // writeFileAtomic's normal path above already covers overwriting one. keepAsBackup() itself, which the
+    // fallback calls, is tested directly instead.
     check(mb::keepAsBackup(file) && !fs::exists(file) && readText(fs::path(file) += ".bak") == "three", "kept as .bak");
     writeText(file, "newer");
     check(mb::keepAsBackup(file) && readText(fs::path(file) += ".bak") == "newer", "an older .bak is replaced");

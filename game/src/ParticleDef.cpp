@@ -147,10 +147,12 @@ std::optional<ParticleType> particleTypeByName(std::string_view name) {
 
 ParticleLibrary ParticleLibrary::load(const std::filesystem::path& directory) {
     std::vector<std::filesystem::path> files;
-    std::error_code error;
-    for (const auto& entry : std::filesystem::directory_iterator(directory, error)) {
-        if (entry.is_regular_file() && lowerAscii(entry.path().extension().string()) == ".json") {
-            files.push_back(entry.path());
+    std::error_code error, ignored;
+    // The error_code overloads throughout: directory_iterator's default increment (as a range-for would call it)
+    // throws on a read error partway through, which the manual loop below avoids.
+    for (std::filesystem::directory_iterator it(directory, error), end; !error && it != end; it.increment(error)) {
+        if (it->is_regular_file(ignored) && lowerAscii(it->path().extension().string()) == ".json") {
+            files.push_back(it->path());
         }
     }
     if (error) {

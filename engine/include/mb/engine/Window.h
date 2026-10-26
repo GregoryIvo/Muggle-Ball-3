@@ -4,9 +4,21 @@
 #include <string>
 #include <vector>
 
+#ifdef MB3_PLATFORM_VITA
+#include <chrono>
+#include <memory>
+#endif
+
 struct SDL_Window;
+#ifdef MB3_PLATFORM_VITA
+struct SDL_Joystick;
+#endif
 
 namespace mb {
+
+#ifdef MB3_PLATFORM_VITA
+class ConsoleInput;
+#endif
 
 // One pointer event as SDL reported it: where the pointer was, in window pixels ((-1, -1) once it has left the
 // window), and whether the left button was down just after it. The 2D UI replays these in order, so a click that
@@ -72,6 +84,12 @@ public:
     // The size in points of the display the window is on; false if SDL cannot tell.
     bool displaySize(int& width, int& height) const;
 
+    // On the Vita, pumps the window system's events without reading them, for a long load: SDL ticks the
+    // power timer in its own event pump, which is what keeps the console from sleeping while nothing else
+    // is. A no-op everywhere else, where loading does not risk a sleep and there is nothing to gain from it;
+    // safe to call unconditionally either way.
+    void keepAwake();
+
     // Desktop fullscreen: the window covers the display at the display's own size, so the 3D view keeps
     // its vertical field of view and shows more at the sides on a wider screen. On macOS this is a
     // fullscreen Space, which takes a moment, so fullscreen() changes only once it has begun.
@@ -95,6 +113,18 @@ private:
     // Button state as of the last event seen, kept across polls.
     bool leftHeld_ = false, rightHeld_ = false, middleHeld_ = false;
     float pointerX_ = 0, pointerY_ = 0;  // the last pointer position seen in an event, window pixels
+
+#ifdef MB3_PLATFORM_VITA
+    // The buttons, stick and touch screen, turned into InputEvents (ConsoleInput.h, docs/VITA_PLAN.md 5.8).
+    std::unique_ptr<ConsoleInput> console_;
+    SDL_Joystick* joystick_ = nullptr;
+    std::uint64_t frontTouchId_ = 0;  // the front panel's SDL touch device id; 0 is never a real one
+    bool frontTouchKnown_ = false;
+    bool textInputOn_ = false;  // remembered so a confirm press can reopen a cancelled, one-shot IME
+    bool cursorHidden_ = false;  // as last set by setCursorHidden(): a level is playing while this is true
+    float stickAxisX_ = 0, stickAxisY_ = 0;  // the left stick's last reported axes, each updated independently
+    std::chrono::steady_clock::time_point lastPoll_{};  // for frame()'s dt; unset until the first poll
+#endif
 };
 
 }  // namespace mb

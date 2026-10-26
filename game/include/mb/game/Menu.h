@@ -92,6 +92,9 @@ public:
 
     // The window sizes the Options video list offers. With none the list is hidden.
     void setVideoModes(std::vector<VideoMode> modes);
+    // Whether Options offers the Fullscreen check box at all (on by default); off hides it the same way
+    // setVideoModes({}) hides the size list, for a platform with one fixed display and no window (the Vita).
+    void setFullscreenAvailable(bool available);
     // Whether the background form (the sky and the stone frame) is drawn behind the forms; on until turned off.
     // Takes effect with the next form opened. The Loading form has its own picture and never has it.
     void setBackground(bool on) { background_ = on; }
@@ -173,6 +176,7 @@ private:
     bool lockLevels_ = true;
     std::vector<VideoMode> videoModes_;
     int videoMode_ = 0;
+    bool fullscreenAvailable_ = true;
     Settings videoAtOpen_;  // the video settings when Options opened, to tell whether Apply has anything to apply
 
     std::string formName_;

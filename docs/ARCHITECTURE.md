@@ -5,8 +5,8 @@ Goal: native on macOS first, then other platforms without rewriting the game.
 | Layer | Choice | Notes |
 |---|---|---|
 | Language and build | C++20, CMake | CMake also generates Xcode projects. |
-| Window, input, audio device | SDL3 | Same API on macOS, Windows, Linux, iOS and consoles. |
-| Rendering | SDL3 GPU API | Metal on macOS, Vulkan elsewhere. Shaders are GLSL, compiled ahead of time to SPIR-V and MSL by `tools/build_shaders.py` (glslang + SPIRV-Cross); the generated headers are committed, so building needs neither tool. Meshes are `DrawItem`s, the particles `EffectBatch`es of world-space triangles (one call for each texture and blend, whatever the number of particles), 2D `Sprite`s go over both. |
+| Window, input, audio device | SDL3 | Same API on macOS, Windows, Linux, iOS and consoles. On the Vita (`MB3_PLATFORM_VITA`), `Window.cpp` also reads the joystick and touch events and feeds them to `ConsoleInput` (`engine/include/mb/engine/ConsoleInput.h`), a platform-neutral class (so its rules are unit-tested on the host, `tests/test_console_input.cpp`) that turns the buttons, stick and touch screen into the same `InputEvents` the mouse and keyboard fill elsewhere: the enter button confirms, the other one and Start are Escape, the stick and d-pad move a drawn virtual cursor, and touch presses in the menus but only taps while playing (`docs/VITA.md`, "Controls"). |
+| Rendering | SDL3 GPU API or GL, back end chosen by `MB3_RENDERER` | `SDLGPU` (the default on desktop): Metal on macOS, Vulkan elsewhere; shaders are GLSL, compiled ahead of time to SPIR-V and MSL by `tools/build_shaders.py` (glslang + SPIRV-Cross). `GL`: desktop OpenGL 2.1 through SDL, for testing the GL back end on a Mac before a device run. `VITAGL` (the default on the Vita, needs `MB3_PLATFORM_VITA`): the same GL back end on the console's vitaGL. `GL` and `VITAGL` share one source (`engine/src/render/gl/`) against the GLSL ES 1.00 / GL 2.1 subset both offer (no fixed function, UBOs, VAOs, sRGB or instancing); `tools/build_shaders.py` embeds their shader bodies, with a per-target preamble applied at runtime, into `engine/shaders/generated/gl_shaders.h`. Meshes are `DrawItem`s, the particles `EffectBatch`es of world-space triangles (one call for each texture and blend, whatever the number of particles), 2D `Sprite`s go over both. The backend-neutral parts (draw collection and sorting, line/sprite/effect vertex building, the render-state key) live in `engine/src/render/RenderCommon.{h,cpp}`; the SDL GPU calls are in `engine/src/render/sdlgpu/`; `NONE` (`engine/src/render/none/`) is a stub for a build with no GPU API, whose `Renderer` constructor throws. See [`VITA.md`](VITA.md), "GL back end". |
 | Physics | Jolt Physics | Replaces PhysX 2.x. Levels store PhysX boxes, spheres, capsules, convexes and joints, all of which map directly. `PhysicsWorld` is the PhysX model over Jolt, `PhysicsScene` runs a level in it; how, and why, is in `PHYSICS.md`. |
 | Audio | stb_vorbis, a software mixer, SDL3 audio | All sounds and music are Ogg Vorbis. See [`AUDIO.md`](AUDIO.md). |
 | XML | Converted offline | `materials.xml`, the sound and music lists, the menus and the string table, and the object and particle definitions are converted to JSON by `tools/materials.py`, `tools/sounds.py`, `tools/ui.py` and `tools/objects.py` (see `OBJECTS.md`). |
@@ -276,6 +276,15 @@ and its plane.
 
 `PlaySession` (`app/`) is the game's `LevelSession`: it builds a level's `GameSession` and its picture, feeds the rules the mouse and
 the click each frame, and turns what they report into what is seen and heard.
+
+`runGame` (`app/Game.cpp`, `GameOptions`) is the game itself, start to finish: the save data, the window at its saved size and
+fullscreen state, the renderer, the audio, `PlaySession` and `FrontEnd` together, the frame-time report, and the window state
+written back on the way out. `app/main.cpp` is a developer harness around it (the level viewer, screenshots, the form and sound
+tests, `--check`); it knows nothing `runGame` needs that `GameOptions` doesn't already carry, so the PlayStation Vita's own
+entry point (`platform/vita/game/main.cpp`) calls `runGame` directly, with no harness: clocks, the log file, a check that the
+asset pack is where it should be, then `mb_app::runGame(GameOptions{})` (`docs/VITA_PLAN.md`, M5a/M5b). `app/`'s six sources
+`runGame` needs (`FrontEnd`, `FrontEndAudio`, `GameAudio`, `PlayerInput`, `PlaySession`, `Game.cpp` itself) are the static
+library `mb_app`, linked by the desktop `MuggleBall3` (with `main.cpp` and `FormViewer.cpp`) and the Vita one alike.
 
 | Part | What it does |
 |---|---|

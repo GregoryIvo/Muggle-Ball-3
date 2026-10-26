@@ -12,11 +12,18 @@ if(MB3_FETCH_SDL3)
   set(mb3_sdl3_find "")
   message(STATUS "SDL3: building release-3.2.10 from source, linked statically")
 endif()
-FetchContent_Declare(SDL3
-  GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-  GIT_TAG release-3.2.10
-  GIT_SHALLOW TRUE
-  ${mb3_sdl3_find})
+if(MB3_PLATFORM_VITA)
+  # The SDK's own SDL3 (the vdpm package), and only that: the toolchain file limits find_package to the SDK,
+  # and a fetched copy would be built for the wrong system.
+  find_package(SDL3 CONFIG REQUIRED)
+  message(STATUS "SDL3 ${SDL3_VERSION} from the Vita SDK (${SDL3_DIR})")
+else()
+  FetchContent_Declare(SDL3
+    GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+    GIT_TAG release-3.2.10
+    GIT_SHALLOW TRUE
+    ${mb3_sdl3_find})
+endif()
 
 # JSON for the converted level, material and mesh files.
 set(JSON_BuildTests OFF CACHE INTERNAL "")
@@ -59,7 +66,21 @@ FetchContent_Declare(JoltPhysics
   GIT_SHALLOW TRUE
   SOURCE_SUBDIR Build)
 
-FetchContent_MakeAvailable(SDL3 nlohmann_json stb cgltf JoltPhysics)
+set(mb3_dependencies nlohmann_json stb cgltf JoltPhysics)
+if(NOT MB3_PLATFORM_VITA)
+  list(PREPEND mb3_dependencies SDL3)
+endif()
+FetchContent_MakeAvailable(${mb3_dependencies})
+
+if(MB3_PLATFORM_VITA)
+  # Jolt's Core.h knows no Vita and stops with "Unknown platform", but it checks JPH_PLATFORM_BLUE first and
+  # then includes <Jolt/Core/PlatformBlue.h>, which the platform provides: ours is in platform/vita/jolt.
+  # PUBLIC, so the engine's Physics*.cpp compile Jolt's headers the same way. Newlib has no posix_memalign,
+  # which Jolt's allocator calls; mb3_vita_compat supplies it.
+  target_compile_definitions(Jolt PUBLIC JPH_PLATFORM_BLUE)
+  target_include_directories(Jolt BEFORE PUBLIC ${PROJECT_SOURCE_DIR}/platform/vita/jolt)
+  target_link_libraries(Jolt PUBLIC mb3_vita_compat)
+endif()
 
 # stb and cgltf are header-only and ship no CMake project of their own.
 add_library(stb INTERFACE)
